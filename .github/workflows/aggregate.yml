@@ -5,6 +5,8 @@ on:
     branches:
       - main
   workflow_dispatch:
+  repository_dispatch:
+    types: [aggregate]
 
 jobs:
   aggregate:
@@ -20,7 +22,7 @@ jobs:
             - repo: vivla-tech/vivla-backend
               path: docs
               destination: backend
-            - repo: vivla-tech/vivla-mobile
+            - repo: vivla-tech/vivla-mobile-app
               path: docs
               destination: mobile
             - repo: vivla-tech/vivla-tools
