@@ -1,0 +1,31 @@
+---
+title: "Builds"
+description: "Builds con EAS Build para iOS y Android"
+---
+
+## EAS Build
+
+VIVLA usa EAS Build para generar builds de iOS y Android.
+
+```bash
+# Build de desarrollo
+eas build --profile development --platform all
+
+# Build de preview (testing interno)
+eas build --profile preview --platform all
+
+# Build de producción
+eas build --profile production --platform all
+```
+
+## Perfiles
+
+| Perfil | Uso | Distribución |
+|--------|-----|-------------|
+| `development` | Debug con Expo Dev Client | Interno |
+| `preview` | Testing interno | TestFlight / Internal Testing |
+| `production` | Release | App Store / Google Play |
+
+<Note>
+  Configurar los perfiles en `eas.json` según las necesidades del proyecto.
+</Note>

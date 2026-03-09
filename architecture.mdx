@@ -1,0 +1,61 @@
+---
+title: "Arquitectura"
+description: "Visión general de la arquitectura de VIVLA"
+---
+
+## Diagrama de alto nivel
+
+```
+                        ┌──────────────────┐
+                        │   Cloudflare     │
+                        │   (CDN/DNS/      │
+                        │    Access)       │
+                        └────────┬─────────┘
+                                 │
+              ┌──────────────────┼──────────────────┐
+              │                  │                   │
+     ┌────────▼───────┐  ┌──────▼───────┐  ┌───────▼────────┐
+     │  Mobile App    │  │  Panel       │  │  Tools Apps    │
+     │  (Expo)        │  │  (TBD)       │  │  (vivla-tools) │
+     └────────┬───────┘  └──────┬───────┘  └───────┬────────┘
+              │                  │                   │
+              ▼                  ▼                   ▼
+     ┌─────────────────┐              ┌─────────────────────┐
+     │  API Principal  │              │  Tools API          │
+     │  vivla-backend  │              │  vivla-tools/backend│
+     │  (NestJS)       │              │  (NestJS)           │
+     └────────┬────────┘              └──────────┬──────────┘
+              │                                   │
+              ▼                                   ▼
+     ┌──────────────┐                  ┌──────────────┐
+     │  PostgreSQL  │                  │  PostgreSQL  │
+     │  (Railway)   │                  │  (Railway)   │
+     └──────────────┘                  └──────────────┘
+```
+
+## Stack técnico
+
+| Capa | Tecnología | Hosting |
+|------|-----------|---------|
+| API Principal | NestJS | Railway |
+| Tools API | NestJS | Railway |
+| DB Principal | PostgreSQL | Railway |
+| DB Tools | PostgreSQL | Railway |
+| Mobile | React Native + Expo | App Store / Google Play |
+| Tools Frontend | Next.js (monorepo) | Vercel |
+| DNS / CDN / Access | Cloudflare | - |
+| Docs | Mintlify | Mintlify Cloud |
+
+## Repos
+
+- **vivla-backend** — API principal, sirve a mobile y panel
+- **vivla-mobile** — App React Native con Expo Router
+- **vivla-tools** — Monorepo: chat de soporte, community guidelines, guías de mantenimiento + su backend
+- **docs** — Documentación centralizada (este repo)
+
+## Conexiones clave
+
+- El **chat de soporte** en la app mobile se comunica con la **Tools API** (no con la API principal)
+- El **panel** consume la **API principal**
+- Las **Tools apps** (backoffice de tools) consumen la **Tools API**
+- El portal de **community guidelines** (clientes) consume la **Tools API**

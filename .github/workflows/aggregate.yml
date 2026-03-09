@@ -1,0 +1,33 @@
+name: Aggregate Docs
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout docs repo
+        uses: actions/checkout@v4
+
+      - name: Aggregate multirepo docs
+        uses: mintlify/multirepo-action@v0.15
+        with:
+          sources: |
+            - repo: vivla-tech/vivla-backend
+              path: docs
+              destination: backend
+            - repo: vivla-tech/vivla-mobile
+              path: docs
+              destination: mobile
+            - repo: vivla-tech/vivla-tools
+              path: docs
+              destination: tools
+            # TODO: descomentar cuando se identifique el repo del panel
+            # - repo: vivla-tech/PANEL_REPO_NAME
+            #   path: docs
+            #   destination: panel
+          token: ${{ secrets.PUSH_TOKEN }}

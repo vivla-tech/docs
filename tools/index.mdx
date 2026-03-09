@@ -1,0 +1,36 @@
+---
+title: "Tools"
+description: "Documentación del monorepo vivla-tools — mini apps internas y su backend"
+---
+
+## Overview
+
+`vivla-tools` es un monorepo que contiene las herramientas internas de VIVLA: chat de soporte, community guidelines, guías de mantenimiento, y el backend que las sirve.
+
+## Estructura del monorepo
+
+```
+vivla-tools/
+├── apps/
+│   ├── tools/           # Frontend: mini apps (chat, guías, etc.)
+│   └── community/       # Frontend: portal community guidelines (clientes)
+└── packages/
+    └── backend/         # API NestJS que sirve a todos los frontales
+```
+
+## Secciones
+
+<Columns cols={2}>
+  <Card title="Chat de soporte" icon="comments" href="/tools/chat/index">
+    Chat en tiempo real para soporte (también integrado en la app mobile).
+  </Card>
+  <Card title="Community guidelines" icon="users" href="/tools/community/index">
+    Portal para clientes con guías de comunidad.
+  </Card>
+  <Card title="Guías de mantenimiento" icon="clipboard-list" href="/tools/maintenance/index">
+    Herramienta interna de guías de mantenimiento.
+  </Card>
+  <Card title="Tools API" icon="code" href="/tools/api/index">
+    Backend NestJS que sirve a tools, community y al chat en mobile.
+  </Card>
+</Columns>

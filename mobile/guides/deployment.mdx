@@ -1,0 +1,30 @@
+---
+title: "Deployment"
+description: "Proceso de despliegue de la app a stores"
+---
+
+## OTA Updates
+
+Para cambios que no tocan código nativo, usar EAS Update:
+
+```bash
+# Publicar update al canal de preview
+eas update --branch preview --message "descripción del cambio"
+
+# Publicar update a producción
+eas update --branch production --message "descripción del cambio"
+```
+
+## Submission a stores
+
+```bash
+# Submit a App Store Connect
+eas submit --platform ios
+
+# Submit a Google Play Console
+eas submit --platform android
+```
+
+<Warning>
+  Siempre testear en el canal `preview` antes de publicar a producción.
+</Warning>

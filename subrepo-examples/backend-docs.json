@@ -1,0 +1,28 @@
+{
+  "navigation": {
+    "groups": [
+      {
+        "group": "Overview",
+        "pages": [
+          "index",
+          "getting-started"
+        ]
+      },
+      {
+        "group": "API reference",
+        "pages": [
+          "api/authentication",
+          "api/properties",
+          "api/bookings"
+        ]
+      },
+      {
+        "group": "Database",
+        "pages": [
+          "database/schema",
+          "database/migrations"
+        ]
+      }
+    ]
+  }
+}

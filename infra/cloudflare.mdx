@@ -1,0 +1,26 @@
+---
+title: "Cloudflare"
+description: "DNS, CDN y Cloudflare Access"
+---
+
+## DNS
+
+Todos los dominios de VIVLA están gestionados en Cloudflare.
+
+## Cloudflare Access
+
+La documentación en `wiki.vivla.com` está protegida por Cloudflare Access. Solo miembros autorizados del equipo pueden acceder.
+
+### Configuración
+
+- **Application**: VIVLA Docs
+- **Domain**: `wiki.vivla.com`
+- **Policy**: Allow — equipo VIVLA (por email domain o grupo)
+
+<Note>
+  No se necesita autenticación adicional de Mintlify. Cloudflare Access maneja todo el control de acceso.
+</Note>
+
+## CDN
+
+Cloudflare actúa como CDN y proxy inverso para los servicios web de VIVLA, proporcionando cache, protección DDoS y SSL automático.

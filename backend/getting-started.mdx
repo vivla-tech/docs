@@ -1,0 +1,29 @@
+---
+title: "Getting started"
+description: "Configuración del entorno local para el backend"
+---
+
+## Requisitos
+
+- Node.js 20+
+- PostgreSQL 15+
+- pnpm
+
+## Setup local
+
+```bash
+git clone git@github.com:vivla-tech/vivla-backend.git
+cd vivla-backend
+pnpm install
+cp .env.example .env
+pnpm prisma migrate dev
+pnpm start:dev
+```
+
+## Variables de entorno
+
+Copiar `.env.example` y completar los valores necesarios. Consultar con el equipo para obtener las credenciales de desarrollo.
+
+<Warning>
+  No compartir credenciales por canales no seguros. Usar el vault del equipo.
+</Warning>

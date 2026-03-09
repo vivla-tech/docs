@@ -1,0 +1,19 @@
+---
+title: "Integración con mobile"
+description: "Cómo el chat se integra con la app mobile de VIVLA"
+---
+
+## Overview
+
+El chat de la app mobile se conecta a la Tools API (no a la API principal). La app vivla-mobile consume los endpoints de chat del backend de vivla-tools.
+
+## Flujo
+
+1. El usuario abre el chat en la app mobile
+2. La app se conecta a la Tools API
+3. Los mensajes se envían/reciben en tiempo real
+4. En el otro lado, el agente usa el panel de tools (web) para responder
+
+<Note>
+  Completar con detalles de implementación: WebSocket vs polling, endpoints, autenticación cruzada, etc.
+</Note>

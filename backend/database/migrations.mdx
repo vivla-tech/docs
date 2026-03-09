@@ -1,0 +1,27 @@
+---
+title: "Migraciones"
+description: "Guía para manejar migraciones de base de datos"
+---
+
+## Comandos
+
+```bash
+# Crear una migración a partir de cambios en schema.prisma
+pnpm prisma migrate dev --name nombre_de_migracion
+
+# Aplicar migraciones en producción
+pnpm prisma migrate deploy
+
+# Resetear base de datos local (destructivo)
+pnpm prisma migrate reset
+```
+
+## Convenciones
+
+- Nombres de migración en snake_case descriptivo (ej: `add_booking_status`)
+- Siempre revisar el SQL generado antes de hacer merge
+- No modificar migraciones ya aplicadas en producción
+
+<Warning>
+  `prisma migrate reset` destruye todos los datos. Usar solo en desarrollo local.
+</Warning>

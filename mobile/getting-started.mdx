@@ -1,0 +1,39 @@
+---
+title: "Getting started"
+description: "Configuración del entorno local para la app móvil"
+---
+
+## Requisitos
+
+- Node.js 20+
+- pnpm
+- Expo CLI (`npx expo`)
+- iOS: Xcode 15+ (macOS)
+- Android: Android Studio con emulador
+
+## Setup local
+
+```bash
+git clone git@github.com:vivla-tech/vivla-mobile.git
+cd vivla-mobile
+pnpm install
+cp .env.example .env
+npx expo start
+```
+
+## Correr en dispositivo/simulador
+
+```bash
+# iOS Simulator
+npx expo run:ios
+
+# Android Emulator
+npx expo run:android
+
+# Expo Go (desarrollo rápido)
+npx expo start --go
+```
+
+<Warning>
+  No compartir credenciales por canales no seguros. Usar el vault del equipo.
+</Warning>

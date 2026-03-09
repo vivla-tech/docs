@@ -1,0 +1,25 @@
+---
+title: "Railway"
+description: "Configuración y deploys en Railway"
+---
+
+## Servicios
+
+| Servicio | Tipo | Branch tracking |
+|----------|------|----------------|
+| vivla-api | Web Service | `main` |
+| vivla-db | PostgreSQL | - |
+
+## Deploys
+
+Railway hace deploy automático en cada push a `main`. Los PRs generan preview deployments.
+
+## Monitoreo
+
+- Logs en tiempo real desde el dashboard de Railway
+- Health checks configurados en el servicio web
+- Alertas por email en caso de errores
+
+<Note>
+  Documentar configuración específica de Railway (variables, scaling, etc.) cuando esté definida.
+</Note>

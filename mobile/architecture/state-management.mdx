@@ -1,0 +1,20 @@
+---
+title: "State management"
+description: "Manejo de estado global en la app móvil"
+---
+
+## Overview
+
+La app utiliza estado global para manejar autenticación, datos del usuario y cache de propiedades.
+
+## Herramientas
+
+| Tipo de estado | Herramienta | Uso |
+|---------------|-------------|-----|
+| Server state | React Query | Cache de API calls |
+| Auth state | Context + SecureStore | Token y sesión |
+| UI state | useState / useReducer | Estado local de componentes |
+
+<Note>
+  Documentar la implementación específica cuando el stack de estado esté definido.
+</Note>

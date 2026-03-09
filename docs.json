@@ -1,68 +1,134 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "VIVLA Docs",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#6D28D9",
+    "light": "#8B5CF6",
+    "dark": "#5B21B6"
   },
   "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Overview",
         "groups": [
           {
             "group": "Getting started",
             "pages": [
               "index",
-              "quickstart",
-              "development"
-            ]
-          },
-          {
-            "group": "Customization",
-            "pages": [
-              "essentials/settings",
-              "essentials/navigation"
-            ]
-          },
-          {
-            "group": "Writing content",
-            "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
-            ]
-          },
-          {
-            "group": "AI tools",
-            "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "architecture",
+              "environments"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Principal",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Overview",
             "pages": [
-              "api-reference/introduction"
+              "backend/index",
+              "backend/getting-started"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "API reference",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "backend/api/authentication",
+              "backend/api/properties",
+              "backend/api/bookings"
+            ]
+          },
+          {
+            "group": "Database",
+            "pages": [
+              "backend/database/schema",
+              "backend/database/migrations"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Mobile",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "mobile/index",
+              "mobile/getting-started"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "mobile/architecture/navigation",
+              "mobile/architecture/state-management"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "mobile/guides/builds",
+              "mobile/guides/deployment"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Tools",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "tools/index"
+            ]
+          },
+          {
+            "group": "Chat de soporte",
+            "pages": [
+              "tools/chat/index",
+              "tools/chat/frontend",
+              "tools/chat/mobile-integration"
+            ]
+          },
+          {
+            "group": "Community guidelines",
+            "pages": [
+              "tools/community/index",
+              "tools/community/portal"
+            ]
+          },
+          {
+            "group": "Guías de mantenimiento",
+            "pages": [
+              "tools/maintenance/index"
+            ]
+          },
+          {
+            "group": "Tools API",
+            "pages": [
+              "tools/api/index",
+              "tools/api/endpoints",
+              "tools/api/database"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Infra",
+        "groups": [
+          {
+            "group": "Infrastructure",
+            "pages": [
+              "infra/index",
+              "infra/railway",
+              "infra/cloudflare"
             ]
           }
         ]
@@ -71,52 +137,32 @@
     "global": {
       "anchors": [
         {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
+          "anchor": "GitHub",
+          "href": "https://github.com/vivla-tech",
+          "icon": "github"
         }
       ]
     }
   },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
   "navbar": {
     "links": [
       {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
+        "label": "VIVLA",
+        "href": "https://vivla.com"
       }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
+    ]
   },
   "contextual": {
     "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
+      "copy",
+      "view",
+      "claude",
+      "cursor"
+    ]
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "github": "https://github.com/vivla-tech"
     }
   }
 }
