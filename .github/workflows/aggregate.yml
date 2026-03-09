@@ -16,20 +16,21 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Aggregate multirepo docs
-        uses: mintlify/multirepo-action@v0.15
+        uses: mintlify/mintlify-multirepo-action@v0.15
         with:
-          sources: |
-            - repo: vivla-tech/vivla-backend
-              path: docs
-              destination: backend
-            - repo: vivla-tech/vivla-mobile-app
-              path: docs
-              destination: mobile
-            - repo: vivla-tech/vivla-tools
-              path: docs
-              destination: tools
-            # TODO: descomentar cuando se identifique el repo del panel
-            # - repo: vivla-tech/PANEL_REPO_NAME
-            #   path: docs
-            #   destination: panel
           token: ${{ secrets.PUSH_TOKEN }}
+          target-branch: docs
+          repos: |
+            - owner: vivla-tech
+              repo: vivla-backend
+              subdirectory: docs
+            - owner: vivla-tech
+              repo: vivla-mobile-app
+              subdirectory: docs
+            - owner: vivla-tech
+              repo: vivla-tools
+              subdirectory: docs
+            # TODO: descomentar cuando se identifique el repo del panel
+            # - owner: vivla-tech
+            #   repo: PANEL_REPO_NAME
+            #   subdirectory: docs
