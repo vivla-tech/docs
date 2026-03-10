@@ -20,6 +20,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
+          token: ${{ secrets.PUSH_TOKEN }}
 
       - name: Clone subrepos and copy docs
         env:
@@ -28,18 +29,15 @@ jobs:
           set -e
 
           for entry in $SUBREPOS; do
-            # Skip empty lines and comments
             [[ -z "$entry" || "$entry" =~ ^[[:space:]]*# ]] && continue
             IFS=':' read -r repo subdir dest <<< "$entry"
             echo "::group::Cloning $repo ($subdir → $dest)"
 
             git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${repo}.git" "_tmp_${dest}"
 
-            # Remove placeholder pages, keep only what comes from the subrepo
             rm -rf "${dest}"
 
             if [ -d "_tmp_${dest}/${subdir}" ]; then
-              # Copy mdx files and subdirectories (not docs.json, that stays in the subrepo)
               mkdir -p "${dest}"
               cd "_tmp_${dest}/${subdir}"
               find . -name '*.mdx' | while read -r file; do
@@ -57,18 +55,11 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Merge navigation from subrepos
+          # Clean up any leftover temp dirs
+          rm -rf _tmp_*
+
+      - name: Verify pages
         run: |
-          set -e
-
-          # Start with the main docs.json as base
-          cp docs.json docs.json.bak
-
-          # For each subrepo, if it has a docs.json with navigation,
-          # we already have the navigation defined in our main docs.json
-          # (the central repo is the source of truth for navigation)
-          # So we just need to verify the pages exist
-
           echo "Verifying pages referenced in docs.json exist..."
           missing=0
           for page in $(python3 -c "
@@ -108,8 +99,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Switch to docs branch (create if doesn't exist)
           git checkout -B docs
+
+          # Exclude temp files and backups from commit
+          echo "_tmp_*" >> .gitignore
+          echo "docs.json.bak" >> .gitignore
 
           git add -A
           if git diff --cached --quiet; then
