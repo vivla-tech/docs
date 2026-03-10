@@ -15,6 +15,9 @@ jobs:
       - name: Checkout docs repo
         uses: actions/checkout@v4
 
+      - name: Create mint.json from docs.json
+        run: cp docs.json mint.json
+
       - name: Aggregate multirepo docs
         uses: mintlify/mintlify-multirepo-action@v0.15
         with:
