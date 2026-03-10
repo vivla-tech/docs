@@ -13,17 +13,19 @@
     "dark": "/logo/dark.svg"
   },
   "fonts": {
+    "family": "Sneak",
+    "weight": 400,
     "heading": {
       "family": "Teodor",
       "weight": 400,
-      "source": "/fonts/Teodor-Regular.ttf",
-      "format": "truetype"
+      "source": "/fonts/Teodor-Regular.woff2",
+      "format": "woff2"
     },
     "body": {
       "family": "Sneak",
       "weight": 400,
-      "source": "/fonts/Sneak-Regular.otf",
-      "format": "opentype"
+      "source": "/fonts/Sneak-Regular.woff2",
+      "format": "woff2"
     }
   },
   "navigation": {
