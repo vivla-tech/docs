@@ -11,29 +11,110 @@ on:
 jobs:
   aggregate:
     runs-on: ubuntu-latest
+    env:
+      SUBREPOS: |
+        vivla-tech/vivla-backend:docs:backend
+        vivla-tech/vivla-mobile-app:docs:mobile
+        vivla-tech/vivla-tools:docs:tools
     steps:
       - name: Checkout docs repo
         uses: actions/checkout@v4
-
-      - name: Create mint.json from docs.json
-        run: cp docs.json mint.json
-
-      - name: Aggregate multirepo docs
-        uses: mintlify/mintlify-multirepo-action@v0.15
         with:
-          token: ${{ secrets.PUSH_TOKEN }}
-          target-branch: docs
-          repos: |
-            - owner: vivla-tech
-              repo: vivla-backend
-              subdirectory: docs
-            - owner: vivla-tech
-              repo: vivla-mobile-app
-              subdirectory: docs
-            - owner: vivla-tech
-              repo: vivla-tools
-              subdirectory: docs
-            # TODO: descomentar cuando se identifique el repo del panel
-            # - owner: vivla-tech
-            #   repo: PANEL_REPO_NAME
-            #   subdirectory: docs
+          ref: main
+
+      - name: Clone subrepos and copy docs
+        env:
+          GH_TOKEN: ${{ secrets.PUSH_TOKEN }}
+        run: |
+          set -e
+
+          for entry in $SUBREPOS; do
+            IFS=':' read -r repo subdir dest <<< "$entry"
+            echo "::group::Cloning $repo ($subdir → $dest)"
+
+            git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${repo}.git" "_tmp_${dest}"
+
+            # Remove placeholder pages, keep only what comes from the subrepo
+            rm -rf "${dest}"
+
+            if [ -d "_tmp_${dest}/${subdir}" ]; then
+              # Copy mdx files and subdirectories (not docs.json, that stays in the subrepo)
+              mkdir -p "${dest}"
+              cd "_tmp_${dest}/${subdir}"
+              find . -name '*.mdx' | while read -r file; do
+                target_dir="$(dirname "${file}")"
+                mkdir -p "../../../${dest}/${target_dir}"
+                cp "$file" "../../../${dest}/${file}"
+              done
+              cd ../../..
+              echo "  Copied docs from $repo to $dest/"
+            else
+              echo "  Warning: $repo has no $subdir/ directory, skipping"
+            fi
+
+            rm -rf "_tmp_${dest}"
+            echo "::endgroup::"
+          done
+
+      - name: Merge navigation from subrepos
+        run: |
+          set -e
+
+          # Start with the main docs.json as base
+          cp docs.json docs.json.bak
+
+          # For each subrepo, if it has a docs.json with navigation,
+          # we already have the navigation defined in our main docs.json
+          # (the central repo is the source of truth for navigation)
+          # So we just need to verify the pages exist
+
+          echo "Verifying pages referenced in docs.json exist..."
+          missing=0
+          for page in $(python3 -c "
+          import json
+          with open('docs.json') as f:
+              config = json.load(f)
+          def extract_pages(obj):
+              if isinstance(obj, str):
+                  print(obj)
+              elif isinstance(obj, list):
+                  for item in obj:
+                      extract_pages(item)
+              elif isinstance(obj, dict):
+                  if 'pages' in obj:
+                      extract_pages(obj['pages'])
+                  for key in ['tabs', 'groups']:
+                      if key in obj:
+                          extract_pages(obj[key])
+          extract_pages(config.get('navigation', {}))
+          "); do
+            if [ ! -f "${page}.mdx" ]; then
+              echo "  Warning: ${page}.mdx not found"
+              missing=$((missing + 1))
+            fi
+          done
+
+          if [ "$missing" -gt 0 ]; then
+            echo "  $missing page(s) missing — subrepos may not have pushed docs yet"
+          else
+            echo "  All pages verified"
+          fi
+
+      - name: Push to docs branch
+        run: |
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Switch to docs branch (create if doesn't exist)
+          git checkout -B docs
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Aggregate docs from subrepos [skip ci]"
+            git push -f origin docs
+            echo "Pushed aggregated docs to 'docs' branch"
+          fi
