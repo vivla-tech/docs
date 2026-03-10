@@ -14,16 +14,16 @@
   },
   "fonts": {
     "heading": {
-      "family": "Theodor",
-      "weight": 700,
-      "source": "/fonts/Theodor.woff2",
-      "format": "woff2"
+      "family": "Teodor",
+      "weight": 400,
+      "source": "/fonts/Teodor-Regular.ttf",
+      "format": "truetype"
     },
     "body": {
       "family": "Sneak",
       "weight": 400,
-      "source": "/fonts/Sneak.woff2",
-      "format": "woff2"
+      "source": "/fonts/Sneak-Regular.otf",
+      "format": "opentype"
     }
   },
   "navigation": {
