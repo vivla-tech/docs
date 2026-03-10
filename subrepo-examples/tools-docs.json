@@ -1,41 +1,40 @@
 {
-  "navigation": {
-    "groups": [
-      {
-        "group": "Overview",
-        "pages": [
-          "index"
-        ]
-      },
-      {
-        "group": "Chat de soporte",
-        "pages": [
-          "chat/index",
-          "chat/frontend",
-          "chat/mobile-integration"
-        ]
-      },
-      {
-        "group": "Community guidelines",
-        "pages": [
-          "community/index",
-          "community/portal"
-        ]
-      },
-      {
-        "group": "Guías de mantenimiento",
-        "pages": [
-          "maintenance/index"
-        ]
-      },
-      {
-        "group": "Tools API",
-        "pages": [
-          "api/index",
-          "api/endpoints",
-          "api/database"
-        ]
-      }
-    ]
-  }
+  "tab": "Tools",
+  "groups": [
+    {
+      "group": "Overview",
+      "pages": [
+        "index"
+      ]
+    },
+    {
+      "group": "Chat de soporte",
+      "pages": [
+        "chat/index",
+        "chat/frontend",
+        "chat/mobile-integration"
+      ]
+    },
+    {
+      "group": "Community guidelines",
+      "pages": [
+        "community/index",
+        "community/portal"
+      ]
+    },
+    {
+      "group": "Guías de mantenimiento",
+      "pages": [
+        "maintenance/index"
+      ]
+    },
+    {
+      "group": "Tools API",
+      "pages": [
+        "api/index",
+        "api/endpoints",
+        "api/database"
+      ]
+    }
+  ]
 }

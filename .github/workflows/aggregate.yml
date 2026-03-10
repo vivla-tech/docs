@@ -35,10 +35,13 @@ jobs:
 
             git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${repo}.git" "_tmp_${dest}"
 
+            # Remove old pages for this subrepo
             rm -rf "${dest}"
 
             if [ -d "_tmp_${dest}/${subdir}" ]; then
               mkdir -p "${dest}"
+
+              # Copy all .mdx files
               cd "_tmp_${dest}/${subdir}"
               find . -name '*.mdx' | while read -r file; do
                 target_dir="$(dirname "${file}")"
@@ -46,7 +49,14 @@ jobs:
                 cp "$file" "../../../${dest}/${file}"
               done
               cd ../../..
-              echo "  Copied docs from $repo to $dest/"
+
+              # Copy the subrepo docs.json for navigation merge
+              if [ -f "_tmp_${dest}/${subdir}/docs.json" ]; then
+                cp "_tmp_${dest}/${subdir}/docs.json" "${dest}/_subrepo_nav.json"
+                echo "  Copied docs + navigation from $repo to $dest/"
+              else
+                echo "  Copied docs from $repo to $dest/ (no docs.json found, tab won't be added)"
+              fi
             else
               echo "  Warning: $repo has no $subdir/ directory, skipping"
             fi
@@ -55,42 +65,111 @@ jobs:
             echo "::endgroup::"
           done
 
-          # Clean up any leftover temp dirs
           rm -rf _tmp_*
+
+      - name: Merge navigation
+        run: |
+          python3 << 'PYTHON'
+          import json, os, sys
+
+          # Load central docs.json
+          with open('docs.json') as f:
+              config = json.load(f)
+
+          tabs = config['navigation']['tabs']
+
+          # Scan for subrepo navigation files
+          for entry in os.environ.get('SUBREPOS', '').strip().split('\n'):
+              entry = entry.strip()
+              if not entry or entry.startswith('#'):
+                  continue
+              _, _, dest = entry.split(':')
+
+              nav_file = f'{dest}/_subrepo_nav.json'
+              if not os.path.isfile(nav_file):
+                  print(f'  Skipping {dest}: no _subrepo_nav.json')
+                  continue
+
+              with open(nav_file) as f:
+                  sub_nav = json.load(f)
+
+              tab_name = sub_nav.get('tab', dest.capitalize())
+              groups = sub_nav.get('groups', [])
+
+              # Prefix all page paths with the destination folder
+              def prefix_pages(obj):
+                  if isinstance(obj, str):
+                      return f'{dest}/{obj}'
+                  elif isinstance(obj, list):
+                      return [prefix_pages(item) for item in obj]
+                  elif isinstance(obj, dict):
+                      result = {}
+                      for k, v in obj.items():
+                          if k == 'pages':
+                              result[k] = prefix_pages(v)
+                          else:
+                              result[k] = v
+                      return result
+                  return obj
+
+              prefixed_groups = [prefix_pages(g) for g in groups]
+
+              # Remove existing tab with same name (if any)
+              tabs = [t for t in tabs if t.get('tab') != tab_name]
+
+              # Add the new tab
+              tabs.append({
+                  'tab': tab_name,
+                  'groups': prefixed_groups
+              })
+
+              print(f'  Added tab "{tab_name}" from {dest} ({len(groups)} groups)')
+
+              # Clean up the temp nav file
+              os.remove(nav_file)
+
+          config['navigation']['tabs'] = tabs
+
+          with open('docs.json', 'w') as f:
+              json.dump(config, f, indent=2, ensure_ascii=False)
+
+          print('  docs.json updated')
+          PYTHON
 
       - name: Verify pages
         run: |
-          echo "Verifying pages referenced in docs.json exist..."
-          missing=0
-          for page in $(python3 -c "
-          import json
+          echo "Verifying pages referenced in docs.json..."
+          python3 << 'PYTHON'
+          import json, os
+
           with open('docs.json') as f:
               config = json.load(f)
-          def extract_pages(obj):
+
+          missing = 0
+
+          def check_pages(obj):
+              global missing
               if isinstance(obj, str):
-                  print(obj)
+                  if not os.path.isfile(f'{obj}.mdx'):
+                      print(f'  Warning: {obj}.mdx not found')
+                      missing += 1
               elif isinstance(obj, list):
                   for item in obj:
-                      extract_pages(item)
+                      check_pages(item)
               elif isinstance(obj, dict):
                   if 'pages' in obj:
-                      extract_pages(obj['pages'])
+                      check_pages(obj['pages'])
                   for key in ['tabs', 'groups']:
                       if key in obj:
-                          extract_pages(obj[key])
-          extract_pages(config.get('navigation', {}))
-          "); do
-            if [ ! -f "${page}.mdx" ]; then
-              echo "  Warning: ${page}.mdx not found"
-              missing=$((missing + 1))
-            fi
-          done
+                          check_pages(obj[key])
 
-          if [ "$missing" -gt 0 ]; then
-            echo "  $missing page(s) missing — subrepos may not have pushed docs yet"
-          else
-            echo "  All pages verified"
-          fi
+          check_pages(config.get('navigation', {}))
+
+          if missing > 0:
+              print(f'  {missing} page(s) missing')
+          else:
+              print('  All pages verified')
+          PYTHON
 
       - name: Push to docs branch
         run: |
@@ -100,10 +179,6 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           git checkout -B docs
-
-          # Exclude temp files and backups from commit
-          echo "_tmp_*" >> .gitignore
-          echo "docs.json.bak" >> .gitignore
 
           git add -A
           if git diff --cached --quiet; then

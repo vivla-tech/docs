@@ -1,27 +1,26 @@
 {
-  "navigation": {
-    "groups": [
-      {
-        "group": "Overview",
-        "pages": [
-          "index",
-          "getting-started"
-        ]
-      },
-      {
-        "group": "Architecture",
-        "pages": [
-          "architecture/navigation",
-          "architecture/state-management"
-        ]
-      },
-      {
-        "group": "Guides",
-        "pages": [
-          "guides/builds",
-          "guides/deployment"
-        ]
-      }
-    ]
-  }
+  "tab": "Mobile",
+  "groups": [
+    {
+      "group": "Overview",
+      "pages": [
+        "index",
+        "getting-started"
+      ]
+    },
+    {
+      "group": "Architecture",
+      "pages": [
+        "architecture/navigation",
+        "architecture/state-management"
+      ]
+    },
+    {
+      "group": "Guides",
+      "pages": [
+        "guides/builds",
+        "guides/deployment"
+      ]
+    }
+  ]
 }
