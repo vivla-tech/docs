@@ -15,7 +15,6 @@ jobs:
       SUBREPOS: |
         vivla-tech/vivla-mobile-app:docs:mobile
         vivla-tech/vivla-tools:docs:tools
-        # vivla-tech/vivla-backend:docs:backend
     steps:
       - name: Checkout docs repo
         uses: actions/checkout@v4
@@ -29,6 +28,8 @@ jobs:
           set -e
 
           for entry in $SUBREPOS; do
+            # Skip empty lines and comments
+            [[ -z "$entry" || "$entry" =~ ^[[:space:]]*# ]] && continue
             IFS=':' read -r repo subdir dest <<< "$entry"
             echo "::group::Cloning $repo ($subdir → $dest)"
 
