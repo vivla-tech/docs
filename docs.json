@@ -3,14 +3,28 @@
   "theme": "mint",
   "name": "VIVLA Docs",
   "colors": {
-    "primary": "#6D28D9",
-    "light": "#8B5CF6",
-    "dark": "#5B21B6"
+    "primary": "#0c2425",
+    "light": "#cf7625",
+    "dark": "#0c2425"
   },
   "favicon": "/favicon.svg",
   "logo": {
     "light": "/logo/light.svg",
     "dark": "/logo/dark.svg"
+  },
+  "fonts": {
+    "heading": {
+      "family": "Theodor",
+      "weight": 700,
+      "source": "/fonts/Theodor.woff2",
+      "format": "woff2"
+    },
+    "body": {
+      "family": "Sneak",
+      "weight": 400,
+      "source": "/fonts/Sneak.woff2",
+      "format": "woff2"
+    }
   },
   "navigation": {
     "tabs": [
