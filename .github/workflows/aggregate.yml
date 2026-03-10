@@ -28,31 +28,34 @@ jobs:
         run: |
           set -e
 
+          # Clone to /tmp to avoid polluting the workspace
+          CLONE_DIR="/tmp/subrepo_clones"
+          mkdir -p "$CLONE_DIR"
+
           for entry in $SUBREPOS; do
             [[ -z "$entry" || "$entry" =~ ^[[:space:]]*# ]] && continue
             IFS=':' read -r repo subdir dest <<< "$entry"
             echo "::group::Cloning $repo ($subdir → $dest)"
 
-            git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${repo}.git" "_tmp_${dest}"
+            git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${repo}.git" "${CLONE_DIR}/${dest}"
 
             # Remove old pages for this subrepo
             rm -rf "${dest}"
 
-            if [ -d "_tmp_${dest}/${subdir}" ]; then
+            if [ -d "${CLONE_DIR}/${dest}/${subdir}" ]; then
               mkdir -p "${dest}"
 
               # Copy all .mdx files
-              cd "_tmp_${dest}/${subdir}"
-              find . -name '*.mdx' | while read -r file; do
-                target_dir="$(dirname "${file}")"
-                mkdir -p "../../../${dest}/${target_dir}"
-                cp "$file" "../../../${dest}/${file}"
+              find "${CLONE_DIR}/${dest}/${subdir}" -name '*.mdx' | while read -r file; do
+                rel="${file#${CLONE_DIR}/${dest}/${subdir}/}"
+                target_dir="$(dirname "${rel}")"
+                mkdir -p "${dest}/${target_dir}"
+                cp "$file" "${dest}/${rel}"
               done
-              cd ../../..
 
               # Copy the subrepo docs.json for navigation merge
-              if [ -f "_tmp_${dest}/${subdir}/docs.json" ]; then
-                cp "_tmp_${dest}/${subdir}/docs.json" "${dest}/_subrepo_nav.json"
+              if [ -f "${CLONE_DIR}/${dest}/${subdir}/docs.json" ]; then
+                cp "${CLONE_DIR}/${dest}/${subdir}/docs.json" "${dest}/_subrepo_nav.json"
                 echo "  Copied docs + navigation from $repo to $dest/"
               else
                 echo "  Copied docs from $repo to $dest/ (no docs.json found, tab won't be added)"
@@ -61,24 +64,21 @@ jobs:
               echo "  Warning: $repo has no $subdir/ directory, skipping"
             fi
 
-            rm -rf "_tmp_${dest}"
             echo "::endgroup::"
           done
 
-          rm -rf _tmp_*
+          rm -rf "$CLONE_DIR"
 
       - name: Merge navigation
         run: |
           python3 << 'PYTHON'
           import json, os, sys
 
-          # Load central docs.json
           with open('docs.json') as f:
               config = json.load(f)
 
           tabs = config['navigation']['tabs']
 
-          # Scan for subrepo navigation files
           for entry in os.environ.get('SUBREPOS', '').strip().split('\n'):
               entry = entry.strip()
               if not entry or entry.startswith('#'):
@@ -96,7 +96,6 @@ jobs:
               tab_name = sub_nav.get('tab', dest.capitalize())
               groups = sub_nav.get('groups', [])
 
-              # Prefix all page paths with the destination folder
               def prefix_pages(obj):
                   if isinstance(obj, str):
                       return f'{dest}/{obj}'
@@ -114,18 +113,13 @@ jobs:
 
               prefixed_groups = [prefix_pages(g) for g in groups]
 
-              # Remove existing tab with same name (if any)
               tabs = [t for t in tabs if t.get('tab') != tab_name]
-
-              # Add the new tab
               tabs.append({
                   'tab': tab_name,
                   'groups': prefixed_groups
               })
 
               print(f'  Added tab "{tab_name}" from {dest} ({len(groups)} groups)')
-
-              # Clean up the temp nav file
               os.remove(nav_file)
 
           config['navigation']['tabs'] = tabs
