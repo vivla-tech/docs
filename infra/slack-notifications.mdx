@@ -1,0 +1,190 @@
+---
+title: "Notificaciones Slack"
+description: "Formato estándar para notificaciones de deploy y procesos automatizados en el canal #deploys"
+---
+
+## Canal
+
+Todas las notificaciones van al canal **#deploys** (`C091W026C23`). Este canal centraliza el estado de deploys, builds, y procesos automatizados de todos los repositorios.
+
+## Formato estándar
+
+Usamos [Block Kit](https://api.slack.com/block-kit) dentro de `attachments` para lograr:
+
+- **Color lateral** verde/rojo según resultado
+- **Header** con emoji + nombre del proyecto + resultado
+- **Campos estructurados** con info relevante (repo, branch, commit, etc.)
+- **Link al workflow** en el footer
+- **Fallback text** para que el preview en móvil/desktop se vea bien
+
+<Note>
+  El campo `text` dentro del attachment es **obligatorio** para que el preview de la notificación (push móvil, desktop) muestre contenido útil en vez de "sent an attachment".
+</Note>
+
+## Plantilla base
+
+### Para GitHub Actions (webhook)
+
+```yaml
+- name: Send Slack notification
+  if: always()
+  env:
+    SLACK_WEBHOOK_URL: $\{{ secrets.SLACK_WEBHOOK_URL }}
+  run: |
+    # -- Determinar resultado --
+    if [ "$JOB_FAILED" = "false" ]; then
+      COLOR="#36a64f"
+      STATUS_EMOJI="✅"
+      RESULT="succeeded"
+    else
+      COLOR="#e01e5a"
+      STATUS_EMOJI="❌"
+      RESULT="failed"
+    fi
+
+    COMMIT_SHORT=$(echo "$\{{ github.sha }}" | cut -c1-7)
+    PROJECT_NAME="Mi Proyecto"  # Cambiar por el nombre del proyecto
+
+    curl -sf -X POST "$SLACK_WEBHOOK_URL" \
+      -H "Content-Type: application/json" \
+      -d "$(cat <<EOF
+    {
+      "attachments": [{
+        "color": "$COLOR",
+        "text": "$STATUS_EMOJI $PROJECT_NAME deploy $RESULT ($\{{ github.ref_name }} @ $COMMIT_SHORT)",
+        "blocks": [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": "$STATUS_EMOJI $PROJECT_NAME deploy $RESULT"
+            }
+          },
+          {
+            "type": "section",
+            "fields": [
+              { "type": "mrkdwn", "text": "*Repo:*\n$\{{ github.repository }}" },
+              { "type": "mrkdwn", "text": "*Branch:*\n\`$\{{ github.ref_name }}\`" },
+              { "type": "mrkdwn", "text": "*Commit:*\n\`$COMMIT_SHORT\`" },
+              { "type": "mrkdwn", "text": "*Author:*\n$\{{ github.actor }}" }
+            ]
+          },
+          {
+            "type": "context",
+            "elements": [
+              { "type": "mrkdwn", "text": "<$\{{ github.server_url }}/$\{{ github.repository }}/actions/runs/$\{{ github.run_id }}|View workflow run>" }
+            ]
+          }
+        ]
+      }]
+    }
+    EOF
+    )"
+```
+
+### Para Windmill (TypeScript con Slack Web API)
+
+```typescript
+import { WebClient } from "@slack/web-api";
+
+const CHANNEL_ID = "C091W026C23";
+
+interface SlackNotifyParams {
+  success: boolean;
+  projectName: string;
+  details: Record<string, string>; // key-value pairs para los fields
+  linkUrl?: string;
+  linkLabel?: string;
+}
+
+export async function sendSlackNotification(
+  slackToken: string,
+  params: SlackNotifyParams
+) {
+  const web = new WebClient(slackToken);
+
+  const color = params.success ? "#36a64f" : "#e01e5a";
+  const emoji = params.success ? "✅" : "❌";
+  const result = params.success ? "succeeded" : "failed";
+  const headerText = `${emoji} ${params.projectName} ${result}`;
+
+  const fields = Object.entries(params.details).map(([key, value]) => ({
+    type: "mrkdwn" as const,
+    text: `*${key}:*\n${value}`,
+  }));
+
+  const contextElements = [
+    {
+      type: "mrkdwn" as const,
+      text: `Executed at: ${new Date().toISOString()}`,
+    },
+  ];
+
+  if (params.linkUrl) {
+    contextElements.push({
+      type: "mrkdwn" as const,
+      text: `<${params.linkUrl}|${params.linkLabel || "View details"}>`,
+    });
+  }
+
+  await web.chat.postMessage({
+    channel: CHANNEL_ID,
+    text: headerText, // Fallback para preview
+    attachments: [
+      {
+        color,
+        text: headerText,
+        blocks: [
+          {
+            type: "header",
+            text: { type: "plain_text", text: headerText },
+          },
+          ...(fields.length > 0
+            ? [{ type: "section", fields }]
+            : []),
+          {
+            type: "context",
+            elements: contextElements,
+          },
+        ],
+      },
+    ],
+  });
+}
+```
+
+**Ejemplo de uso en Windmill:**
+
+```typescript
+await sendSlackNotification(slack_auth.token, {
+  success: true,
+  projectName: "Windmill Sync",
+  details: {
+    "Process": "Daily sync",
+    "Records": "1,234 synced",
+  },
+});
+```
+
+## Campos por proyecto
+
+Cada proyecto incluye los campos más relevantes en la sección `fields`. Máximo 6 campos (límite de Slack para el layout de 2 columnas).
+
+| Proyecto | Campos |
+|----------|--------|
+| `vivla-tools` | Repo, Branch, Commit, Author, Railway Backend, Vercel Frontend |
+| `vivla-mobile` | Repo, Branch, Commit, Author + campos de build por plataforma |
+| Windmill scripts | Process, Result/Records + campos específicos del proceso |
+
+<Tip>
+  Para builds con múltiples jobs (como mobile con iOS/Android), agrega los estados como campos adicionales usando emojis de estado: ✅ success, ❌ failed, ⏭️ skipped, 🚀 deployed.
+</Tip>
+
+## Reglas
+
+1. **Siempre usar `attachments`** con `color` y `blocks` — nunca solo `text` o solo `blocks` a nivel root.
+2. **Siempre incluir `text`** dentro del attachment como fallback para el preview.
+3. **Header**: emoji de estado + nombre del proyecto + resultado (`succeeded`/`failed`).
+4. **Section fields**: datos estructurados en pares clave-valor.
+5. **Context**: timestamp y/o link al workflow/proceso.
+6. **Colores**: `#36a64f` (verde) para éxito, `#e01e5a` (rojo) para fallo.

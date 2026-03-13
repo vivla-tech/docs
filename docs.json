@@ -51,7 +51,8 @@
             "pages": [
               "infra/index",
               "infra/railway",
-              "infra/cloudflare"
+              "infra/cloudflare",
+              "infra/slack-notifications"
             ]
           }
         ]
