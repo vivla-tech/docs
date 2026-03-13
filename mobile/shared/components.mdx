@@ -1,0 +1,155 @@
+---
+title: 'Componentes Compartidos'
+description: 'Catálogo de componentes UI reutilizables'
+---
+
+# Componentes Compartidos
+
+Ubicación: `src/shared/components/`
+
+Estos componentes son reutilizables en cualquier módulo de la aplicación. Están organizados por categoría funcional.
+
+## Buttons
+
+<CardGroup cols={2}>
+  <Card title="BackButton">
+    Botón de retroceso con icono de flecha. Se integra con la navegación de Expo Router.
+  </Card>
+  <Card title="Button">
+    Botón principal con variantes: primary, secondary, outline, ghost, danger. Soporta estado de
+    carga y deshabilitado.
+  </Card>
+  <Card title="CloseButton">Botón de cierre (X) para modales y sheets.</Card>
+  <Card title="HelpButton">
+    Botón de ayuda (?) que abre el canal de soporte o información contextual.
+  </Card>
+  <Card title="ScrollToTopButton">
+    Botón flotante que aparece al hacer scroll hacia abajo. Retorna al inicio de la lista.
+  </Card>
+</CardGroup>
+
+| Componente          | Props principales                                       | Variantes                                            |
+| ------------------- | ------------------------------------------------------- | ---------------------------------------------------- |
+| `BackButton`        | `onPress?`, `color?`                                    | —                                                    |
+| `Button`            | `title`, `onPress`, `variant?`, `loading?`, `disabled?` | `primary`, `secondary`, `outline`, `ghost`, `danger` |
+| `CloseButton`       | `onPress`, `color?`, `size?`                            | —                                                    |
+| `HelpButton`        | `onPress?`                                              | —                                                    |
+| `ScrollToTopButton` | `scrollRef`, `visible`                                  | —                                                    |
+
+---
+
+## Layout
+
+| Componente     | Descripción                                       | Props principales                                       |
+| -------------- | ------------------------------------------------- | ------------------------------------------------------- |
+| `Divider`      | Línea separadora horizontal                       | `color?`, `margin?`                                     |
+| `Header`       | Header con navegación, título y acciones          | `title?`, `leftAction?`, `rightAction?`, `transparent?` |
+| `ImageGallery` | Carousel multi-imagen con zoom y paginación       | `images`, `initialIndex?`, `onClose`                    |
+| `VideoPlayer`  | Reproductor de video con controles nativos        | `source`, `autoPlay?`, `loop?`                          |
+| `WebViewModal` | Modal con WebView embebido para contenido externo | `url`, `visible`, `onClose`, `title?`                   |
+
+---
+
+## Feedback
+
+Componentes para comunicar estados de carga, errores y notificaciones al usuario.
+
+<Tabs>
+  <Tab title="Loading">
+    | Componente | Uso | |------------|-----| | `LoadingIndicator` | Spinner inline para secciones
+    de la pantalla | | `LoadingScreen` | Pantalla completa de carga con logo. Usado durante
+    inicialización. | | `LoadingOverlay` | Overlay semitransparente sobre contenido existente. Para
+    operaciones que bloquean UI. |
+  </Tab>
+  <Tab title="Error">
+    | Componente | Uso | |------------|-----| | `ErrorDisplay` | Mensaje de error inline con icono y
+    botón de retry opcional | | `AppErrorScreen` | Pantalla de error completa con acción de
+    recuperación. Para errores fatales. |
+  </Tab>
+  <Tab title="Toast">
+    | Componente | Uso | |------------|-----| | `ToastManager` | Cola de toasts temporales (éxito,
+    error, info). Se muestra en la parte superior. | | `ProgressToast` | Toast individual con barra
+    de progreso para operaciones largas. | | `ProgressToastManager` | Gestor de múltiples
+    ProgressToasts simultáneos. |
+  </Tab>
+</Tabs>
+
+---
+
+## Navigation
+
+| Componente              | Descripción                                                    | Props principales                         |
+| ----------------------- | -------------------------------------------------------------- | ----------------------------------------- |
+| `TabBarItem`            | Item del tab bar inferior con icono, label y badge             | `icon`, `label`, `focused`, `badgeCount?` |
+| `NavigationAppSelector` | Selector de apps de navegación (Google Maps, Apple Maps, Waze) | `latitude`, `longitude`, `label?`         |
+
+---
+
+## Icons
+
+Más de **90 iconos SVG** disponibles como componentes React Native, organizados por categoría.
+
+<CardGroup cols={3}>
+  <Card title="Navegación" icon="compass">
+    Home, Calendar, Stays, Profile, Search, Map, Inbox, Bell
+  </Card>
+  <Card title="Amenidades" icon="bed">
+    Bed, Bathtub, Wifi, Door, Kitchen, Parking, Pool, Garden, AC, Heating, etc.
+  </Card>
+  <Card title="UI" icon="chevron-right">
+    ChevronRight, ChevronDown, ChevronLeft, ChevronUp, ArrowRight, ArrowLeft, ArrowUp, Plus, Minus,
+    Close, etc.
+  </Card>
+  <Card title="Reviews" icon="star">
+    ReviewHouse, ReviewHeadphones, StarFilled, StarEmpty, StarHalf
+  </Card>
+  <Card title="Chat" icon="message">
+    ChatMic, ChatCamera, ChatFile, ChatSend, ChatTickSingle, ChatTickRead, ChatTickDelivered, etc.
+  </Card>
+  <Card title="Funcionales" icon="wrench">
+    Lock, Key, Doc, Image, Delete, CheckTick, Edit, Share, Copy, Download, Upload, Filter, Sort,
+    etc.
+  </Card>
+</CardGroup>
+
+<Note>
+  Todos los iconos aceptan las props `width`, `height` y `color` para personalizar su apariencia. El
+  tamaño por defecto es 24x24.
+</Note>
+
+### Uso de iconos
+
+```tsx
+import { HomeIcon, CalendarIcon, StarFilled } from '@/shared/components/icons';
+
+<HomeIcon width={28} height={28} color="#333" />
+<StarFilled color="#FFD700" />
+```
+
+---
+
+## Otros componentes
+
+| Componente                  | Descripción                                                        | Props principales                         |
+| --------------------------- | ------------------------------------------------------------------ | ----------------------------------------- |
+| `ReviewStars`               | Display read-only de estrellas (1-5)                               | `rating`, `size?`, `color?`               |
+| `InteractiveStarRating`     | Input de 5 estrellas con interacción táctil                        | `value`, `onChange`, `size?`, `disabled?` |
+| `SelectableOptionBox`       | Selector con estado activo/inactivo y contenido personalizable     | `selected`, `onPress`, `children`         |
+| `StarRatingTutorialOverlay` | Overlay de onboarding que explica cómo usar el rating de estrellas | `visible`, `onDismiss`                    |
+| `QueryClientProvider`       | Setup de React Query con configuración global                      | `children`                                |
+| `KeyboardHeightTracker`     | Observador del teclado que reporta su altura actual                | Componente sin UI visible                 |
+
+### InteractiveStarRating
+
+```tsx
+import { InteractiveStarRating } from '@/shared/components';
+
+const [rating, setRating] = useState(0);
+
+<InteractiveStarRating value={rating} onChange={setRating} size={32} />;
+```
+
+<Warning>
+  `QueryClientProvider` debe envolver toda la aplicación. Ya está configurado en el layout raíz; no
+  lo agregues manualmente en componentes individuales.
+</Warning>

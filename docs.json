@@ -56,6 +56,65 @@
             ]
           }
         ]
+      },
+      {
+        "tab": "Mobile",
+        "groups": []
+      },
+      {
+        "tab": "Tools",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "tools/index"
+            ]
+          },
+          {
+            "group": "Chat",
+            "pages": [
+              "tools/chat/index",
+              "tools/chat/frontend",
+              "tools/chat/mobile-integration"
+            ]
+          },
+          {
+            "group": "Community guidelines",
+            "pages": [
+              "tools/community/index",
+              "tools/community/portal"
+            ]
+          },
+          {
+            "group": "Guías de mantenimiento",
+            "pages": [
+              "tools/maintenance/index"
+            ]
+          },
+          {
+            "group": "Notificaciones",
+            "pages": [
+              "tools/notifications/index",
+              "tools/notifications/automations"
+            ]
+          },
+          {
+            "group": "Tools API",
+            "pages": [
+              "tools/api/index",
+              "tools/api/endpoints",
+              "tools/api/database",
+              "tools/api/auth"
+            ]
+          },
+          {
+            "group": "Plataforma",
+            "pages": [
+              "tools/platform/permissions",
+              "tools/platform/teams"
+            ]
+          }
+        ]
       }
     ],
     "global": {

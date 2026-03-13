@@ -1,0 +1,119 @@
+---
+title: 'Home'
+description: 'Módulo del dashboard principal y selector de propiedades'
+---
+
+## Descripción
+
+Ubicación: `src/modules/home/`
+
+Pantalla principal de la app que muestra el dashboard de la propiedad seleccionada, el selector de propiedades y la galería de fotos. Este módulo actúa como punto de entrada principal para el usuario autenticado.
+
+<Note>
+  El tab Home (`01_home`) actúa como gate de selección de propiedad. Los demás tabs permanecen
+  bloqueados hasta que el usuario seleccione una propiedad.
+</Note>
+
+## Screens
+
+| Screen            | Ruta                         | Descripción                          |
+| ----------------- | ---------------------------- | ------------------------------------ |
+| `HomeScreen`      | `/(tabs)/01_home`            | Dashboard principal de la propiedad  |
+| `HomeGuestScreen` | `/(tabs)/01_home` (visitors) | Vista para usuarios visitantes       |
+| `AmenitiesScreen` | `/(tabs)/01_home/amenities`  | Listado de amenities de la propiedad |
+| `GalleryScreen`   | `/(tabs)/01_home/gallery`    | Galería de fotos de la propiedad     |
+
+## API Endpoints
+
+Este módulo no expone endpoints propios. Consume datos de propiedades a través del hook `useProperties` del módulo `property`.
+
+## Hooks
+
+| Hook                       | Descripción                                                                                                                                                  |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `useHome()`                | Hook principal del módulo. Expone propiedades owned/public, selección de propiedad activa, tipo/rol del usuario, estado de carga y visibilidad del selector. |
+| `useFinancialReport2025()` | Obtiene el reporte financiero de la propiedad. Controlado por feature flag.                                                                                  |
+
+<Tabs>
+  <Tab title="useHome">
+    ```typescript
+    const {
+      ownedProperties,
+      publicProperties,
+      selectedProperty,
+      selectProperty,
+      userType,
+      userRole,
+      isLoading,
+      selectorVisible,
+      setSelectorVisible,
+    } = useHome();
+    ```
+  </Tab>
+  <Tab title="useFinancialReport2025">
+    ```typescript
+    const { report, isLoading } = useFinancialReport2025();
+    ```
+
+    <Warning>
+      Este hook solo retorna datos si el feature flag `financialReport2025` está habilitado.
+    </Warning>
+
+  </Tab>
+</Tabs>
+
+## Tipos principales
+
+```typescript
+interface HomeState {
+  selectedPropertyId: string | null;
+  hasSelectedInCurrentAppSession: boolean;
+  selectorVisible: boolean;
+}
+
+interface PropertySelectorProps {
+  properties: Property[];
+  selectedPropertyId: string | null;
+  onSelect: (propertyId: string) => void;
+  visible: boolean;
+  onClose: () => void;
+}
+```
+
+## Store
+
+El módulo mantiene un store local (`HomeState`) que persiste:
+
+- **`selectedPropertyId`** — ID de la propiedad actualmente seleccionada.
+- **`hasSelectedInCurrentAppSession`** — Indica si el usuario ya seleccionó una propiedad en la sesión actual.
+- **`selectorVisible`** — Controla la visibilidad del modal del selector de propiedades.
+
+## Componentes destacados
+
+<CardGroup cols={2}>
+  <Card title="HomePropertyHero">
+    Sección hero con la imagen principal de la propiedad seleccionada. Muestra nombre, ubicación y
+    acceso rápido a la galería.
+  </Card>
+  <Card title="HomePropertySelector">
+    Selector de propiedades con implementaciones separadas para iOS y Android. Permite cambiar entre
+    propiedades owned y public.
+  </Card>
+  <Card title="HomePropertyDetails">
+    Detalles de la propiedad seleccionada: descripción, amenities destacadas, información general y
+    reporte financiero (si aplica).
+  </Card>
+  <Card title="HomeScreenSkeleton">
+    Loading skeleton que se muestra mientras se cargan los datos de la propiedad. Replica la
+    estructura visual del dashboard.
+  </Card>
+  <Card title="HomeEmptyState">
+    Estado vacío que se muestra cuando el usuario no tiene propiedades asociadas. Incluye llamada a
+    la acción para explorar propiedades públicas.
+  </Card>
+</CardGroup>
+
+<Note>
+  El feature flag `financialReport2025` controla la visibilidad del reporte financiero dentro del
+  dashboard. Cuando está deshabilitado, la sección no se renderiza.
+</Note>

@@ -1,0 +1,93 @@
+---
+title: 'Builds'
+description: 'Perfiles de build con EAS Build'
+---
+
+# Builds
+
+La app de Vivla utiliza **EAS Build** (Expo Application Services) para generar los binarios de iOS y Android. Todos los perfiles de build estan definidos en `eas.json`.
+
+<Note>
+  Se requiere **EAS CLI version 16.16.0** o superior. Instalalo con `npm install -g eas-cli`.
+</Note>
+
+## Perfiles de build
+
+El proyecto define cuatro perfiles de build, cada uno orientado a una etapa distinta del ciclo de desarrollo:
+
+| Perfil        | Distribucion | Canal       | Entorno     | Android    | iOS       | Uso                          |
+| ------------- | ------------ | ----------- | ----------- | ---------- | --------- | ---------------------------- |
+| `development` | internal     | development | development | APK        | Simulador | Desarrollo local             |
+| `preview`     | store        | develop     | development | App Bundle | Release   | Testing interno / TestFlight |
+| `beta-prod`   | store        | beta-prod   | production  | APK        | Release   | QA con API de produccion     |
+| `production`  | store        | production  | production  | App Bundle | Release   | Publicacion en stores        |
+
+## Configuracion por plataforma
+
+<Tabs>
+  <Tab title="iOS">
+    - **Credenciales**: gestionadas de forma remota por EAS (no se almacenan localmente) - **Build
+    configuration**: `Release` - Los provisioning profiles y certificados se manejan automaticamente
+  </Tab>
+  <Tab title="Android">
+    - **Hermes**: habilitado como motor de JavaScript - **ProGuard**: deshabilitado - **Flipper**:
+    deshabilitado en todos los perfiles - El keystore se gestiona de forma remota por EAS
+  </Tab>
+</Tabs>
+
+## Scripts de build
+
+Usa los siguientes scripts de npm para ejecutar builds desde la terminal:
+
+<CodeGroup>
+```bash Desarrollo
+npm run build:development
+```
+
+```bash Preview
+npm run build:preview
+```
+
+```bash Produccion
+npm run build:production
+```
+
+```bash Enviar a stores
+npm run submit:production
+```
+
+</CodeGroup>
+
+| Script                      | Descripcion                                            |
+| --------------------------- | ------------------------------------------------------ |
+| `npm run build:development` | Build de desarrollo para testing local                 |
+| `npm run build:preview`     | Build preview para testing interno y TestFlight        |
+| `npm run build:production`  | Build de produccion para publicacion en stores         |
+| `npm run submit:production` | Envia el build de produccion a App Store y Google Play |
+
+## Iconos por entorno
+
+Cada entorno utiliza un icono diferente para facilitar la identificacion de la app instalada en el dispositivo:
+
+| Entorno                   | Icono                  |
+| ------------------------- | ---------------------- |
+| `development` / `develop` | `vivla_dev_icon.png`   |
+| `beta-prod`               | `vivla_stage_icon.png` |
+| `production`              | `ios_icon.png`         |
+
+## Bundle IDs
+
+Los identificadores de bundle varian segun el entorno para permitir la instalacion simultanea de multiples versiones:
+
+| Entorno         | Bundle ID                     |
+| --------------- | ----------------------------- |
+| Development     | `com.vivla.booking.beta`      |
+| Beta Prod (iOS) | `com.vivla.booking.beta.prod` |
+| Production      | `com.vivla.app`               |
+
+<Note>Antes de hacer build, siempre ejecutar `npm run validate` para verificar lint y tests.</Note>
+
+<Warning>
+  Los builds de produccion consumen creditos de EAS. Usa `development` o `preview` para pruebas y
+  reserva `production` para releases finales.
+</Warning>

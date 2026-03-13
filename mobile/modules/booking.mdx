@@ -1,0 +1,126 @@
+---
+title: 'Booking'
+description: 'Módulo de reservas, intercambios y alquileres'
+---
+
+## Descripción
+
+El módulo **Booking** gestiona la creación, visualización y cancelación de reservas. Soporta tres tipos de operación: reserva directa, intercambio y alquiler.
+
+- **Ubicación:** `src/modules/booking/`
+
+<Note>
+  Los usuarios visitantes y aquellos sin propiedades registradas solo tienen acceso a la pantalla de
+  alquiler (`RentScreen`).
+</Note>
+
+## Screens
+
+| Screen                      | Ruta                             | Descripción                                    |
+| --------------------------- | -------------------------------- | ---------------------------------------------- |
+| `BookScreen`                | `/(tabs)/02_book/book-stays`     | Lista de propiedades disponibles para reservar |
+| `ExchangeScreen`            | `/(tabs)/02_book/exchange-stays` | Propiedades disponibles para intercambio       |
+| `RentScreen`                | `/(tabs)/02_book/rent-stays`     | Propiedades disponibles para alquiler          |
+| `BookingCreationScreen`     | `/booking/new`                   | Crear nueva reserva                            |
+| `BookingConfirmationScreen` | `/booking/review`                | Confirmación de reserva                        |
+
+## API Endpoints
+
+| Método   | Path                           | Descripción                  |
+| -------- | ------------------------------ | ---------------------------- |
+| `GET`    | `/bookings/mine`               | Obtener reservas del usuario |
+| `GET`    | `/bookings/{id}`               | Detalle de una reserva       |
+| `GET`    | `/properties/{id}`             | Propiedad asociada a reserva |
+| `PUT`    | `/bookings/{id}`               | Actualizar reserva           |
+| `POST`   | `/bookings/{id}/reviews`       | Enviar reseña                |
+| `POST`   | `/bookings/make`               | Crear reserva                |
+| `POST`   | `/bookings/{id}/rent`          | Crear reserva de alquiler    |
+| `POST`   | `/bookings/{id}/exchange`      | Crear reserva de intercambio |
+| `POST`   | `/bookings/exchange-last-hour` | Intercambio de última hora   |
+| `DELETE` | `/bookings/{id}`               | Cancelar reserva             |
+| `PUT`    | `/bookings/{id}/modify-type`   | Modificar tipo de reserva    |
+
+## Hooks
+
+| Hook                                   | Descripción                                                     |
+| -------------------------------------- | --------------------------------------------------------------- |
+| `useBooking(bookingId, propertyId)`    | Fetch de reserva y propiedad                                    |
+| `useCancelBooking()`                   | Cancelar con invalidación de cache                              |
+| `useModifyBooking()`                   | Modificar tipo de reserva                                       |
+| `useBookings()`                        | Listar y categorizar (`active`, `cancelled`, `past`, `pending`) |
+| `useBookingDetail(bookingId)`          | Detalle de una reserva                                          |
+| `useBookingReviews()`                  | Enviar reseña                                                   |
+| `useCreateBooking()`                   | Crear reserva directa                                           |
+| `useCreateBookingToRent()`             | Crear reserva de alquiler                                       |
+| `useCreateBookingToExchange()`         | Crear reserva de intercambio                                    |
+| `useCreateBookingToExchangeLastHour()` | Intercambio última hora                                         |
+
+## Tipos principales
+
+<Tabs>
+  <Tab title="BookingInfo">
+    ```typescript
+    interface BookingInfo {
+      checkIn: string;
+      checkOut: string;
+      adults: number;
+      kids: number;
+      pets: number;
+      requests: string;
+      cleaning: boolean;
+      rental: boolean;
+      reservations: Reservation[];
+      crib: boolean;
+    }
+    ```
+  </Tab>
+  <Tab title="Estados y tipos">
+    ```typescript
+    // Estados de reserva
+    type BookingStatus = "ACTIVE" | "CANCELLED" | "PAST";
+
+    // Tipos de reserva
+    type BookingType = "EXCHANGE" | "RENT";
+
+    // Estados de aprobación
+    type ApprovalStatus = "APPROVED" | "REJECTED" | "PENDING";
+    ```
+
+  </Tab>
+  <Tab title="Guest">
+    ```typescript
+    // Información del huésped asociado a la reserva
+    interface Guest {
+      name: string;
+      email: string;
+      phone: string;
+      // ...campos adicionales
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Componentes destacados
+
+<CardGroup cols={2}>
+  <Card title="booking-creation" icon="calendar-plus">
+    Flujo completo de creación de reserva: selección de propiedad, fechas, huéspedes y confirmación.
+  </Card>
+  <Card title="calendar" icon="calendar-days">
+    Componente de selección de fechas con soporte para rangos, disponibilidad y bloqueos.
+  </Card>
+</CardGroup>
+
+## Queries
+
+<Warning>
+  Todas las consultas de reservas utilizan **React Query** (`bookingQueries`) para fetching y
+  caching. No realizar llamadas directas al API fuera de este sistema de queries.
+</Warning>
+
+El módulo define `bookingQueries` con claves de cache estructuradas para:
+
+- Listado de reservas del usuario
+- Detalle de reserva individual
+- Propiedades asociadas
+- Invalidación automática tras mutaciones (crear, cancelar, modificar)

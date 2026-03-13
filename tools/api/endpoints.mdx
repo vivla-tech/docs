@@ -1,0 +1,321 @@
+---
+title: "Endpoints"
+description: "Referencia completa de todos los endpoints de la API agrupados por módulo"
+---
+
+# Endpoints
+
+Referencia completa de todos los endpoints de la Tools API. Todos los endpoints tienen el prefijo `/api`.
+
+## Auth
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| GET | `/auth/me` | Bearer | Información del usuario autenticado |
+| GET | `/auth/profile` | Bearer | Perfil completo (id, email, nombre, rol, org, permisos) |
+| POST | `/auth/update-role` | Bearer (Admin) | Actualizar rol de usuario |
+| GET | `/auth/pending-tools/:email` | API Key | Herramientas pendientes de asignar |
+| POST | `/auth/pending-tools/:email/clear` | API Key | Limpiar asignaciones pendientes |
+| GET | `/auth/public` | Público | Endpoint público de ejemplo |
+
+## Users
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| POST | `/users` | Bearer (Admin) | Crear usuario |
+| GET | `/users` | Bearer (Admin/Mod) | Listar usuarios (paginado) |
+| GET | `/users/me` | Bearer | Perfil propio |
+| GET | `/users/me/preferences` | Bearer | Preferencias del usuario |
+| PATCH | `/users/me` | Bearer | Actualizar perfil propio |
+| PATCH | `/users/me/preferences` | Bearer | Actualizar preferencias |
+| GET | `/users/:id` | Bearer (Admin/Mod) | Obtener usuario por ID |
+| PATCH | `/users/:id` | Bearer (Admin) | Actualizar usuario |
+| PATCH | `/users/:id/role` | Bearer (Admin) | Cambiar rol |
+| PATCH | `/users/:id/status` | Bearer (Admin) | Cambiar estado |
+| DELETE | `/users/:id` | Bearer (Admin) | Eliminar usuario |
+
+## Teams
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| POST | `/teams` | Bearer | Crear equipo |
+| GET | `/teams` | Bearer | Listar equipos |
+| GET | `/teams/:id` | Bearer | Obtener equipo |
+| PATCH | `/teams/:id` | Bearer | Actualizar equipo |
+| DELETE | `/teams/:id` | Bearer | Eliminar equipo |
+| POST | `/teams/:id/members` | Bearer | Agregar miembro |
+| PATCH | `/teams/:id/members/:userId` | Bearer | Actualizar miembro |
+| DELETE | `/teams/:id/members/:userId` | Bearer | Quitar miembro |
+| GET | `/teams/:id/members` | Bearer | Listar miembros |
+
+## Admin
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| POST | `/admin/users` | Bearer (Admin) | Crear usuario |
+| GET | `/admin/users` | Bearer (Admin) | Listar usuarios |
+| PATCH | `/admin/users/:id/role` | Bearer (Admin) | Cambiar rol |
+| DELETE | `/admin/users/:id` | Bearer (Admin) | Eliminar usuario |
+| POST | `/admin/users/bulk` | Bearer (Admin) | Operaciones bulk |
+| GET | `/admin/stats` | Bearer (Admin) | Estadísticas del sistema |
+
+## Chat — Channels
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| POST | `/chat/channels` | Bearer (Chat Editor) | Crear canal |
+| GET | `/chat/channels` | Bearer (Chat Editor) | Listar canales con filtros |
+| GET | `/chat/channels/management` | Bearer (Chat Editor) | Vista de gestión de canales |
+| GET | `/chat/channels/activity-logs` | Bearer (Admin) | Logs de actividad |
+| GET | `/chat/channels/check-existing` | Bearer (Chat Editor) | Verificar si existe canal |
+| GET | `/chat/channels/unread-counts` | Bearer (Chat Editor) | Conteo de no leídos |
+| GET | `/chat/channels/list` | Bearer (Chat Editor) | Lista paginada |
+| GET | `/chat/channels/by-stream-id/:id` | Bearer (Chat Editor) | Obtener por Stream ID |
+| GET | `/chat/channels/:id` | Bearer (Chat Editor) | Obtener por ID |
+| PATCH | `/chat/channels/batch/default-agent` | Bearer (Chat Editor) | Batch: agente default |
+| PATCH | `/chat/channels/batch/active-agent` | Bearer (Chat Editor) | Batch: agente activo |
+| PATCH | `/chat/channels/batch/moderators` | Bearer (Chat Editor) | Batch: moderadores |
+| DELETE | `/chat/channels/batch` | Bearer (Chat Admin) | Batch: eliminar canales |
+| PATCH | `/chat/channels/:id` | Bearer (Chat Editor) | Actualizar canal |
+| PATCH | `/chat/channels/:id/archive` | Bearer (Chat Editor) | Archivar canal |
+| PATCH | `/chat/channels/:id/active-agent` | Bearer (Chat Editor) | Cambiar agente activo |
+| PATCH | `/chat/channels/:id/default-agent` | Bearer (Chat Editor) | Cambiar agente default |
+| PATCH | `/chat/channels/:id/members` | Bearer (Chat Editor) | Agregar/quitar miembros |
+| PATCH | `/chat/channels/:id/moderators` | Bearer (Chat Editor) | Agregar moderadores |
+| DELETE | `/chat/channels/:id` | Bearer (Chat Admin) | Eliminar canal |
+
+## Chat — Messages
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| POST | `/chat/messages/log` | Bearer (Chat Editor) | Registrar mensaje para analytics |
+| GET | `/chat/messages` | Bearer (Chat Editor) | Consultar logs de mensajes |
+| GET | `/chat/messages/channels/:channelId` | Bearer (Chat Editor) | Mensajes por canal |
+
+## Chat — Mobile
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| POST | `/chat/mobile/auth/login` | Mobile Guard | Login mobile (retorna Stream token) |
+| POST | `/chat/mobile/auth/refresh` | Mobile Guard | Refresh Stream token (1h) |
+| PATCH | `/chat/mobile/profile` | Mobile Guard | Actualizar perfil y sync a Stream |
+| POST | `/chat/mobile/invitations` | Mobile Guard | Crear invitación con deep link |
+| GET | `/chat/mobile/invitations/:token` | Público | Info de invitación |
+
+## Chat — Bookings
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| GET | `/chat/bookings` | Bearer (Chat Editor) | Listar bookings con filtros |
+| GET | `/chat/bookings/:id` | Bearer (Chat Editor) | Obtener booking |
+| POST | `/chat/bookings/:id/channels` | Bearer (Chat Editor) | Crear canales por booking |
+| POST | `/chat/bookings/batch-create-channels` | Bearer (Chat Editor) | Batch crear canales |
+| POST | `/chat/bookings/batch-archive-channels` | Bearer (Chat Editor) | Batch archivar canales |
+
+## Chat — Tickets
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| POST | `/chat/tickets` | Bearer (Chat Editor) | Crear ticket |
+| GET | `/chat/tickets` | Bearer (Chat Editor) | Listar tickets con filtros |
+| GET | `/chat/tickets/:id` | Bearer (Chat Editor) | Obtener ticket |
+| PATCH | `/chat/tickets/:id` | Bearer (Chat Editor) | Actualizar ticket |
+| POST | `/chat/tickets/:id/messages` | Bearer (Chat Editor) | Agregar mensajes al ticket |
+
+## Chat — Shifts
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| GET | `/chat/shifts` | Bearer (Chat Editor) | Listar turnos |
+| GET | `/chat/shifts/:id` | Bearer (Chat Editor) | Obtener turno |
+| POST | `/chat/shifts` | Bearer (Chat Editor) | Crear turno |
+| PATCH | `/chat/shifts/:id` | Bearer (Chat Editor) | Actualizar turno |
+| DELETE | `/chat/shifts/:id` | Bearer (Chat Editor) | Eliminar turno |
+
+## Chat — Invitations
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| GET | `/chat/invitations` | Bearer (Chat Editor) | Listar invitaciones |
+| GET | `/chat/invitations/:id` | Bearer (Chat Editor) | Obtener invitación |
+| POST | `/chat/invitations` | Bearer (Chat Editor) | Crear invitación |
+| PATCH | `/chat/invitations/:id` | Bearer (Chat Editor) | Actualizar invitación |
+| DELETE | `/chat/invitations/:id` | Bearer (Chat Editor) | Eliminar invitación |
+
+## Chat — Sync
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| GET | `/chat/sync/jobs` | Bearer (Admin) | Listar jobs de sync |
+| POST | `/chat/sync/trigger` | Bearer (Admin) | Trigger manual |
+| GET | `/chat/sync/logs` | Bearer (Admin) | Logs de sync |
+
+## Chat — Analytics
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| GET | `/chat/analytics` | Bearer (Admin) | Analytics general |
+| GET | `/chat/analytics/channels` | Bearer (Admin) | Analytics por canal |
+| GET | `/chat/analytics/users` | Bearer (Admin) | Analytics por usuario |
+
+## Chat — Webhooks
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| POST | `/chat/webhooks/stream` | Firma Stream | Webhook de Stream.io |
+| POST | `/chat/webhooks/zendesk` | HMAC-SHA256 | Webhook de Zendesk |
+| POST | `/chat/webhooks/invitation-accepted` | HMAC-SHA256 | Webhook de invitación aceptada |
+
+## Community — Properties
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| POST | `/community/properties/api-integration` | API Key | Crear propiedad (integración externa) |
+| POST | `/community/properties` | Bearer (Community Editor) | Crear propiedad |
+| GET | `/community/properties` | Bearer (Community Viewer) | Listar propiedades |
+| GET | `/community/properties/:id` | Bearer (Community Viewer) | Obtener propiedad |
+| PATCH | `/community/properties/:id` | Bearer (Community Editor) | Actualizar propiedad |
+| DELETE | `/community/properties/:id` | Bearer (Community Editor) | Eliminar propiedad |
+| POST | `/community/properties/:id/assign` | Bearer (Community Editor) | Asignar propiedad |
+
+## Community — Rooms
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| GET | `/community/rooms` | Bearer (Community Viewer) | Listar estancias |
+| GET | `/community/rooms/:id` | Bearer (Community Viewer) | Obtener estancia |
+| POST | `/community/rooms` | Bearer (Community Editor) | Crear estancia |
+| PATCH | `/community/rooms/:id` | Bearer (Community Editor) | Actualizar estancia |
+| DELETE | `/community/rooms/:id` | Bearer (Community Editor) | Eliminar estancia |
+
+## Community — Inventory & Items
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| GET | `/community/inventory` | Bearer (Community Viewer) | Listar inventario |
+| GET | `/community/inventory/:id` | Bearer (Community Viewer) | Obtener inventario |
+| POST | `/community/inventory` | Bearer (Community Editor) | Crear inventario |
+| PATCH | `/community/inventory/:id` | Bearer (Community Editor) | Actualizar inventario |
+| DELETE | `/community/inventory/:id` | Bearer (Community Editor) | Eliminar inventario |
+| GET | `/community/items` | Bearer (Community Viewer) | Listar ítems |
+| GET | `/community/items/:id` | Bearer (Community Viewer) | Obtener ítem |
+| POST | `/community/items` | Bearer (Community Editor) | Crear ítem |
+| PATCH | `/community/items/:id` | Bearer (Community Editor) | Actualizar ítem |
+| DELETE | `/community/items/:id` | Bearer (Community Editor) | Eliminar ítem |
+
+## Community — Cleaning
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| GET | `/community/cleaning` | Bearer (Community Viewer) | Listar reglas de limpieza |
+| POST | `/community/cleaning` | Bearer (Community Editor) | Crear regla |
+| PATCH | `/community/cleaning/:id` | Bearer (Community Editor) | Actualizar regla |
+| DELETE | `/community/cleaning/:id` | Bearer (Community Editor) | Eliminar regla |
+| GET | `/community/cleaning-sessions` | Bearer (Community Viewer) | Listar sesiones |
+| POST | `/community/cleaning-sessions` | Bearer (Community Editor) | Crear sesión |
+| PATCH | `/community/cleaning-sessions/:id` | Bearer (Community Editor) | Actualizar sesión |
+| DELETE | `/community/cleaning-sessions/:id` | Bearer (Community Editor) | Eliminar sesión |
+
+## Community — Guides & Plans
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| GET | `/community/guides` | Bearer (Community Viewer) | Listar guías |
+| GET | `/community/guides/:id` | Bearer (Community Viewer) | Obtener guía |
+| POST | `/community/guides` | Bearer (Community Editor) | Crear guía |
+| PATCH | `/community/guides/:id` | Bearer (Community Editor) | Actualizar guía |
+| DELETE | `/community/guides/:id` | Bearer (Community Editor) | Eliminar guía |
+| GET | `/community/floor-plans` | Bearer (Community Viewer) | Listar planos |
+| POST | `/community/floor-plans` | Bearer (Community Editor) | Crear plano |
+| PATCH | `/community/floor-plans/:id` | Bearer (Community Editor) | Actualizar plano |
+| GET | `/community/qr-codes` | Bearer (Community Viewer) | Listar QR codes |
+| POST | `/community/qr-codes` | Bearer (Community Editor) | Generar QR code |
+
+## Community — Dashboard
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| GET | `/community/dashboard/overview` | Bearer | Métricas de overview (filtrable por propertyId) |
+
+## Notifications
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| POST | `/notifications` | Bearer | Crear notificación |
+| GET | `/notifications` | Bearer | Listar notificaciones |
+| GET | `/notifications/:id` | Bearer | Obtener notificación |
+| GET | `/notifications/:id/recipients` | Bearer | Recipients |
+| GET | `/notifications/:id/stats` | Bearer | Estadísticas de entrega |
+| POST | `/notifications/audience/estimate` | Bearer | Estimar audiencia |
+| POST | `/notifications/audience/resolve` | Bearer | Resolver audiencia |
+| PUT | `/notifications/:id` | Bearer | Actualizar (solo draft) |
+| DELETE | `/notifications/:id` | Bearer | Eliminar (solo draft) |
+| POST | `/notifications/:id/duplicate` | Bearer | Duplicar |
+| POST | `/notifications/:id/send` | Bearer | Enviar |
+| POST | `/notifications/:id/test` | Bearer | Envío de test |
+| POST | `/notifications/batch/send` | Bearer (Admin) | Envío batch |
+| POST | `/notifications/scheduled/send` | Bearer (Admin) | Enviar programadas |
+
+## Notifications — Automations
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| GET | `/notifications/automations` | Bearer | Listar automaciones |
+| GET | `/notifications/automations/stats` | Bearer | Estadísticas |
+| GET | `/notifications/automations/:type` | Bearer | Obtener por tipo |
+| PUT | `/notifications/automations/:type` | Bearer | Actualizar config |
+| POST | `/notifications/automations/:type/test` | Bearer (Admin) | Ejecutar test |
+
+## Inbox
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| POST | `/inbox/messages` | Bearer o API Key | Crear mensaje |
+| GET | `/inbox/messages` | Bearer | Listar mensajes (filtros: sourceTool, messageTypes) |
+| GET | `/inbox/unread-count` | Bearer | Conteo de no leídos (por prioridad, tipo y herramienta) |
+| GET | `/inbox/messages/:id` | Bearer | Obtener mensaje |
+| PATCH | `/inbox/messages/:id` | Bearer | Actualizar mensaje |
+| PATCH | `/inbox/messages/:id/read` | Bearer | Marcar como leído |
+| POST | `/inbox/messages/batch-read` | Bearer | Batch marcar como leído |
+| PATCH | `/inbox/messages/:id/resolve` | Bearer | Marcar como resuelto |
+| DELETE | `/inbox/messages/:id` | Bearer | Eliminar mensaje |
+| POST | `/inbox/push-subscription` | Bearer | Suscribir a push |
+| DELETE | `/inbox/push-subscription` | Bearer | Desuscribir de push |
+| GET | `/inbox/vapid-public-key` | Bearer | Clave pública VAPID |
+| GET | `/inbox/preferences` | Bearer | Preferencias de notificación |
+| PATCH | `/inbox/preferences` | Bearer | Actualizar preferencias |
+
+## Permissions
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| GET | `/permissions/modules/home` | Bearer | Módulos visibles para el usuario |
+| GET | `/permissions/modules/home-layout` | Bearer | Layout con grupos y módulos |
+| GET | `/permissions/modules/admin` | Bearer (Admin) | Todos los módulos |
+| POST | `/permissions/modules` | Bearer (Admin) | Crear módulo |
+| PATCH | `/permissions/modules/:id` | Bearer (Admin) | Actualizar módulo |
+| DELETE | `/permissions/modules/:id` | Bearer (Admin) | Eliminar módulo |
+| POST | `/permissions/modules/:id/upload-icon` | Bearer (Admin) | Subir ícono (2MB máx) |
+| GET | `/permissions/modules/groups` | Bearer | Listar grupos |
+| POST | `/permissions/modules/groups` | Bearer (Admin) | Crear grupo |
+| PATCH | `/permissions/modules/groups/:id` | Bearer (Admin) | Actualizar grupo |
+| DELETE | `/permissions/modules/groups/:id` | Bearer (Admin) | Eliminar grupo |
+| GET/PUT | `/permissions/modules/groups/:id/visibility` | Bearer (Admin) | Visibilidad de grupo por equipo |
+| GET/PUT | `/permissions/modules/:id/visibility` | Bearer (Admin) | Visibilidad de módulo por equipo |
+| GET/PUT/DELETE | `/permissions/modules/my-layout` | Bearer | Layout personalizado del usuario |
+| GET | `/permissions/user/:userId` | Bearer | Permisos del usuario |
+| POST | `/permissions/user/:userId` | Bearer (Admin) | Asignar permiso |
+| GET | `/permissions/team/:teamId` | Bearer | Permisos del equipo |
+| POST | `/permissions/team/:teamId` | Bearer (Admin) | Asignar permiso al equipo |
+| GET | `/permissions/user/:userId/module/:slug` | Bearer | Verificar permiso específico |
+| GET | `/permissions/user/:userId/access` | Bearer | Acceso a módulos del usuario |
+
+## Tools (Gestión de herramientas)
+
+| Método | Endpoint | Auth | Descripción |
+|--------|----------|------|-------------|
+| POST | `/tools/:toolId/invite` | Bearer (Tool Admin) | Invitar usuario a herramienta |
+| POST | `/tools/:toolId/assign` | Bearer (Tool Admin) | Asignar usuario |
+| PATCH | `/tools/:toolId/users/:userId/role` | Bearer (Tool Admin) | Cambiar rol en herramienta |
+| DELETE | `/tools/:toolId/users/:userId` | Bearer (Tool Admin) | Quitar usuario |
+| GET | `/tools/:toolId/users` | Bearer (Tool Editor) | Listar usuarios de herramienta |

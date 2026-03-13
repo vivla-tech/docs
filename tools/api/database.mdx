@@ -1,0 +1,141 @@
+---
+title: "Base de datos"
+description: "Schema de base de datos PostgreSQL en Supabase con Row Level Security"
+---
+
+# Base de datos
+
+La API usa **Supabase** (PostgreSQL) como base de datos, con **Row Level Security (RLS)** habilitado en tablas sensibles. Las migraciones se gestionan con archivos SQL en `apps/backend/src/database/migrations/`.
+
+## Tablas principales
+
+### Users y autenticación
+
+| Tabla | Descripción |
+|-------|-------------|
+| `users` | Cuentas de usuario |
+| `user_preferences` | Preferencias (tema, notificaciones, privacidad) |
+| `teams` | Equipos |
+| `team_members` | Membresía de equipos |
+
+**Tabla `users`:**
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `id` | UUID (PK) | Identificador único |
+| `email` | VARCHAR(255) UNIQUE | Email |
+| `first_name` | VARCHAR(100) | Nombre |
+| `last_name` | VARCHAR(100) | Apellido |
+| `role` | VARCHAR(20) | Rol: `admin`, `user`, `moderator` |
+| `status` | VARCHAR(20) | Estado: `active`, `inactive`, `suspended`, `pending` |
+| `avatar` | TEXT | URL del avatar |
+| `bio` | TEXT | Biografía |
+| `phone` | VARCHAR(20) | Teléfono |
+| `timezone` | VARCHAR(50) | Zona horaria |
+| `language` | VARCHAR(10) | Idioma (default: `en`) |
+| `email_verified` | BOOLEAN | Email verificado |
+| `two_factor_enabled` | BOOLEAN | 2FA habilitado |
+| `last_login_at` | TIMESTAMP | Último login |
+| `metadata` | JSONB | Metadata adicional (permisos de herramientas, etc.) |
+| `auth0_id` | VARCHAR(255) | ID de Auth0 |
+| `created_at` | TIMESTAMP | Fecha de creación |
+| `updated_at` | TIMESTAMP | Última actualización (trigger automático) |
+
+### Chat
+
+| Tabla | Descripción |
+|-------|-------------|
+| `channels` | Canales de chat (stream_channel_id, tipo, nombre, usuario principal) |
+| `channel_members` | Miembros de canales |
+| `channel_moderators` | Moderadores de canales |
+| `message_logs` | Registro de mensajes para analytics |
+| `bookings` | Reservas asociadas a canales |
+| `booking_snapshots` | Snapshots de bookings para sync |
+| `tickets` | Tickets de soporte |
+| `shifts` | Turnos de agentes |
+| `invitations` | Invitaciones a canales (con token UUID) |
+| `activity_logs` | Logs de actividad de canales |
+| `sync_jobs` | Jobs de sincronización |
+| `sync_logs` | Logs de operaciones de sync |
+
+### Community
+
+| Tabla | Descripción |
+|-------|-------------|
+| `properties` | Propiedades (nombre, ubicación, tipo, estado) |
+| `rooms` | Estancias/ambientes de propiedades |
+| `locations` | Datos de ubicación |
+| `items` | Ítems individuales de inventario |
+| `inventory` | Inventario por propiedad |
+| `photos` | Fotos de propiedades |
+| `cleaning_rules` | Reglas de limpieza por estancia |
+| `cleaning_sessions` | Sesiones de limpieza realizadas |
+| `floor_plans` | Planos de planta (imágenes/PDF) |
+| `guides` | Guías de uso de propiedades |
+| `appliance_guides` | Guías de electrodomésticos |
+| `qr_codes` | QR codes generados para acceso público |
+| `styling_rules` | Reglas de estilo visual |
+
+### Notificaciones e inbox
+
+| Tabla | Descripción |
+|-------|-------------|
+| `deep_links` | Deep links configurados (nombre, patrón, parámetros) |
+| `notification_templates` | Templates de notificación (categoría, contenido, deep link) |
+| `notifications` | Notificaciones enviadas/programadas |
+| `notification_recipients` | Recipients con estado de entrega individual |
+| `automation_configs` | Configuración de automatizaciones |
+| `inbox_messages` | Mensajes de bandeja de entrada |
+| `push_subscriptions` | Suscripciones de push notifications |
+| `preferences` | Preferencias de notificación por usuario |
+| `push_notification_logs` | Historial de push notifications |
+
+**Tabla `inbox_messages`:**
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `id` | UUID (PK) | Identificador |
+| `recipient_id` | UUID (FK → users) | Usuario destinatario |
+| `message_type` | VARCHAR(50) | Tipo: `restock_alert`, `guide_incomplete`, `guide_request`, `general` |
+| `title` | VARCHAR(255) | Título |
+| `body` | TEXT | Contenido |
+| `priority` | VARCHAR(50) | Prioridad: `urgent`, `high`, `normal`, `low` |
+| `property_id` | UUID (FK → properties) | Propiedad relacionada |
+| `item_id` | UUID (FK → items) | Ítem relacionado |
+| `metadata` | JSONB | Datos adicionales |
+| `status` | VARCHAR(50) | Estado: `unread`, `read`, `resolved` |
+| `read_at` | TIMESTAMP | Fecha de lectura |
+| `resolved_at` | TIMESTAMP | Fecha de resolución |
+| `resolved_by` | UUID (FK → users) | Usuario que resolvió |
+| `notes` | TEXT | Notas adicionales |
+| `deleted_at` | TIMESTAMP | Soft delete |
+
+### Permisos
+
+| Tabla | Descripción |
+|-------|-------------|
+| `permissions` | Definiciones de permisos |
+| `user_permissions` | Permisos asignados a usuarios |
+| `role_permissions` | Permisos basados en roles |
+
+### Integraciones
+
+| Tabla | Descripción |
+|-------|-------------|
+| `webhooks` | Configuraciones de webhooks |
+| `integrations` | Integraciones externas (Zendesk, Stream, etc.) |
+
+## Row Level Security (RLS)
+
+Las tablas sensibles tienen políticas RLS habilitadas:
+
+- **`inbox_messages`**: Los usuarios solo pueden leer y actualizar sus propios mensajes. Los admin pueden acceder a todos. El service role puede insertar mensajes (para integraciones y notificaciones del sistema).
+- Otras tablas con datos de usuario siguen patrones similares.
+
+<Warning>
+  El backend usa el **service role** de Supabase para operaciones del servidor, lo que permite bypasear RLS. Las operaciones directas desde el cliente no están habilitadas.
+</Warning>
+
+## Migraciones
+
+Las migraciones SQL se encuentran en `apps/backend/src/database/migrations/` y se ejecutan en orden numérico. Cada migración crea tablas, índices y políticas RLS necesarias.

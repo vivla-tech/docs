@@ -1,0 +1,184 @@
+---
+title: "Integración mobile"
+description: "Cómo vivla-mobile consume los endpoints de chat de este backend"
+---
+
+# Integración con vivla-mobile
+
+La app mobile de Vivla (**vivla-mobile**) consume endpoints específicos de este backend para ofrecer chat de soporte a los huéspedes. Estos endpoints están bajo `/api/chat/mobile/` y manejan autenticación, tokens de Stream Chat y gestión de perfil.
+
+<Warning>
+  El chat en vivla-mobile **no** usa el backend principal de Vivla. Todos los endpoints de chat se sirven desde este backend (Tools API).
+</Warning>
+
+## Flujo de autenticación
+
+```
+┌─────────────┐     ┌───────────────┐     ┌──────────────┐
+│ vivla-mobile │────▶│  Tools API    │────▶│  Stream Chat │
+│              │     │  /chat/mobile │     │              │
+└─────────────┘     └───────────────┘     └──────────────┘
+       │                    │
+       │  authToken +       │  Genera
+       │  userId            │  streamToken
+       │                    │  (1h expiry)
+       ▼                    ▼
+┌─────────────┐     ┌───────────────┐
+│vivla-backend│     │   Supabase    │
+│ (auth orig.)│     │  (users DB)   │
+└─────────────┘     └───────────────┘
+```
+
+1. La app mobile obtiene un `authToken` del backend principal de Vivla
+2. Envía `authToken` + `userId` al endpoint de login de Tools API
+3. Tools API valida el usuario y verifica que tenga acceso al chat (`chat_enabled`)
+4. Si tiene acceso, genera un token de Stream Chat con expiración de **1 hora**
+5. La app usa el `streamToken` para conectarse directamente a Stream Chat
+
+## Endpoints
+
+### Login
+
+```
+POST /api/chat/mobile/auth/login
+```
+
+Autentica al usuario mobile y retorna un token de Stream Chat.
+
+**Request:**
+```json
+{
+  "authToken": "token-del-backend-principal",
+  "userId": "vivla-user-id"
+}
+```
+
+**Respuestas posibles:**
+
+<Tabs>
+  <Tab title="Acceso completo">
+    ```json
+    {
+      "hasAccess": true,
+      "streamUserId": "stream-user-id",
+      "streamToken": "eyJ...",
+      "expiresAt": "2025-01-15T12:00:00Z",
+      "user": {
+        "id": "uuid",
+        "firstName": "Juan",
+        "lastName": "Pérez",
+        "email": "juan@example.com"
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Sin acceso">
+    ```json
+    {
+      "hasAccess": false,
+      "reason": "NOT_ENABLED"
+    }
+    ```
+  </Tab>
+  <Tab title="Usuario no encontrado">
+    ```json
+    {
+      "hasAccess": false,
+      "reason": "NOT_FOUND"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Refresh token
+
+```
+POST /api/chat/mobile/auth/refresh
+```
+
+Renueva el token de Stream Chat. Debe llamarse antes de que expire (1 hora).
+
+**Request:**
+```json
+{
+  "authToken": "token-del-backend-principal",
+  "userId": "vivla-user-id"
+}
+```
+
+**Response:**
+```json
+{
+  "streamToken": "eyJ...",
+  "expiresAt": "2025-01-15T13:00:00Z",
+  "streamUserId": "stream-user-id"
+}
+```
+
+### Actualizar perfil
+
+```
+PATCH /api/chat/mobile/profile
+```
+
+Actualiza el perfil del usuario y sincroniza los cambios con Stream Chat (nombre y avatar).
+
+**Request:**
+```json
+{
+  "authToken": "token-del-backend-principal",
+  "userId": "vivla-user-id",
+  "firstName": "Juan",
+  "lastName": "Pérez"
+}
+```
+
+### Crear invitación
+
+```
+POST /api/chat/mobile/invitations
+```
+
+Crea una invitación a un canal de chat con un deep link para compartir.
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "streamChannelId": "channel-id",
+  "status": "pending",
+  "expiresAt": "2025-01-20T00:00:00Z",
+  "deepLink": "vivla://chat/invitation/token-uuid"
+}
+```
+
+### Obtener información de invitación
+
+```
+GET /api/chat/mobile/invitations/:token
+```
+
+Endpoint público (sin autenticación). Permite previsualizar un canal antes de aceptar la invitación.
+
+**Response:**
+```json
+{
+  "channel": {
+    "id": "uuid",
+    "name": "Canal de soporte",
+    "type": "support"
+  },
+  "inviter": {
+    "name": "Agente Vivla",
+    "avatar": "https://..."
+  }
+}
+```
+
+## Consideraciones técnicas
+
+- Los tokens de Stream Chat expiran en **1 hora**. La app debe implementar auto-refresh.
+- El `MobileAuthGuard` valida `authToken` y `userId` en el body de cada request.
+- Las actualizaciones de perfil se sincronizan bidireccionalmente con Stream Chat.
+- Los deep links usan el formato `vivla://chat/invitation/{token}` para abrir invitaciones directamente en la app.
+- El endpoint de invitaciones (`GET /invitations/:token`) es público para permitir previsualización sin autenticación.

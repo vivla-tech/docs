@@ -1,0 +1,122 @@
+---
+title: 'Analytics'
+description: 'Integración con PostHog para product analytics'
+---
+
+## Visión general
+
+La app utiliza **PostHog React Native SDK (v4.35.1)** para product analytics, conectándose a la instancia EU (`eu.i.posthog.com`).
+
+<Note>
+  Session replay y autocapture están **deshabilitados**. Todos los eventos se capturan de forma
+  explícita mediante la API pública.
+</Note>
+
+## Arquitectura
+
+<CardGroup cols={2}>
+  <Card title="Cliente singleton" icon="plug">
+    Definido en `src/core/analytics/client.posthog.ts`. Inicializa y exporta la instancia única de
+    PostHog.
+  </Card>
+  <Card title="API pública" icon="code">
+    Expuesta desde `src/core/analytics/index.ts`. Todas las interacciones con analytics pasan por
+    esta capa.
+  </Card>
+  <Card title="Eventos" icon="list">
+    Catálogo de eventos definido en `src/core/analytics/events.ts`.
+  </Card>
+  <Card title="Configuración" icon="gear">
+    Parámetros de conexión en `src/core/config/posthog.ts`.
+  </Card>
+</CardGroup>
+
+## API pública
+
+La API se exporta desde `src/core/analytics/index.ts` y expone los siguientes métodos:
+
+| Método                         | Descripción                                  |
+| ------------------------------ | -------------------------------------------- |
+| `capture(event, properties)`   | Captura un evento con propiedades opcionales |
+| `screen(name, properties)`     | Registra una vista de pantalla               |
+| `identify(userId, properties)` | Identifica al usuario autenticado            |
+| `reset()`                      | Resetea la sesión (al hacer logout)          |
+| `set(properties)`              | Establece propiedades del perfil del usuario |
+
+<Tabs>
+  <Tab title="Capturar evento">
+    ```typescript
+    import { capture } from '@/core/analytics';
+
+    capture('booking_completed', {
+      stayId: '123',
+      amount: 500,
+    });
+    ```
+
+  </Tab>
+  <Tab title="Identificar usuario">
+    ```typescript
+    import { identify, set } from '@/core/analytics';
+
+    identify(user.id, {
+      email: user.email,
+    });
+
+    set({ plan: 'premium' });
+    ```
+
+  </Tab>
+  <Tab title="Registrar pantalla">
+    ```typescript
+    import { screen } from '@/core/analytics';
+
+    screen('StayDetail', {
+      stayId: '123',
+    });
+    ```
+
+  </Tab>
+</Tabs>
+
+## Integración en la app
+
+### Provider
+
+`PostHogProvider` envuelve toda la aplicación desde el root layout, garantizando que el SDK esté disponible en todo el árbol de componentes.
+
+### Sincronización de perfil
+
+El hook `useAnalyticsProfileSync` se encarga de sincronizar las propiedades del perfil del usuario con PostHog automáticamente cuando cambian los datos del usuario.
+
+### Feature flags
+
+PostHog gestiona los feature flags de la aplicación. Estos se evalúan del lado del cliente y permiten activar o desactivar funcionalidades de forma remota.
+
+<CodeGroup>
+  ```typescript Ejemplo de feature flag // Feature flag disponible via PostHog const isEnabled =
+  posthog.isFeatureEnabled('financialReport2025'); ```
+</CodeGroup>
+
+## Configuración del SDK
+
+| Parámetro      | Valor                          |
+| -------------- | ------------------------------ |
+| Instancia      | `eu.i.posthog.com` (EU)        |
+| Session replay | Deshabilitado                  |
+| Autocapture    | Deshabilitado                  |
+| SDK            | `posthog-react-native` v4.35.1 |
+
+<Warning>
+  No incluyas la API key de PostHog en el código fuente directamente. La configuración se gestiona a
+  través del archivo de configuración en `src/core/config/posthog.ts`.
+</Warning>
+
+## Archivos clave
+
+| Archivo                                | Responsabilidad              |
+| -------------------------------------- | ---------------------------- |
+| `src/core/analytics/client.posthog.ts` | Cliente singleton de PostHog |
+| `src/core/analytics/index.ts`          | API pública de analytics     |
+| `src/core/analytics/events.ts`         | Definición de eventos        |
+| `src/core/config/posthog.ts`           | Configuración de conexión    |

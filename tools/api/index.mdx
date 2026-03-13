@@ -1,0 +1,77 @@
+---
+title: "Tools API"
+description: "Arquitectura y configuración general del backend NestJS"
+---
+
+# Tools API
+
+El backend de Vivla Tools es una API REST construida con **NestJS 10** que sirve a todos los frontales (frontend, community-frontend) y a la app mobile (vivla-mobile).
+
+## Configuración general
+
+| Parámetro | Valor |
+|-----------|-------|
+| Framework | NestJS 10 (Express) |
+| Prefijo API | `/api` |
+| Puerto | 3001 (o `PORT` env var) |
+| Documentación | Swagger UI en `/api/docs` (solo en desarrollo) |
+| Rate limiting | 100 requests por 60 segundos |
+| Seguridad | Helmet (XSS, CSP, headers) |
+| Validación | class-validator con transformación automática |
+| CORS | Frontend + community-frontend origins configurados |
+
+## Arquitectura modular
+
+La API se organiza en módulos NestJS independientes:
+
+```
+src/
+├── auth/              # Autenticación y autorización
+├── chat/              # Chat y soporte (15 sub-módulos)
+├── community/         # Gestión de propiedades (15 sub-módulos)
+├── notifications/     # Push notifications
+├── inbox/             # Bandeja de entrada
+├── teams/             # Gestión de equipos
+├── users/             # Gestión de usuarios
+├── permissions/       # Control de acceso
+├── admin/             # Operaciones administrativas
+├── email/             # Servicio de email (Resend)
+├── database/          # Conexión Supabase y migraciones
+├── health/            # Health checks
+├── shared/            # Servicios compartidos (Cloudinary)
+├── common/            # Filtros, interceptores, utilidades
+├── config/            # Configuración de la aplicación
+└── cli/               # Herramientas CLI (importación Zendesk)
+```
+
+## Servicios externos
+
+| Servicio | Uso |
+|----------|-----|
+| **Supabase** | Base de datos PostgreSQL con Row Level Security |
+| **Auth0** | Autenticación JWT/JWKS |
+| **Stream Chat** | Mensajería en tiempo real |
+| **Cloudinary** | Almacenamiento y transformación de imágenes |
+| **Resend** | Envío de emails transaccionales |
+| **Firebase Admin SDK** | Push notifications (iOS/Android) |
+| **Expo Server SDK** | Push notifications (Expo apps) |
+| **Web Push** | Notificaciones web (VAPID) |
+
+## Manejo de errores
+
+La API incluye un filtro global de excepciones que estandariza las respuestas de error. Las respuestas de error siguen el formato:
+
+```json
+{
+  "statusCode": 400,
+  "message": "Descripción del error",
+  "error": "Bad Request"
+}
+```
+
+## Health checks
+
+| Endpoint | Auth | Descripción |
+|----------|------|-------------|
+| `GET /api/health` | Público | Health check básico |
+| `GET /api/health/detailed` | Público | Health check detallado con estado de dependencias |

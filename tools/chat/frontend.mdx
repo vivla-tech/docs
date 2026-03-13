@@ -1,0 +1,114 @@
+---
+title: "Panel de soporte"
+description: "Interfaz del panel de soporte de chat para agentes y administradores"
+---
+
+# Panel de soporte
+
+El panel de soporte es la interfaz principal del módulo de Chat en el frontend (`/app/chat/`). Permite a los agentes gestionar conversaciones, crear tickets y administrar la configuración del chat.
+
+## Vistas principales
+
+### Lista de canales
+
+Ruta: `/app/chat/`
+
+Panel lateral redimensionable (320px por defecto, rango 240-600px) que muestra la lista de canales con:
+
+- **Scroll virtualizado** con paginación infinita (50 canales por página)
+- **Filtros**: por propiedad, agente, tipo de canal
+- **Búsqueda** de mensajes a través de canales
+- **Conteo de no leídos** en tiempo real por canal
+- **Pestañas** para diferentes vistas de canales
+- **Asistente de creación** de canales (wizard multi-paso)
+
+### Conversación
+
+Ruta: `/app/chat/$channelId`
+
+Vista principal de la conversación con:
+
+- **Lista de mensajes** con scroll virtualizado
+- **Búsqueda en conversación** con navegación entre resultados
+- **Sidebar de respuestas rápidas** (quick replies)
+- **Modo de selección de mensajes** para crear tickets o agregar a tickets existentes
+- **Sidebar lateral** con metadata del canal (propiedad, booking, información del huésped)
+- **Seguimiento de estado de lectura**
+- **Salto a mensaje** (jump-to-message)
+
+### Tickets
+
+Ruta: `/app/chat/tickets/`
+
+Panel de administración de tickets con:
+
+- Filtros por estado, prioridad, propiedad y agente
+- Paginación (100 tickets por página)
+- Búsqueda rápida por ID o título
+- Badges de prioridad y estado
+- Vista detallada por ticket (`/app/chat/tickets/$ticketId`) con comentarios
+
+## Configuración (Settings)
+
+Todas las rutas bajo `/app/chat/settings/`:
+
+<Tabs>
+  <Tab title="Agentes">
+    **`/app/chat/settings/agents`**
+
+    Gestión de agentes de soporte: crear, editar, asignar a canales.
+  </Tab>
+  <Tab title="Canales">
+    **`/app/chat/settings/channels`**
+
+    Tres pestañas:
+    - **Todos los canales**: búsqueda, filtros (tipo/agente/propiedad/ubicación), operaciones batch (cambiar agente activo/default, agregar moderadores, eliminar)
+    - **Bookings**: gestión de reservas con vista de calendario
+    - **Tipos**: (solo admin) crear y editar tipos de canal
+  </Tab>
+  <Tab title="Propiedades">
+    **`/app/chat/settings/properties`**
+
+    Mapeo de propiedades a canales de chat.
+  </Tab>
+  <Tab title="Usuarios">
+    **`/app/chat/settings/users/`**
+
+    Lista de usuarios del chat con vista detallada por usuario (`/app/chat/settings/users/$userId`).
+  </Tab>
+  <Tab title="Turnos">
+    **`/app/chat/settings/shifts`**
+
+    Programación de turnos de agentes de soporte.
+  </Tab>
+  <Tab title="Sincronización">
+    **`/app/chat/settings/sync`** (solo admin)
+
+    Visualización de jobs de sincronización, logs y trigger manual.
+  </Tab>
+</Tabs>
+
+## News (Notificaciones embebidas)
+
+Sección de broadcast y notificaciones integrada en el módulo de chat, bajo `/app/chat/news/`:
+
+| Ruta | Descripción |
+|------|-------------|
+| `/app/chat/news/` | Hub principal de noticias |
+| `/app/chat/news/dashboard` | Dashboard de analytics |
+| `/app/chat/news/templates` | Templates de mensajes |
+| `/app/chat/news/send` | Envío manual de notificaciones |
+| `/app/chat/news/history` | Historial de mensajes enviados |
+| `/app/chat/news/deep-links` | Configuración de deep links |
+| `/app/chat/news/automations` | Reglas de automatización |
+| `/app/chat/news/settings` | Configuración general de news |
+
+## Analytics
+
+Ruta: `/app/chat/analytics`
+
+Métricas de uso del chat: actividad por canal, por usuario y estadísticas generales.
+
+<Note>
+  El acceso a las diferentes secciones está controlado por el sistema de permisos. Los agentes con rol `editor` pueden gestionar canales y tickets, mientras que las operaciones de configuración avanzada (tipos de canal, sync) requieren rol `admin`.
+</Note>

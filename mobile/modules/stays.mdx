@@ -1,0 +1,177 @@
+---
+title: 'Stays'
+description: 'Módulo de gestión de estadías'
+---
+
+## Descripción
+
+El módulo **Stays** gestiona las estadías del usuario organizadas por estado. Incluye filtrado, visualización por categoría, modales de acciones (cancelar, modificar, reseñar) y auto-prompt de reseñas al completar una estadía.
+
+- **Ubicación:** `src/modules/stays/`
+
+<Note>
+  Los usuarios visitantes ven `StayGuestScreen` en lugar de los Material Top Tabs. Los propietarios
+  (coowners) ven las 4 pestañas deslizables: activas, pasadas, canceladas y pendientes.
+</Note>
+
+## Screens
+
+| Screen                 | Ruta                         | Descripción                                   |
+| ---------------------- | ---------------------------- | --------------------------------------------- |
+| `ActiveStaysScreen`    | `/(tabs)/04_stays/active`    | Estadías activas o en curso                   |
+| `PastStaysScreen`      | `/(tabs)/04_stays/past`      | Estadías pasadas                              |
+| `CancelledStaysScreen` | `/(tabs)/04_stays/cancelled` | Estadías canceladas                           |
+| `PendingStaysScreen`   | `/(tabs)/04_stays/pending`   | Estadías pendientes de aprobación             |
+| `StayGuestScreen`      | `/(tabs)/04_stays`           | Vista para usuarios visitantes (sin pestañas) |
+
+## API Endpoints
+
+| Método | Path                           | Descripción                    |
+| ------ | ------------------------------ | ------------------------------ |
+| `GET`  | `/stays/mine`                  | Todas las estadías del usuario |
+| `GET`  | `/stays/mine?status=active`    | Estadías activas               |
+| `GET`  | `/stays/mine?status=past`      | Estadías pasadas               |
+| `GET`  | `/stays/mine?status=cancelled` | Estadías canceladas            |
+
+<Note>
+  La API retorna objetos `Booking` que son transformados internamente por `staysApi` para normalizar
+  el campo `property` (el backend puede devolver `home` en lugar de `property` en ciertos casos).
+</Note>
+
+## Hooks
+
+| Hook                  | Descripción                                                                 |
+| --------------------- | --------------------------------------------------------------------------- |
+| `useStays()`          | Fetch y categorización de estadías por estado (active, past, cancelled)     |
+| `useFilteredStays()`  | Filtrado de estadías por criterios múltiples (propiedad, temporada, fechas) |
+| `useAutoShowReview()` | Muestra automáticamente el modal de reseña al completar una estadía         |
+
+## Services
+
+| Servicio            | Descripción                                            |
+| ------------------- | ------------------------------------------------------ |
+| `stayFilterService` | Lógica de filtrado de estadías por criterios múltiples |
+
+## Tipos principales
+
+<CodeGroup>
+```typescript Stay
+type Stay = {
+  id: string;
+  startDate: string;
+  endDate: string;
+  season: {
+    slug: string;
+    allowConsecutive: boolean;
+  };
+  allowLastHour?: boolean;
+  available: boolean;
+  keys?: number;
+  instantKeys?: boolean;
+  booking?: {
+    id: string;
+    type: 'book' | 'exchange' | 'rent';
+  };
+};
+```
+
+```typescript AvailableStays
+// Conteo de estadías disponibles por categoría de temporada
+type AvailableStays = {
+  low: number;
+  mid: number;
+  high: number;
+  peak: number;
+};
+```
+
+```typescript AvailableExchangeStay
+type AvailableExchangeStay = {
+  id: string;
+  remainingStays: number;
+};
+```
+
+</CodeGroup>
+
+### Temporadas
+
+Las estadías se clasifican por temporada: **peak**, **high**, **mid** y **low** (con variantes ski/beach según la ubicación de la propiedad). Cada temporada tiene colores y traducciones asociadas definidas en las constantes `SEASONS`.
+
+| Temporada | Descripción                    |
+| --------- | ------------------------------ |
+| `peak`    | Temporada alta (mayor demanda) |
+| `high`    | Temporada alta intermedia      |
+| `mid`     | Temporada media                |
+| `low`     | Temporada baja                 |
+
+## Store
+
+El módulo utiliza `useReviewQueueStore` en **Zustand** para gestionar la cola de reseñas pendientes:
+
+| Estado                    | Tipo                | Descripción                                                 |
+| ------------------------- | ------------------- | ----------------------------------------------------------- |
+| `queue`                   | `ReviewQueueItem[]` | Cola de reseñas pendientes ordenadas por fecha de check-out |
+| `currentIndex`            | `number`            | Índice de la reseña actual en la cola                       |
+| `hasProcessedThisSession` | `boolean`           | Indica si ya se procesó la cola en la sesión actual         |
+
+<Tabs>
+  <Tab title="Acciones del store">
+    - `populateQueue(stays, getCheckOut)` — Llena la cola con estadías que requieren reseña. Solo se
+    ejecuta una vez por sesión. - `showNextReview()` — Avanza al siguiente item de la cola. -
+    `dismissCurrentReview()` — Descarta la reseña actual y avanza a la siguiente. -
+    `completeCurrentReview()` — Marca como completada y avanza. - `reset()` — Reinicia la cola y
+    permite reprocesar en la siguiente sesión.
+  </Tab>
+  <Tab title="ReviewQueueItem">
+    Cada item de la cola contiene: - `bookingId` — ID de la reserva asociada. - `propertyName` —
+    Nombre de la propiedad para mostrar en el modal. - `checkOut` — Fecha de check-out para ordenar
+    la cola cronológicamente.
+  </Tab>
+</Tabs>
+
+## Componentes destacados
+
+<CardGroup cols={2}>
+  <Card title="StayCard" icon="calendar">
+    Tarjeta de estadía con información de fechas, propiedad y estado. Incluye indicador visual de
+    temporada.
+  </Card>
+  <Card title="StayList" icon="list">
+    Listado de estadías con soporte para skeletons de carga y estado vacío.
+  </Card>
+  <Card title="StayDetailsView" icon="circle-info">
+    Vista de detalle de una estadía con información completa y panel de acciones.
+  </Card>
+  <Card title="SeasonsDisplay" icon="sun">
+    Visualización de temporadas con colores y conteo de estadías disponibles por categoría.
+  </Card>
+  <Card title="StayActionsPanel" icon="ellipsis">
+    Panel de acciones contextuales: cancelar, modificar y gestionar invitados.
+  </Card>
+  <Card title="AutoShowReviewModal" icon="star">
+    Modal que se muestra automáticamente al completar una estadía para solicitar una reseña. Utiliza
+    `useReviewQueueStore` para gestionar múltiples reseñas pendientes.
+  </Card>
+</CardGroup>
+
+### Modales
+
+| Modal                 | Descripción                                                                    |
+| --------------------- | ------------------------------------------------------------------------------ |
+| `AutoShowReviewModal` | Prompt automático de reseña post-estadía (integrado con `useReviewQueueStore`) |
+| `StayCancelModal`     | Confirmación de cancelación de estadía                                         |
+| `StayModifyModal`     | Modificación de fechas de estadía                                              |
+| `StayReviewModal`     | Formulario manual de reseña de estadía                                         |
+
+### Formularios
+
+| Formulario       | Descripción                                                                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `StayReviewForm` | Formulario de reseña con calificación (rating) y comentario opcional. Envía datos tipo `StayReviewData` al endpoint de reseña del módulo Property |
+
+<Warning>
+  Las reseñas de estadía se envían a través de `propertyApi.postStayReview()` del módulo Property,
+  no directamente desde el módulo Stays. El módulo Stays gestiona la UX y la cola de reseñas,
+  mientras que Property maneja la persistencia.
+</Warning>

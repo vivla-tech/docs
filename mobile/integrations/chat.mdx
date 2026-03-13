@@ -1,0 +1,99 @@
+---
+title: 'Chat'
+description: 'Integración con Stream Chat para mensajería en tiempo real'
+---
+
+## Visión general
+
+La funcionalidad de chat en tiempo real se implementa con **Stream Chat Expo SDK (v8.8.1)**. El módulo completo se encuentra en `src/modules/chat/`.
+
+## Estructura del módulo
+
+<CardGroup cols={2}>
+  <Card title="Store" icon="database">
+    `store/chatStore.ts` — Zustand store que gestiona el estado del chat.
+  </Card>
+  <Card title="Auth Service" icon="key">
+    `services/authService.ts` — Token provider para autenticación con Stream.
+  </Card>
+  <Card title="Contexts" icon="layer-group">
+    `contexts/` — React contexts para la gestión de canales.
+  </Card>
+  <Card title="Rutas" icon="route">
+    Rutas de chat bajo `/chat/` con file-based routing de Expo Router.
+  </Card>
+</CardGroup>
+
+## Store (Zustand)
+
+El store en `store/chatStore.ts` gestiona todo el estado de la integración con Stream Chat:
+
+| Propiedad        | Descripción                                 |
+| ---------------- | ------------------------------------------- |
+| `StreamClient`   | Instancia del cliente de Stream Chat        |
+| `isConnected`    | Estado de conexión al servicio              |
+| `activeChannel`  | Canal actualmente activo                    |
+| `unreadCount`    | Conteo de mensajes no leídos                |
+| Token management | Gestión de tokens con control de expiración |
+
+<Note>
+  El store utiliza middlewares de **devtools** y **persist** de Zustand para facilitar el debugging
+  y mantener el estado entre sesiones.
+</Note>
+
+## Autenticación
+
+El servicio `services/authService.ts` actúa como token provider para Stream Chat. Se encarga de obtener y renovar los tokens de autenticación necesarios para conectar al usuario con el servicio de mensajería.
+
+<Warning>
+  Los tokens de Stream Chat tienen expiración. El store gestiona automáticamente la renovación antes
+  de que expiren.
+</Warning>
+
+## Rutas de chat
+
+<Tabs>
+  <Tab title="Vista principal">
+    ``` /chat/[channelType]/[channelId]/ ``` Vista principal de conversación dentro de un canal.
+    Recibe el tipo y el ID del canal como parámetros dinámicos.
+  </Tab>
+  <Tab title="Info del canal">
+    ``` /chat/[channelType]/[channelId]/info ``` Pantalla de información del canal: miembros,
+    configuración y detalles.
+  </Tab>
+  <Tab title="Galería de medios">
+    ``` /chat/[channelType]/[channelId]/media ``` Galería con todos los archivos multimedia
+    compartidos en el canal.
+  </Tab>
+  <Tab title="Invitación">
+    ``` /chat/invite/ ``` Modal de invitación a un canal. Se presenta con animación
+    `slide_from_bottom`.
+  </Tab>
+</Tabs>
+
+## Integración en la app
+
+### OverlayProvider
+
+El `OverlayProvider` de Stream Chat envuelve toda la aplicación desde el root layout. Este componente es necesario para que funcionen los overlays del SDK (previews de imágenes, menús contextuales, etc.).
+
+### Badge de mensajes no leídos
+
+El tab **Inbox** en la navegación principal muestra un badge con el conteo de mensajes no leídos.
+
+```typescript
+// Hook que agrega el conteo total de mensajes no leídos
+const { unreadCount } = useCombinedUnreadCount();
+```
+
+### Conteo combinado
+
+El hook `useCombinedUnreadCount` agrega el conteo total de mensajes no leídos de todos los canales del usuario, proporcionando un número unificado para mostrar en la UI.
+
+## Archivos clave
+
+| Archivo                                    | Responsabilidad                  |
+| ------------------------------------------ | -------------------------------- |
+| `src/modules/chat/store/chatStore.ts`      | Estado global del chat (Zustand) |
+| `src/modules/chat/services/authService.ts` | Autenticación con Stream         |
+| `src/modules/chat/contexts/`               | Contexts de gestión de canales   |

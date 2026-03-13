@@ -1,0 +1,193 @@
+---
+title: 'Constantes'
+description: 'Constantes globales y configuración compartida'
+---
+
+# Constantes
+
+Ubicación: `src/shared/constants/`
+
+Todas las constantes globales de la aplicación están centralizadas en este directorio. Cada archivo agrupa constantes por dominio.
+
+## API Endpoints
+
+**Archivo:** `api.ts`
+
+Patrones de URL para todos los endpoints del backend, organizados por dominio.
+
+| Grupo              | Endpoints                          | Ejemplos                                                                         |
+| ------------------ | ---------------------------------- | -------------------------------------------------------------------------------- |
+| Auth               | Login, registro, refresh, logout   | `/auth/login`, `/auth/register`, `/auth/refresh-token`, `/auth/logout`           |
+| Users              | Perfil, actualización, eliminación | `/users/me`, `/users/{id}`                                                       |
+| Stays              | Listado, detalle, estados          | `/stays`, `/stays/{id}`, `/stays/{id}/review`                                    |
+| Bookings           | CRUD, aprobación, cancelación      | `/bookings`, `/bookings/{id}`, `/bookings/{id}/approve`, `/bookings/{id}/cancel` |
+| Properties         | Listado, detalle, fotos            | `/properties`, `/properties/{id}`, `/properties/{id}/photos`                     |
+| Invitations        | Crear, aceptar, rechazar           | `/invitations`, `/invitations/{code}/accept`                                     |
+| Experiences        | Listado, detalle                   | `/experiences`, `/experiences/{id}`                                              |
+| Upload             | Signed URL                         | `/upload/signed-url`                                                             |
+| Notifications      | Listado, marcar leída              | `/notifications`, `/notifications/{id}/read`                                     |
+| Push Notifications | Registro de token                  | `/push-notifications/register`                                                   |
+| Chat               | Configuración                      | `/chat/token`                                                                    |
+
+<Note>
+  Los placeholders `{id}` y `{code}` se reemplazan en runtime. Usa las funciones helper del API
+  client en lugar de construir URLs manualmente.
+</Note>
+
+---
+
+## Booking
+
+**Archivo:** `booking.ts`
+
+### BookingTypeValues
+
+| Valor      | Descripción                    |
+| ---------- | ------------------------------ |
+| `book`     | Reserva estándar               |
+| `rent`     | Alquiler                       |
+| `exchange` | Intercambio entre propietarios |
+
+### BookingStatusValues
+
+| Valor       | Descripción               |
+| ----------- | ------------------------- |
+| `active`    | Reserva activa / en curso |
+| `past`      | Reserva pasada            |
+| `cancelled` | Reserva cancelada         |
+
+### BookingApprovalValues
+
+| Valor      | Descripción                  |
+| ---------- | ---------------------------- |
+| `approved` | Aprobada por el propietario  |
+| `rejected` | Rechazada por el propietario |
+| `pending`  | Pendiente de aprobación      |
+
+---
+
+## Seasons
+
+**Archivo:** `seasons.ts`
+
+Configuración de temporadas con variantes por tipo de propiedad (ski/beach), colores de UI y traducciones.
+
+| Temporada | Clave       | Color        | Descripción                                   |
+| --------- | ----------- | ------------ | --------------------------------------------- |
+| Peak      | `peak`      | Rojo intenso | Temporada alta máxima (Navidad, Semana Santa) |
+| High      | `high`      | Naranja      | Temporada alta estándar                       |
+| Mid       | `mid`       | Amarillo     | Temporada media                               |
+| Low       | `low`       | Verde        | Temporada baja                                |
+| Last Hour | `last-hour` | Azul         | Ofertas de última hora                        |
+
+<Tabs>
+  <Tab title="Variante Ski">
+    Las temporadas se ajustan al calendario de estaciones de esquí. Peak coincide con vacaciones de
+    invierno y temporada alta de nieve.
+  </Tab>
+  <Tab title="Variante Beach">
+    Las temporadas se ajustan al calendario de playa. Peak coincide con meses de verano.
+  </Tab>
+</Tabs>
+
+### normalizePropertyType
+
+Función auxiliar que normaliza el tipo de propiedad para determinar qué variante de temporada aplicar (ski o beach).
+
+---
+
+## Filter Cities
+
+**Archivo:** `filters.ts`
+
+Lista de 13 ciudades españolas disponibles como filtros de búsqueda:
+
+| Ciudad        |
+| ------------- |
+| Madrid        |
+| Barcelona     |
+| Valencia      |
+| Sevilla       |
+| Málaga        |
+| Bilbao        |
+| San Sebastián |
+| Mallorca      |
+| Ibiza         |
+| Tenerife      |
+| Marbella      |
+| Granada       |
+| Cádiz         |
+
+### generateDateOptions
+
+Función que genera opciones de fecha para los filtros. Crea **24 meses** de opciones a partir de la fecha actual, con formato localizado según el idioma del usuario.
+
+---
+
+## Fonts
+
+**Archivo:** `fonts.ts`
+
+| Fuente         | Clave            | Uso                                   |
+| -------------- | ---------------- | ------------------------------------- |
+| Teodor Light   | `Teodor-Light`   | Títulos grandes, headings principales |
+| Teodor Regular | `Teodor-Regular` | Títulos secundarios                   |
+| Sneak Regular  | `Sneak-Regular`  | Texto body, párrafos                  |
+| Sneak Medium   | `Sneak-Medium`   | Labels, botones, texto enfatizado     |
+
+<Note>
+  Las fuentes se cargan durante la inicialización de la app en `useAppInitialization`. No es
+  necesario cargarlas manualmente.
+</Note>
+
+---
+
+## Navigation
+
+**Archivo:** `navigation.ts`
+
+Configuración centralizada de navegación bajo `NAVIGATION_CONFIG`:
+
+| Sección         | Contenido                                                   |
+| --------------- | ----------------------------------------------------------- |
+| `PUBLIC_GROUPS` | Grupos de rutas accesibles sin autenticación                |
+| `ROUTES`        | Mapeo de nombres de ruta a paths de Expo Router             |
+| `DELAYS`        | Tiempos de espera entre transiciones de navegación          |
+| `TIMEOUTS`      | Timeout de inicialización: **120 segundos**                 |
+| `ANIMATION`     | Especificaciones de animación para transiciones de pantalla |
+
+---
+
+## Query Client
+
+**Archivo:** `queryClient.ts`
+
+Configuración de React Query bajo `QUERY_CLIENT_CONFIG`:
+
+| Parámetro              | Valor      | Descripción                                |
+| ---------------------- | ---------- | ------------------------------------------ |
+| `staleTime`            | 5 minutos  | Tiempo antes de considerar datos obsoletos |
+| `gcTime`               | 30 minutos | Tiempo antes de recolectar datos del cache |
+| `retry`                | 1          | Número de reintentos en caso de error      |
+| `refetchOnWindowFocus` | `false`    | No refresca al volver a la app             |
+
+<Warning>
+  Modificar estos valores afecta el rendimiento y uso de datos de toda la app. Consulta con el
+  equipo antes de cambiarlos.
+</Warning>
+
+---
+
+## Onboarding
+
+**Archivo:** `onboarding.ts`
+
+Configuración de las pantallas de onboarding que se muestran al usuario en su primera sesión.
+
+| Slide   | Contenido                                      |
+| ------- | ---------------------------------------------- |
+| Slide 1 | Introducción a la plataforma con imagen hero   |
+| Slide 2 | Explicación del sistema de intercambio/reserva |
+| Slide 3 | Call-to-action para comenzar                   |
+
+Cada slide incluye una imagen, título y descripción que se localizan según el idioma del usuario.

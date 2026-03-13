@@ -1,0 +1,251 @@
+---
+title: 'Navegacion'
+description: 'Estructura de rutas y navegacion con Expo Router'
+---
+
+# Navegacion
+
+La app Vivla utiliza **Expo Router 5** con file-based routing y typed routes. Toda la estructura de navegacion se define a traves de la jerarquia de archivos en el directorio `app/`.
+
+## Root Layout
+
+El punto de entrada (`app/_layout.tsx`) configura un Stack Navigator envuelto en multiples providers, cada uno aportando una funcionalidad clave:
+
+```
+GestureHandlerRootView
+  └── PostHogProvider          (analytics)
+        └── QueryClientProvider  (TanStack React Query)
+              └── SafeAreaProvider
+                    └── OverlayProvider    (Stream Chat)
+                          └── ActionSheetProvider
+                                └── BottomSheetProvider
+                                      └── Stack Navigator
+                                      └── ProgressToastManager
+```
+
+<Note>
+  El componente raiz esta envuelto con `Sentry.wrap()` para capturar errores automaticamente. Se
+  llama a `SplashScreen.preventAutoHideAsync()` al inicio y se oculta el splash screen cuando
+  `appIsReady` es `true`.
+</Note>
+
+## Screens del Root Stack
+
+| Screen         | Animacion      | Descripcion                                 |
+| -------------- | -------------- | ------------------------------------------- |
+| `index`        | -              | Pantalla inicial (redirecciona)             |
+| `loading`      | `LOADING_FADE` | Pantalla de carga durante inicializacion    |
+| `error`        | `FADE`         | Pantalla de error (timeout o fallo critico) |
+| `(onboarding)` | `SLIDE_RIGHT`  | Flujo de onboarding                         |
+| `(auth)`       | `FADE`         | Pantallas de autenticacion                  |
+| `(tabs)`       | `FADE`         | Tab Navigator principal                     |
+| `chat`         | `SLIDE_RIGHT`  | Stack de mensajeria                         |
+
+### Animation Presets
+
+Los presets de animacion se definen en `src/shared/constants/navigation.ts`:
+
+<CodeGroup>
+```typescript FADE
+{
+  animation: 'fade',
+  duration: 300,
+}
+```
+
+```typescript SLIDE_RIGHT
+{
+  animation: 'slide_from_right',
+  duration: 300,
+}
+```
+
+```typescript LOADING_FADE
+{
+  animation: 'fade',
+  duration: 250,
+}
+```
+
+</CodeGroup>
+
+## Tab Navigator
+
+El Tab Navigator (`app/(tabs)/_layout.tsx`) define 5 tabs con iconos SVG custom:
+
+<CardGroup cols={3}>
+  <Card title="01_home" icon="house">
+    Stack Navigator: index, gallery, amenities
+  </Card>
+  <Card title="02_book" icon="calendar">
+    Material Top Tabs: book-stays, exchange-stays, rent-stays
+  </Card>
+  <Card title="03_inbox" icon="inbox">
+    Stack Navigator: index, archived, search (badge de no leidos)
+  </Card>
+  <Card title="04_stays" icon="bed">
+    Material Top Tabs: active, past, cancelled, pending
+  </Card>
+  <Card title="05_profile" icon="user">
+    Stack Navigator: index
+  </Card>
+</CardGroup>
+
+### Property Selection Gate
+
+<Warning>
+  Los tabs distintos de `01_home` estan bloqueados si el usuario no tiene una propiedad
+  seleccionada. El `tabPress` event se intercepta y se llama a `e.preventDefault()` cuando
+  `isPropertySelected` es `false`.
+</Warning>
+
+### Navegacion basada en rol
+
+<Tabs>
+  <Tab title="Property Owners">
+    - **02_book**: Material Top Tabs con book-stays, exchange-stays, rent-stays y un indicador de
+    llaves disponibles (`HeaderKeysIndicator`) - **04_stays**: Material Top Tabs con active, past,
+    cancelled, pending y `BookingToastProvider`
+  </Tab>
+  <Tab title="Visitors / Guests">
+    - **02_book**: Muestra unicamente `RentScreen` (sin tabs). Se activa para visitors, usuarios sin
+    propiedades, o usuarios con rol `GUEST` en su propiedad seleccionada - **04_stays**: Muestra
+    unicamente `StayGuestScreen` envuelto en `BookingToastProvider`
+  </Tab>
+</Tabs>
+
+## Modal Stacks
+
+### Chat (`app/chat/`)
+
+Stack con animacion `slide_from_right`:
+
+| Ruta                              | Descripcion                                                               |
+| --------------------------------- | ------------------------------------------------------------------------- |
+| `[channelType]/[channelId]/index` | Pantalla de conversacion                                                  |
+| `[channelType]/[channelId]/info`  | Informacion del canal                                                     |
+| `invite`                          | Modal de invitacion (animacion `slide_from_bottom`, presentacion `modal`) |
+
+### Booking (`app/booking/`)
+
+Usa `Slot` envuelto en `BookingToastProvider`:
+
+| Ruta     | Descripcion         |
+| -------- | ------------------- |
+| `[id]`   | Detalle de reserva  |
+| `new`    | Nueva reserva       |
+| `review` | Revision de reserva |
+| `wallet` | Wallet de usuario   |
+
+### Property (`app/property/`)
+
+| Ruta             | Descripcion             |
+| ---------------- | ----------------------- |
+| `[id]`           | Detalle de propiedad    |
+| `arrival-review` | Revision de llegada     |
+| `rating-report`  | Reporte de calificacion |
+
+### Invite (`app/invite/`)
+
+| Ruta                | Descripcion               |
+| ------------------- | ------------------------- |
+| `[token]`           | Invitacion por token      |
+| `owner/[bookingId]` | Invitacion de propietario |
+| `onboarding`        | Onboarding de invitacion  |
+
+### Issues (`app/issues/`)
+
+Stack con `BackButton` fijo, que contiene Material Top Tabs:
+
+| Tab       | Descripcion            |
+| --------- | ---------------------- |
+| `active`  | Incidencias activas    |
+| `pending` | Incidencias pendientes |
+| `upgrade` | Mejoras solicitadas    |
+| `closed`  | Incidencias cerradas   |
+
+## Arbol de Rutas Completo
+
+```
+app/
+├── _layout.tsx              # Root Layout (providers + Stack)
+├── index.tsx                # Redireccion inicial
+├── loading.tsx              # Pantalla de carga
+├── error.tsx                # Pantalla de error
+│
+├── (onboarding)/            # Flujo de onboarding
+│   └── ...
+│
+├── (auth)/                  # Autenticacion
+│   ├── login
+│   ├── reset-password
+│   └── resend-password
+│
+├── (tabs)/                  # Tab Navigator
+│   ├── _layout.tsx          # 5 tabs con iconos SVG
+│   ├── 01_home/
+│   │   ├── _layout.tsx      # Stack Navigator
+│   │   ├── index.tsx        # Dashboard de propiedad
+│   │   ├── gallery.tsx      # Galeria de fotos
+│   │   └── amenities.tsx    # Lista de amenidades
+│   ├── 02_book/
+│   │   ├── _layout.tsx      # Material Top Tabs (o RentScreen para visitors)
+│   │   ├── book-stays.tsx
+│   │   ├── exchange-stays.tsx
+│   │   └── rent-stays.tsx
+│   ├── 03_inbox/
+│   │   ├── _layout.tsx      # Stack Navigator
+│   │   ├── index.tsx        # Lista de conversaciones
+│   │   ├── archived.tsx     # Conversaciones archivadas
+│   │   └── search.tsx       # Busqueda de mensajes
+│   ├── 04_stays/
+│   │   ├── _layout.tsx      # Material Top Tabs (o StayGuestScreen)
+│   │   ├── active.tsx
+│   │   ├── past.tsx
+│   │   ├── cancelled.tsx
+│   │   └── pending.tsx
+│   └── 05_profile/
+│       ├── _layout.tsx      # Stack Navigator
+│       └── index.tsx        # Perfil de usuario
+│
+├── chat/
+│   ├── _layout.tsx          # Stack con slide_from_right
+│   ├── [channelType]/[channelId]/
+│   │   ├── index.tsx
+│   │   └── info.tsx
+│   └── invite/              # Modal de invitacion
+│
+├── booking/
+│   ├── _layout.tsx          # Slot + BookingToastProvider
+│   ├── [id].tsx
+│   ├── new.tsx
+│   ├── review.tsx
+│   └── wallet.tsx
+│
+├── property/
+│   ├── _layout.tsx
+│   ├── [id].tsx
+│   ├── arrival-review.tsx
+│   └── rating-report.tsx
+│
+├── invite/
+│   ├── _layout.tsx
+│   ├── [token].tsx
+│   ├── onboarding.tsx
+│   └── owner/[bookingId].tsx
+│
+└── issues/
+    ├── _layout.tsx          # Stack + BackButton
+    └── (tabs)/
+        ├── _layout.tsx      # Material Top Tabs
+        ├── active.tsx
+        ├── pending.tsx
+        ├── upgrade.tsx
+        └── closed.tsx
+```
+
+<Note>
+  Las rutas publicas (que no requieren autenticacion) estan definidas en
+  `NAVIGATION_CONFIG.PUBLIC_GROUPS`: `(onboarding)`, `(auth)` e `invite`. El hook `useNavigation`
+  gestiona las redirecciones segun el estado de autenticacion.
+</Note>

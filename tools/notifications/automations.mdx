@@ -1,0 +1,54 @@
+---
+title: "Automaciones"
+description: "Reglas de automatización para envío programado de notificaciones"
+---
+
+# Automaciones
+
+Las automaciones permiten configurar reglas para el envío automático de notificaciones basadas en eventos o condiciones predefinidas.
+
+Ruta: `/app/notifications/automations`
+
+## Configuración de automaciones
+
+Cada automatización se define por:
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `automation_type` | string | Identificador único del tipo de automatización |
+| `enabled` | boolean | Si la automatización está activa |
+| `template_id` | UUID | Template de notificación asociado |
+| `conditions` | JSON | Condiciones que deben cumplirse para disparar el envío |
+| `last_run_at` | timestamp | Última ejecución |
+| `next_run_at` | timestamp | Próxima ejecución programada |
+| `run_count` | integer | Cantidad de veces que se ejecutó |
+
+## API endpoints
+
+| Método | Endpoint | Rol | Descripción |
+|--------|----------|-----|-------------|
+| GET | `/api/notifications/automations` | Cualquiera | Listar todas las automaciones |
+| GET | `/api/notifications/automations/stats` | Cualquiera | Estadísticas de automaciones |
+| GET | `/api/notifications/automations/:type` | Cualquiera | Obtener configuración por tipo |
+| PUT | `/api/notifications/automations/:type` | Cualquiera | Actualizar configuración |
+| POST | `/api/notifications/automations/:type/test` | Admin | Ejecutar test con datos de ejemplo |
+
+## Segmentación de audiencia
+
+Las notificaciones (manuales y automatizadas) soportan segmentación de audiencia mediante filtros:
+
+- Filtros personalizados en `target_audience` (JSON)
+- Estimación de audiencia antes del envío (`/audience/estimate`)
+- Resolución de IDs de usuarios objetivo (`/audience/resolve`)
+
+## Relación con templates
+
+Las automaciones se vinculan a templates de notificación. Al dispararse, toman el contenido del template (título, mensaje, imagen, deep link) y lo envían a la audiencia definida por las condiciones.
+
+```
+Evento/Condición → Automation Config → Template → Audiencia → Envío
+```
+
+<Note>
+  Solo los administradores pueden ejecutar tests de automaciones. La configuración de automaciones está disponible para cualquier usuario con acceso al módulo de notificaciones.
+</Note>
