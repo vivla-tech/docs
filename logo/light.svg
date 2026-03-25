@@ -1,3 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 36" height="36">
-  <text x="0" y="28" font-family="serif" font-size="32" font-weight="700" letter-spacing="6" fill="#0c2425">VIVLA</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 36" height="36">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Instrument+Serif&amp;display=swap');
+    </style>
+  </defs>
+  <text y="28" font-size="32" letter-spacing="3">
+    <tspan fill="#0c2425" font-family="'Instrument Serif', serif" font-weight="400">VIVLA</tspan><tspan fill="#cf7625" font-family="'Sneak', sans-serif" font-weight="400">TECH</tspan>
+  </text>
 </svg>
