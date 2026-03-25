@@ -12,7 +12,7 @@ Todas las notificaciones van al canal **#deploys** (`C091W026C23`). Este canal c
 Usamos [Block Kit](https://api.slack.com/block-kit) dentro de `attachments` para lograr:
 
 - **Color lateral** verde/rojo según resultado
-- **Header** con emoji + nombre del proyecto + resultado
+- **Título** con emoji + nombre del proyecto + resultado
 - **Campos estructurados** con info relevante (repo, branch, commit, etc.)
 - **Link al workflow** en el footer
 - **Fallback text** para que el preview en móvil/desktop se vea bien
@@ -54,10 +54,10 @@ Usamos [Block Kit](https://api.slack.com/block-kit) dentro de `attachments` para
         "text": "$STATUS_EMOJI $PROJECT_NAME deploy $RESULT ($\{{ github.ref_name }} @ $COMMIT_SHORT)",
         "blocks": [
           {
-            "type": "header",
+            "type": "section",
             "text": {
-              "type": "plain_text",
-              "text": "$STATUS_EMOJI $PROJECT_NAME deploy $RESULT"
+              "type": "mrkdwn",
+              "text": "*$STATUS_EMOJI $PROJECT_NAME deploy $RESULT*"
             }
           },
           {
@@ -136,8 +136,8 @@ export async function sendSlackNotification(
         text: headerText,
         blocks: [
           {
-            type: "header",
-            text: { type: "plain_text", text: headerText },
+            type: "section",
+            text: { type: "mrkdwn", text: `*${headerText}*` },
           },
           ...(fields.length > 0
             ? [{ type: "section", fields }]
@@ -184,7 +184,7 @@ Cada proyecto incluye los campos más relevantes en la sección `fields`. Máxim
 
 1. **Siempre usar `attachments`** con `color` y `blocks` — nunca solo `text` o solo `blocks` a nivel root.
 2. **Siempre incluir `text`** dentro del attachment como fallback para el preview.
-3. **Header**: emoji de estado + nombre del proyecto + resultado (`succeeded`/`failed`).
+3. **Título**: emoji de estado + nombre del proyecto + resultado (`succeeded`/`failed`). Usar `section` con `mrkdwn` en bold (no `header`, que no es soportado dentro de `attachments`).
 4. **Section fields**: datos estructurados en pares clave-valor.
 5. **Context**: timestamp y/o link al workflow/proceso.
 6. **Colores**: `#36a64f` (verde) para éxito, `#e01e5a` (rojo) para fallo.
