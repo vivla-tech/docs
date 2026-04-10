@@ -1,0 +1,26 @@
+{
+  "tab": "Panel",
+  "groups": [
+    {
+      "group": "Overview",
+      "pages": [
+        "index",
+        "getting-started"
+      ]
+    },
+    {
+      "group": "Architecture",
+      "pages": [
+        "architecture/overview",
+        "architecture/authentication"
+      ]
+    },
+    {
+      "group": "Modules",
+      "pages": [
+        "modules/agents",
+        "modules/conversations"
+      ]
+    }
+  ]
+}

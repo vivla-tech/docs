@@ -6,56 +6,105 @@ description: "Visión general de la arquitectura de VIVLA"
 ## Diagrama de alto nivel
 
 ```
-                        ┌──────────────────┐
-                        │   Cloudflare     │
-                        │   (CDN/DNS/      │
-                        │    Access)       │
-                        └────────┬─────────┘
-                                 │
-              ┌──────────────────┼──────────────────┐
-              │                  │                   │
-     ┌────────▼───────┐  ┌──────▼───────┐  ┌───────▼────────┐
-     │  Mobile App    │  │  Panel       │  │  Tools Apps    │
-     │  (Expo)        │  │  (TBD)       │  │  (vivla-tools) │
-     └────────┬───────┘  └──────┬───────┘  └───────┬────────┘
-              │                  │                   │
-              ▼                  ▼                   ▼
-     ┌─────────────────┐              ┌─────────────────────┐
-     │  API Principal  │              │  Tools API          │
-     │  vivla-backend  │              │  vivla-tools/backend│
-     │  (NestJS)       │              │  (NestJS)           │
-     └────────┬────────┘              └──────────┬──────────┘
-              │                                   │
-              ▼                                   ▼
-     ┌──────────────┐                  ┌──────────────┐
-     │  PostgreSQL  │                  │  PostgreSQL  │
-     │  (Railway)   │                  │  (Railway)   │
-     └──────────────┘                  └──────────────┘
+                           ┌──────────────────┐
+                           │   Cloudflare     │
+                           │  (CDN/DNS/Access) │
+                           └────────┬─────────┘
+                                    │
+          ┌─────────────────────────┼─────────────────────────┐
+          │                         │                          │
+ ┌────────▼───────┐   ┌────────────▼────────────┐   ┌────────▼────────┐
+ │  Mobile App    │   │  Panel (vivla-panel)    │   │  Tools Apps     │
+ │  (Expo/RN)     │   │  Backoffice CX          │   │  (vivla-tools)  │
+ └────────┬───────┘   └────────────┬────────────┘   └────────┬────────┘
+          │                         │                          │
+          ├─────────────┐          │                          │
+          │             │          │                          │
+          ▼             │          ▼                          ▼
+ ┌─────────────────┐   │  ┌─────────────────┐     ┌─────────────────────┐
+ │  API Principal  │   │  │  API Principal  │     │  Tools API          │
+ │  (vivla-api)    │◄──┘  │  (vivla-api)    │     │  vivla-tools/backend│
+ │  NestJS         │      │                 │     │  NestJS + Supabase  │
+ └────────┬────────┘      └─────────────────┘     └──────────┬──────────┘
+          │                                                   │
+          ▼                                                   ▼
+ ┌──────────────┐                                  ┌──────────────┐
+ │  PostgreSQL  │                                  │  PostgreSQL  │
+ │  (Railway)   │                                  │  (Supabase)  │
+ └──────────────┘                                  └──────────────┘
+
+          ┌─────────────────────────────────────────────────────┐
+          │              Servicios complementarios              │
+          ├─────────────────────────────────────────────────────┤
+          │                                                     │
+          │  ┌─────────────────────┐  ┌──────────────────────┐ │
+          │  │ Cloud Functions     │  │ calendar-manager     │ │
+          │  │ (Firebase)          │  │ Gestión calendarios  │ │
+          │  │ HubSpot, Notion,    │  │ Consume vivla-api    │ │
+          │  │ Slack, Zendesk,     │  └──────────────────────┘ │
+          │  │ NPS, Reports        │                           │
+          │  └─────────────────────┘  ┌──────────────────────┐ │
+          │                           │ VivlaNPS             │ │
+          │  ┌─────────────────────┐  │ Upload imágenes NPS  │ │
+          │  │ vivla-app-site      │  │ React + Firebase     │ │
+          │  │ Deep links (AASA)   │  └──────────────────────┘ │
+          │  │ Cloudflare Pages    │                           │
+          │  └─────────────────────┘  ┌──────────────────────┐ │
+          │                           │ app-invites          │ │
+          │  ┌─────────────────────┐  │ Redirects invitación │ │
+          │  │ propcos             │  │ Vercel Functions     │ │
+          │  │ (externo: Digio)    │  └──────────────────────┘ │
+          │  └─────────────────────┘                           │
+          └─────────────────────────────────────────────────────┘
 ```
 
 ## Stack técnico
 
 | Capa | Tecnología | Hosting |
 |------|-----------|---------|
-| API Principal | NestJS | Railway |
-| Tools API | NestJS | Railway |
+| API Principal | NestJS 11, PostgreSQL (TypeORM), Firebase | Railway |
+| Tools API | NestJS, Supabase (PostgreSQL) | Railway |
 | DB Principal | PostgreSQL | Railway |
-| DB Tools | PostgreSQL | Railway |
-| Mobile | React Native + Expo | App Store / Google Play |
-| Tools Frontend | Next.js (monorepo) | Vercel |
-| DNS / CDN / Access | Cloudflare | - |
+| DB Tools | PostgreSQL | Supabase |
+| Mobile | React Native 0.79 + Expo SDK 53 | App Store / Google Play |
+| Panel | Backoffice CX (vivla-panel) | TBD |
+| Tools Frontend | TanStack Start (monorepo) | Railway |
+| Cloud Functions | Firebase Functions, Node 20 | Google Firebase |
+| Calendar Manager | Gestión de calendarios | TBD |
+| VivlaNPS | React 19, Vite, MUI | TBD |
+| Deep Links | Cloudflare Pages (vivla-app-site) | Cloudflare Pages |
+| Invitations | Vercel Functions (app-invites) | Vercel |
+| Propcos | Desarrollo externo (Digio) | TBD |
+| DNS / CDN / Access | Cloudflare | — |
 | Docs | Mintlify | Mintlify Cloud |
 
 ## Repos
 
-- **vivla-backend** — API principal, sirve a mobile y panel
-- **vivla-mobile** — App React Native con Expo Router
-- **vivla-tools** — Monorepo: chat de soporte, community guidelines, guías de mantenimiento + su backend
-- **docs** — Documentación centralizada (este repo)
+Ver [Repositorios](/repositories) para la descripción completa de cada repo.
+
+| Repo | Stack | Descripción |
+|------|-------|-------------|
+| `vivla-api` | NestJS + PostgreSQL | API principal, sirve a mobile y panel |
+| `vivla-mobile-app` | React Native + Expo | App iOS/Android para copropietarios |
+| `vivla-tools` | TanStack Start + NestJS + Supabase | Monorepo: chat, community, surveys, notificaciones, tools API |
+| `vivla-panel` | TBD | Backoffice para agentes CX, consume vivla-api |
+| `booking-cloud-functions` | Firebase Functions | Cloud functions: HubSpot, Notion, Slack, Zendesk, NPS, reportes |
+| `calendar-manager` | TBD | Gestión de calendarios, integrándose al panel |
+| `vivla-app-site` | Cloudflare Pages | Deep links (AASA/assetlinks) y landing de la app |
+| `app-invites` | Vercel Functions | Redirects de invitación con metadata social |
+| `VivlaNPS` | React + Firebase | Subida de imágenes NPS por propiedad |
+| `propcos` | Externo (Digio) | Desarrollo externo por contratista |
+| `docs` | Mintlify | Documentación centralizada (este repo) |
 
 ## Conexiones clave
 
+- La **Mobile App** consume la **API Principal** (vivla-api) para auth, booking, propiedades, perfil, stays, invitaciones y notificaciones
 - El **chat de soporte** en la app mobile se comunica con la **Tools API** (no con la API principal)
-- El **panel** consume la **API principal**
-- Las **Tools apps** (backoffice de tools) consumen la **Tools API**
-- El portal de **community guidelines** (clientes) consume la **Tools API**
+- Las **encuestas** mobile también usan la **Tools API** para envío y consulta
+- El **Panel** (vivla-panel) consume la **API Principal** para gestión de agentes CX
+- El **calendar-manager** consume la **API Principal** y se está integrando al panel
+- Las **Cloud Functions** (Firebase) orquestan integraciones: HubSpot (CRM), Notion, Slack (notificaciones), Zendesk (soporte), reportes y NPS
+- **vivla-app-site** sirve los archivos de verificación de deep links (AASA para iOS, assetlinks.json para Android)
+- **app-invites** genera redirects dinámicos con metadata Open Graph para invitaciones compartidas
+- El portal de **Community Guidelines** (clientes) consume la **Tools API**
+- **Home Excellence** (portal propietarios) consume endpoints públicos de la **Tools API**

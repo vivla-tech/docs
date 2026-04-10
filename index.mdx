@@ -42,10 +42,21 @@ VIVLA es una plataforma de real estate y booking. Esta documentación cubre la a
 
 | Repo | Stack | Descripción |
 |------|-------|-------------|
-| `vivla-backend` | NestJS + PostgreSQL | API principal (mobile + panel) |
-| `vivla-mobile` | React Native + Expo | Aplicación móvil iOS/Android |
-| `vivla-tools` | Monorepo (Next.js + NestJS) | Chat, community guidelines, guías, tools API |
+| `vivla-api` | NestJS + PostgreSQL | API principal (mobile + panel) |
+| `vivla-mobile-app` | React Native + Expo | App iOS/Android para copropietarios |
+| `vivla-tools` | TanStack Start + NestJS + Supabase | Chat, community, surveys, notificaciones, tools API |
+| `vivla-panel` | TBD | Backoffice para agentes CX |
+| `booking-cloud-functions` | Firebase Functions | Integraciones: HubSpot, Notion, Slack, Zendesk |
+| `calendar-manager` | TBD | Gestión de calendarios |
+| `vivla-app-site` | Cloudflare Pages | Deep links y landing de la app |
+| `app-invites` | Vercel Functions | Redirects de invitación |
+| `VivlaNPS` | React + Firebase | Subida imágenes NPS |
+| `propcos` | Externo (Digio) | Desarrollo por contratista |
 | `docs` | Mintlify | Este repositorio de documentación |
+
+<Card title="Ver inventario completo" icon="list" href="/repositories">
+  Descripción detallada de cada repositorio, stack, hosting y conexiones.
+</Card>
 
 <Note>
   Este sitio está protegido por Cloudflare Access en `wiki.vivla.com`. Solo miembros del equipo pueden acceder.

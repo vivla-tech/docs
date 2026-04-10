@@ -1,0 +1,204 @@
+---
+title: "Repositorios"
+description: "Inventario completo de los repositorios de VIVLA, su propósito, stack y conexiones"
+---
+
+# Repositorios
+
+Inventario de todos los repositorios del ecosistema VIVLA, organizados por dominio.
+
+---
+
+## Plataforma principal
+
+<CardGroup cols={2}>
+  <Card title="vivla-api" icon="server" href="https://github.com/vivla-tech/vivla-api">
+    API REST principal. Sirve a la app móvil y al panel de CX.
+  </Card>
+  <Card title="vivla-mobile-app" icon="mobile" href="https://github.com/vivla-tech/vivla-mobile-app">
+    App para copropietarios (iOS y Android).
+  </Card>
+  <Card title="vivla-panel" icon="headset" href="https://github.com/vivla-tech/vivla-panel">
+    Backoffice para agentes de atención al cliente.
+  </Card>
+</CardGroup>
+
+### vivla-api
+
+| | |
+|---|---|
+| **Propósito** | API REST interna que expone datos y lógica de negocio a los frontends. Arquitectura modular por entidades con múltiples versiones (V1, V2, V3). |
+| **Stack** | NestJS 11, Node.js 22+, PostgreSQL (TypeORM), Firebase/Firestore, Google Cloud Storage |
+| **Hosting** | Railway |
+| **Conexiones** | Consumida por vivla-mobile-app, vivla-panel y calendar-manager |
+| **Características** | Sistema de validación custom, jobs programados, comandos CLI, caching, Sentry, i18n, migraciones de DB |
+| **Docs wiki** | Pendiente — template disponible en `subrepo-examples/backend-docs.json` |
+
+### vivla-mobile-app
+
+| | |
+|---|---|
+| **Propósito** | App móvil para copropietarios: reservar estancias, comunicarse, gestionar perfil y propiedades. |
+| **Stack** | React Native 0.79.6, Expo SDK 53, Expo Router 5, TypeScript 5.8 |
+| **Hosting** | App Store (iOS), Google Play (Android) |
+| **Conexiones** | Consume vivla-api (auth, booking, properties, stays) y Tools API (chat, surveys) |
+| **Características** | New Architecture habilitada, Zustand + React Query, Stream Chat, PostHog, Sentry, i18n (ES/EN) |
+| **Docs wiki** | 31 páginas MDX — [Ver tab Mobile App](/mobile/index) |
+
+### vivla-panel
+
+| | |
+|---|---|
+| **Propósito** | Nuevo backoffice para agentes de CX (customer experience). |
+| **Stack** | Por confirmar |
+| **Hosting** | Por confirmar |
+| **Conexiones** | Consume vivla-api |
+| **Docs wiki** | Pendiente — template disponible en `subrepo-examples/panel-docs.json` |
+
+---
+
+## Herramientas internas
+
+<Card title="vivla-tools" icon="wrench" href="https://github.com/vivla-tech/vivla-tools">
+  Monorepo de herramientas internas: chat de soporte, community guidelines, surveys, notificaciones.
+</Card>
+
+### vivla-tools
+
+| | |
+|---|---|
+| **Propósito** | Suite de herramientas internas con permisos jerárquicos, gestión de equipos y arquitectura modular. |
+| **Stack** | TanStack Start (frontend), NestJS (backend), Supabase (PostgreSQL), Auth0, Stream Chat, Cloudinary, Resend |
+| **Hosting** | Railway (backend), Railway (frontend) |
+| **Apps** | `apps/frontend` (panel), `apps/backend` (API), `apps/community-frontend` (portal público), `apps/home-excellence` (portal propietarios) |
+| **Conexiones** | Consumido por vivla-mobile-app (chat, surveys). Community Frontend y Home Excellence son portales públicos. |
+| **Características** | Turborepo + pnpm workspaces, packages compartidos (common, ui, eslint-config) |
+| **Docs wiki** | 24 páginas MDX — [Ver tab Tools](/tools/index) |
+
+---
+
+## Servicios
+
+<CardGroup cols={2}>
+  <Card title="booking-cloud-functions" icon="cloud" href="https://github.com/vivla-tech/booking-cloud-functions">
+    Cloud functions de Firebase para automatizaciones e integraciones.
+  </Card>
+  <Card title="calendar-manager" icon="calendar" href="https://github.com/vivla-tech/calendar-manager">
+    Gestión de calendarios, integrándose al panel.
+  </Card>
+  <Card title="VivlaNPS" icon="chart-simple" href="https://github.com/vivla-tech/VivlaNPS">
+    Herramienta de subida de imágenes NPS por propiedad.
+  </Card>
+</CardGroup>
+
+### booking-cloud-functions
+
+| | |
+|---|---|
+| **Propósito** | Functions serverless para automatización del sistema de booking e integraciones con servicios externos. |
+| **Stack** | Firebase Functions, Node.js 20, HubSpot API, Notion, Slack, Zendesk, Sharp (imágenes), json2csv |
+| **Hosting** | Google Firebase (Cloud Functions) |
+| **Módulos** | books, calendars, dashboard, notifications, NPS, reports, Hostaway, proxy |
+| **Docs wiki** | Pendiente |
+
+### calendar-manager
+
+| | |
+|---|---|
+| **Propósito** | Gestión de calendarios de propiedades. Se está integrando al panel. |
+| **Stack** | Por confirmar (repo no disponible localmente) |
+| **Conexiones** | Consume vivla-api |
+| **Docs wiki** | Pendiente |
+
+### VivlaNPS
+
+| | |
+|---|---|
+| **Propósito** | Aplicación web para subir y gestionar imágenes NPS (Net Promoter Score) por propiedad. Almacena en Firebase Storage con metadata en Firestore. |
+| **Stack** | React 19, Vite, Material-UI (MUI), Firebase (Firestore + Storage), TypeScript |
+| **Docs wiki** | Pendiente |
+
+---
+
+## Deep links y redirects
+
+<CardGroup cols={2}>
+  <Card title="vivla-app-site" icon="link" href="https://github.com/vivla-tech/vivla-app-site">
+    Verificación de deep links y landing page de la app.
+  </Card>
+  <Card title="app-invites" icon="envelope" href="https://github.com/vivla-tech/app-invites">
+    Redirects de invitaciones con metadata social.
+  </Card>
+</CardGroup>
+
+### vivla-app-site
+
+| | |
+|---|---|
+| **Propósito** | Sitio estático que sirve archivos de verificación de deep links (AASA para iOS, assetlinks.json para Android) y una landing page con detección de plataforma. |
+| **Stack** | Cloudflare Pages, Wrangler CLI |
+| **Hosting** | Cloudflare Pages (vivla.app, staging.vivla.app, dev.vivla.app) |
+| **Docs wiki** | Pendiente |
+
+### app-invites
+
+| | |
+|---|---|
+| **Propósito** | Servicio de redirects para invitaciones a la app con generación dinámica de metadata Open Graph y Twitter Cards. Detecta plataforma y redirige a las app stores. |
+| **Stack** | Vercel Functions, Tailwind CSS |
+| **Hosting** | Vercel |
+| **Conexiones** | Consume vivla-api para obtener metadata de invitaciones |
+| **Docs wiki** | Pendiente |
+
+<Warning>
+  **Posible solapamiento**: `app-invites` y `vivla-app-site` ambos manejan redirects y deep links. Pendiente confirmar si `app-invites` está deprecado en favor de `vivla-app-site` o si sirven propósitos diferentes.
+</Warning>
+
+---
+
+## Externo
+
+<Card title="propcos" icon="building" href="https://github.com/vivla-tech/propcos">
+  Desarrollo externo por contratista.
+</Card>
+
+### propcos
+
+| | |
+|---|---|
+| **Propósito** | Proyecto desarrollado por contratista externo (Digio). |
+| **Stack** | Por confirmar (repo no disponible localmente) |
+| **Docs wiki** | Pendiente |
+
+---
+
+## Documentación
+
+<Card title="docs" icon="book" href="https://github.com/vivla-tech/docs">
+  Este repositorio. Wiki centralizada en Mintlify.
+</Card>
+
+### docs
+
+| | |
+|---|---|
+| **Propósito** | Documentación centralizada de toda la plataforma VIVLA. Agrega documentación de los subrepos via GitHub Actions. |
+| **Stack** | Mintlify, GitHub Actions (agregación automática) |
+| **Hosting** | Mintlify Cloud (wiki.vivla.com, protegido por Cloudflare Access) |
+
+---
+
+## Estado de documentación
+
+| Repo | Wiki pages | Estado |
+|------|-----------|--------|
+| vivla-mobile-app | 31 | Activo |
+| vivla-tools | 24 | Activo |
+| vivla-api | 0 | Pendiente (template disponible) |
+| vivla-panel | 0 | Pendiente (template disponible) |
+| booking-cloud-functions | 0 | Pendiente |
+| calendar-manager | 0 | Pendiente |
+| vivla-app-site | 0 | Pendiente |
+| app-invites | 0 | Pendiente |
+| VivlaNPS | 0 | Pendiente |
+| propcos | 0 | Pendiente |

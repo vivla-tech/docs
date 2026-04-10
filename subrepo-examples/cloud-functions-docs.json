@@ -1,0 +1,30 @@
+{
+  "tab": "Cloud Functions",
+  "groups": [
+    {
+      "group": "Overview",
+      "pages": [
+        "index"
+      ]
+    },
+    {
+      "group": "Functions",
+      "pages": [
+        "functions/booking",
+        "functions/notifications",
+        "functions/nps",
+        "functions/reports"
+      ]
+    },
+    {
+      "group": "Integrations",
+      "pages": [
+        "integrations/hubspot",
+        "integrations/notion",
+        "integrations/slack",
+        "integrations/zendesk",
+        "integrations/hostaway"
+      ]
+    }
+  ]
+}

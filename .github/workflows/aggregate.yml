@@ -13,8 +13,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SUBREPOS: |
-        vivla-tech/vivla-mobile-app:docs:mobile
-        vivla-tech/vivla-tools:docs:tools
+        vivla-tech/vivla-mobile-app:docs/wiki:mobile
+        vivla-tech/vivla-tools:docs/wiki:tools
+        # Ready to enable when each repo adds docs/wiki/:
+        # vivla-tech/vivla-api:docs/wiki:backend
+        # vivla-tech/vivla-panel:docs/wiki:panel
     steps:
       - name: Checkout docs repo
         uses: actions/checkout@v4
