@@ -1,110 +1,114 @@
 ---
 title: "Arquitectura"
-description: "Visión general de la arquitectura de VIVLA"
+description: "Visión general de la arquitectura y ecosistema de VIVLA"
 ---
 
-## Diagrama de alto nivel
+## Ecosistema VIVLA
 
+VIVLA opera sobre dos backends independientes que sirven a distintos clientes. Todos los frontends pasan por Cloudflare para DNS, CDN y control de acceso.
+
+```mermaid
+graph TD
+    CF[Cloudflare<br/>CDN / DNS / Access]
+
+    subgraph Clientes
+        MOBILE[Mobile App<br/>React Native + Expo]
+        PANEL[Panel CX<br/>vivla-panel]
+        TOOLS_FE[Vivla Tools<br/>TanStack Start]
+        COMMUNITY[Community Portal<br/>Next.js]
+        HOME_EX[Home Excellence<br/>Next.js]
+    end
+
+    subgraph Backends
+        API[Vivla API<br/>NestJS + TypeORM]
+        TOOLS_BE[Tools API<br/>NestJS + Supabase]
+    end
+
+    subgraph Bases de datos
+        DB_API[(PostgreSQL<br/>Railway)]
+        DB_TOOLS[(PostgreSQL<br/>Supabase)]
+    end
+
+    subgraph Servicios
+        CLOUD_FN[Cloud Functions<br/>Firebase]
+        CALENDAR[Calendar Manager]
+        APP_SITE[vivla-app-site<br/>Deep Links]
+        INVITES[app-invites<br/>Invitaciones]
+        NPS[VivlaNPS<br/>Imágenes NPS]
+    end
+
+    CF --> MOBILE
+    CF --> PANEL
+    CF --> TOOLS_FE
+    CF --> COMMUNITY
+    CF --> HOME_EX
+
+    MOBILE -->|auth, booking,<br/>propiedades, stays| API
+    MOBILE -->|chat, surveys| TOOLS_BE
+    PANEL --> API
+    TOOLS_FE --> TOOLS_BE
+    COMMUNITY --> TOOLS_BE
+    HOME_EX --> TOOLS_BE
+    CALENDAR --> API
+
+    API --> DB_API
+    TOOLS_BE --> DB_TOOLS
+
+    CLOUD_FN -.->|HubSpot, Notion,<br/>Slack, Zendesk| API
+
+    style API fill:#0c2425,color:#fff
+    style TOOLS_BE fill:#0c2425,color:#fff
+    style MOBILE fill:#cf7625,color:#fff
+    style TOOLS_FE fill:#cf7625,color:#fff
 ```
-                           ┌──────────────────┐
-                           │   Cloudflare     │
-                           │  (CDN/DNS/Access) │
-                           └────────┬─────────┘
-                                    │
-          ┌─────────────────────────┼─────────────────────────┐
-          │                         │                          │
- ┌────────▼───────┐   ┌────────────▼────────────┐   ┌────────▼────────┐
- │  Mobile App    │   │  Panel (vivla-panel)    │   │  Tools Apps     │
- │  (Expo/RN)     │   │  Backoffice CX          │   │  (vivla-tools)  │
- └────────┬───────┘   └────────────┬────────────┘   └────────┬────────┘
-          │                         │                          │
-          ├─────────────┐          │                          │
-          │             │          │                          │
-          ▼             │          ▼                          ▼
- ┌─────────────────┐   │  ┌─────────────────┐     ┌─────────────────────┐
- │  API Principal  │   │  │  API Principal  │     │  Tools API          │
- │  (vivla-api)    │◄──┘  │  (vivla-api)    │     │  vivla-tools/backend│
- │  NestJS         │      │                 │     │  NestJS + Supabase  │
- └────────┬────────┘      └─────────────────┘     └──────────┬──────────┘
-          │                                                   │
-          ▼                                                   ▼
- ┌──────────────┐                                  ┌──────────────┐
- │  PostgreSQL  │                                  │  PostgreSQL  │
- │  (Railway)   │                                  │  (Supabase)  │
- └──────────────┘                                  └──────────────┘
 
-          ┌─────────────────────────────────────────────────────┐
-          │              Servicios complementarios              │
-          ├─────────────────────────────────────────────────────┤
-          │                                                     │
-          │  ┌─────────────────────┐  ┌──────────────────────┐ │
-          │  │ Cloud Functions     │  │ calendar-manager     │ │
-          │  │ (Firebase)          │  │ Gestión calendarios  │ │
-          │  │ HubSpot, Notion,    │  │ Consume vivla-api    │ │
-          │  │ Slack, Zendesk,     │  └──────────────────────┘ │
-          │  │ NPS, Reports        │                           │
-          │  └─────────────────────┘  ┌──────────────────────┐ │
-          │                           │ VivlaNPS             │ │
-          │  ┌─────────────────────┐  │ Upload imágenes NPS  │ │
-          │  │ vivla-app-site      │  │ React + Firebase     │ │
-          │  │ Deep links (AASA)   │  └──────────────────────┘ │
-          │  │ Cloudflare Pages    │                           │
-          │  └─────────────────────┘  ┌──────────────────────┐ │
-          │                           │ app-invites          │ │
-          │  ┌─────────────────────┐  │ Redirects invitación │ │
-          │  │ propcos             │  │ Vercel Functions     │ │
-          │  │ (externo: Digio)    │  └──────────────────────┘ │
-          │  └─────────────────────┘                           │
-          └─────────────────────────────────────────────────────┘
-```
+<Note>
+  La **Mobile App** consume **dos backends**: la API principal (vivla-api) para booking, propiedades, auth y stays; y la **Tools API** (vivla-tools) para chat y encuestas.
+</Note>
 
-## Stack técnico
+## Dos backends, dos mundos
 
-| Capa | Tecnología | Hosting |
-|------|-----------|---------|
-| API Principal | NestJS 11, PostgreSQL (TypeORM), Firebase | Railway |
-| Tools API | NestJS, Supabase (PostgreSQL) | Railway |
-| DB Principal | PostgreSQL | Railway |
-| DB Tools | PostgreSQL | Supabase |
-| Mobile | React Native 0.79 + Expo SDK 53 | App Store / Google Play |
-| Panel | Backoffice CX (vivla-panel) | TBD |
-| Tools Frontend | TanStack Start (monorepo) | Railway |
-| Cloud Functions | Firebase Functions, Node 20 | Google Firebase |
-| Calendar Manager | Gestión de calendarios | TBD |
-| VivlaNPS | React 19, Vite, MUI | TBD |
-| Deep Links | Cloudflare Pages (vivla-app-site) | Cloudflare Pages |
-| Invitations | Vercel Functions (app-invites) | Vercel |
-| Propcos | Desarrollo externo (Digio) | TBD |
-| DNS / CDN / Access | Cloudflare | — |
-| Docs | Mintlify | Mintlify Cloud |
+| | Vivla API | Tools API |
+|---|---|---|
+| **Repo** | `vivla-api` | `vivla-tools` (monorepo) |
+| **Framework** | NestJS 11 | NestJS 10 |
+| **Base de datos** | PostgreSQL (Railway) via TypeORM | PostgreSQL (Supabase) directo |
+| **Auth** | JWT propio | Auth0 + API key guard |
+| **Clientes** | Mobile App, Panel, Calendar Manager | Mobile App (chat/surveys), Tools Frontend, Community Portal, Home Excellence |
+| **Hosting** | Railway | Railway |
 
-## Repos
+## Stack tecnológico completo
 
-Ver [Repositorios](/repositories) para la descripción completa de cada repo.
-
-| Repo | Stack | Descripción |
-|------|-------|-------------|
-| `vivla-api` | NestJS + PostgreSQL | API principal, sirve a mobile y panel |
-| `vivla-mobile-app` | React Native + Expo | App iOS/Android para copropietarios |
-| `vivla-tools` | TanStack Start + NestJS + Supabase | Monorepo: chat, community, surveys, notificaciones, tools API |
-| `vivla-panel` | TBD | Backoffice para agentes CX, consume vivla-api |
-| `booking-cloud-functions` | Firebase Functions | Cloud functions: HubSpot, Notion, Slack, Zendesk, NPS, reportes |
-| `calendar-manager` | TBD | Gestión de calendarios, integrándose al panel |
-| `vivla-app-site` | Cloudflare Pages | Deep links (AASA/assetlinks) y landing de la app |
-| `app-invites` | Vercel Functions | Redirects de invitación con metadata social |
-| `VivlaNPS` | React + Firebase | Subida de imágenes NPS por propiedad |
-| `propcos` | Externo (Digio) | Desarrollo externo por contratista |
-| `docs` | Mintlify | Documentación centralizada (este repo) |
+| Producto | Tecnología | Hosting |
+|----------|-----------|---------|
+| **Vivla API** | NestJS 11, PostgreSQL (TypeORM), Firebase, GCS | Railway |
+| **Vivla Tools** | TanStack Start + NestJS + Supabase, Stream Chat, Auth0 | Railway |
+| **Mobile App** | React Native 0.79, Expo SDK 53, TypeScript 5.8 | App Store / Google Play |
+| **Panel CX** | vivla-panel (TBD) | TBD |
+| **Community Portal** | Next.js 14 (portal público clientes) | Railway |
+| **Home Excellence** | Next.js 14 (portal público propietarios) | Railway |
+| **Cloud Functions** | Firebase Functions, Node.js 20 | Google Firebase |
+| **Deep Links** | Cloudflare Pages (vivla-app-site) | Cloudflare Pages |
+| **Invitaciones** | Vercel Functions (app-invites) | Vercel |
+| **NPS** | React 19, Vite, MUI, Firebase | TBD |
+| **DNS / CDN** | Cloudflare (Access para wiki y tools) | — |
+| **Docs** | Mintlify | Mintlify Cloud |
 
 ## Conexiones clave
 
-- La **Mobile App** consume la **API Principal** (vivla-api) para auth, booking, propiedades, perfil, stays, invitaciones y notificaciones
-- El **chat de soporte** en la app mobile se comunica con la **Tools API** (no con la API principal)
-- Las **encuestas** mobile también usan la **Tools API** para envío y consulta
-- El **Panel** (vivla-panel) consume la **API Principal** para gestión de agentes CX
-- El **calendar-manager** consume la **API Principal** y se está integrando al panel
-- Las **Cloud Functions** (Firebase) orquestan integraciones: HubSpot (CRM), Notion, Slack (notificaciones), Zendesk (soporte), reportes y NPS
-- **vivla-app-site** sirve los archivos de verificación de deep links (AASA para iOS, assetlinks.json para Android)
-- **app-invites** genera redirects dinámicos con metadata Open Graph para invitaciones compartidas
-- El portal de **Community Guidelines** (clientes) consume la **Tools API**
-- **Home Excellence** (portal propietarios) consume endpoints públicos de la **Tools API**
+<CardGroup cols={2}>
+  <Card title="Mobile App → 2 backends" icon="mobile">
+    La app consume **vivla-api** para auth, booking, propiedades, stays e invitaciones. Usa **Tools API** para chat en tiempo real y encuestas.
+  </Card>
+  <Card title="Panel → Vivla API" icon="headset">
+    El backoffice de CX consume exclusivamente la API principal para gestionar reservas y atender clientes.
+  </Card>
+  <Card title="Cloud Functions → Integraciones" icon="cloud">
+    Firebase Functions orquestan: HubSpot (CRM), Notion, Slack (alertas), Zendesk (soporte), reportes y NPS.
+  </Card>
+  <Card title="Portales públicos → Tools API" icon="globe">
+    Community Portal (guías de propiedades) y Home Excellence (métricas para propietarios) son Next.js apps que consumen la Tools API.
+  </Card>
+</CardGroup>
+
+Ver [Repositorios](/repositories) para la descripción detallada de cada repo.

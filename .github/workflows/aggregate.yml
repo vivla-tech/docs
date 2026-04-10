@@ -16,8 +16,8 @@ jobs:
       # e.g. vivla-tech/vivla-api:docs/wiki:backend
       # e.g. vivla-tech/vivla-panel:docs/wiki:panel
       SUBREPOS: |
-        vivla-tech/vivla-mobile-app:docs/wiki:mobile
         vivla-tech/vivla-tools:docs/wiki:tools
+        vivla-tech/vivla-mobile-app:docs/wiki:mobile
     steps:
       - name: Checkout docs repo
         uses: actions/checkout@v4
@@ -125,6 +125,15 @@ jobs:
 
               print(f'  Added tab "{tab_name}" from {dest} ({len(groups)} groups)')
               os.remove(nav_file)
+
+          # Sort tabs: defined order first, then everything else, Infra always last
+          tab_order = ['Overview', 'Vivla Tools', 'Mobile App', 'Vivla API', 'Panel', 'Infra']
+          def tab_sort_key(t):
+              name = t.get('tab', '')
+              if name in tab_order:
+                  return tab_order.index(name)
+              return len(tab_order)
+          tabs.sort(key=tab_sort_key)
 
           config['navigation']['tabs'] = tabs
 

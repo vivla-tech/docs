@@ -12,6 +12,9 @@ Inventario de todos los repositorios del ecosistema VIVLA, organizados por domin
 ## Plataforma principal
 
 <CardGroup cols={2}>
+  <Card title="vivla-tools" icon="wrench" href="https://github.com/vivla-tech/vivla-tools">
+    Plataforma interna: chat, surveys, community, notificaciones, equipos.
+  </Card>
   <Card title="vivla-api" icon="server" href="https://github.com/vivla-tech/vivla-api">
     API REST principal. Sirve a la app móvil y al panel de CX.
   </Card>
@@ -22,6 +25,18 @@ Inventario de todos los repositorios del ecosistema VIVLA, organizados por domin
     Backoffice para agentes de atención al cliente.
   </Card>
 </CardGroup>
+
+### vivla-tools
+
+| | |
+|---|---|
+| **Propósito** | Plataforma interna de Vivla. Monorepo con chat de soporte en tiempo real, encuestas NPS (5 tipos), community guidelines, notificaciones push, gestión de equipos y permisos granulares. Es el corazón operativo del negocio. |
+| **Stack** | TanStack Start (frontend), NestJS (backend), Supabase (PostgreSQL), Auth0, Stream Chat, Cloudinary, Resend |
+| **Hosting** | Railway (backend + frontend) |
+| **Apps** | `apps/frontend` (panel interno), `apps/backend` (API), `apps/community-frontend` (portal público clientes), `apps/home-excellence` (portal público propietarios) |
+| **Conexiones** | Consumido por vivla-mobile-app (chat, surveys). Community Portal y Home Excellence son portales públicos. |
+| **Características** | Turborepo + pnpm workspaces, packages compartidos (common, ui, eslint-config), Windmill para syncs automáticos |
+| **Docs wiki** | 24 páginas MDX — [Ver tab Vivla Tools](/tools/index) |
 
 ### vivla-api
 
@@ -54,26 +69,6 @@ Inventario de todos los repositorios del ecosistema VIVLA, organizados por domin
 | **Hosting** | Por confirmar |
 | **Conexiones** | Consume vivla-api |
 | **Docs wiki** | Pendiente — template disponible en `subrepo-examples/panel-docs.json` |
-
----
-
-## Herramientas internas
-
-<Card title="vivla-tools" icon="wrench" href="https://github.com/vivla-tech/vivla-tools">
-  Monorepo de herramientas internas: chat de soporte, community guidelines, surveys, notificaciones.
-</Card>
-
-### vivla-tools
-
-| | |
-|---|---|
-| **Propósito** | Suite de herramientas internas con permisos jerárquicos, gestión de equipos y arquitectura modular. |
-| **Stack** | TanStack Start (frontend), NestJS (backend), Supabase (PostgreSQL), Auth0, Stream Chat, Cloudinary, Resend |
-| **Hosting** | Railway (backend), Railway (frontend) |
-| **Apps** | `apps/frontend` (panel), `apps/backend` (API), `apps/community-frontend` (portal público), `apps/home-excellence` (portal propietarios) |
-| **Conexiones** | Consumido por vivla-mobile-app (chat, surveys). Community Frontend y Home Excellence son portales públicos. |
-| **Características** | Turborepo + pnpm workspaces, packages compartidos (common, ui, eslint-config) |
-| **Docs wiki** | 24 páginas MDX — [Ver tab Tools](/tools/index) |
 
 ---
 
