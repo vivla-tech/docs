@@ -33,6 +33,7 @@ jobs:
 
           # Clone to /tmp to avoid polluting the workspace
           CLONE_DIR="/tmp/subrepo_clones"
+          rm -rf "$CLONE_DIR"
           mkdir -p "$CLONE_DIR"
 
           for entry in $SUBREPOS; do
