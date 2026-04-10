@@ -12,12 +12,12 @@ jobs:
   aggregate:
     runs-on: ubuntu-latest
     env:
+      # To add a new subrepo: append a line with format repo:subdir:dest
+      # e.g. vivla-tech/vivla-api:docs/wiki:backend
+      # e.g. vivla-tech/vivla-panel:docs/wiki:panel
       SUBREPOS: |
         vivla-tech/vivla-mobile-app:docs/wiki:mobile
         vivla-tech/vivla-tools:docs/wiki:tools
-        # Ready to enable when each repo adds docs/wiki/:
-        # vivla-tech/vivla-api:docs/wiki:backend
-        # vivla-tech/vivla-panel:docs/wiki:panel
     steps:
       - name: Checkout docs repo
         uses: actions/checkout@v4
@@ -36,7 +36,7 @@ jobs:
           rm -rf "$CLONE_DIR"
           mkdir -p "$CLONE_DIR"
 
-          for entry in $SUBREPOS; do
+          while IFS= read -r entry; do
             [[ -z "$entry" || "$entry" =~ ^[[:space:]]*# ]] && continue
             IFS=':' read -r repo subdir dest <<< "$entry"
             echo "::group::Cloning $repo ($subdir → $dest)"
@@ -69,7 +69,7 @@ jobs:
             fi
 
             echo "::endgroup::"
-          done
+          done <<< "$SUBREPOS"
 
           rm -rf "$CLONE_DIR"
 
