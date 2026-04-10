@@ -1,0 +1,34 @@
+---
+title: "Vivla API"
+description: "API principal de VIVLA — NestJS + PostgreSQL"
+---
+
+# Vivla API
+
+API REST principal que sirve a la app móvil y al panel de CX. Arquitectura modular por entidades con múltiples versiones (V1, V2, V3).
+
+<Warning>
+  La documentación detallada de Vivla API aún no está disponible. Cada equipo es responsable de documentar su repositorio. Hay un template disponible en `subrepo-examples/backend-docs.json` para empezar.
+</Warning>
+
+## Repositorio
+
+- **Repo:** [vivla-tech/vivla-api](https://github.com/vivla-tech/vivla-api)
+- **Stack:** NestJS 11, Node.js 22+, PostgreSQL (TypeORM), Firebase/Firestore, Google Cloud Storage
+- **Hosting:** Railway
+
+## Clientes
+
+| Cliente | Uso |
+|---------|-----|
+| **Mobile App** | Auth, booking, propiedades, perfil, stays, invitaciones, notificaciones |
+| **Panel CX** | Gestión de reservas y atención al cliente |
+| **Calendar Manager** | Gestión de calendarios de propiedades |
+
+## Características
+
+- Arquitectura modular por entidades con versionado de API (V1, V2, V3)
+- Sistema de validación custom
+- Jobs programados y comandos CLI
+- Caching, Sentry (error tracking), i18n
+- Migraciones de base de datos

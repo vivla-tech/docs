@@ -45,6 +45,50 @@
         ]
       },
       {
+        "tab": "Vivla Tools",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "tools/index"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Mobile App",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "mobile/index"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Vivla API",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "backend/index"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Panel",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "panel/index"
+            ]
+          }
+        ]
+      },
+      {
         "tab": "Infra",
         "groups": [
           {

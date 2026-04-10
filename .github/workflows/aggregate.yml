@@ -97,7 +97,10 @@ jobs:
               with open(nav_file) as f:
                   sub_nav = json.load(f)
 
-              tab_name = sub_nav.get('tab', dest.capitalize())
+              # Normalize tab names so subrepos don't control the final label
+              tab_renames = {'Tools': 'Vivla Tools'}
+              raw_tab = sub_nav.get('tab', dest.capitalize())
+              tab_name = tab_renames.get(raw_tab, raw_tab)
               groups = sub_nav.get('groups', [])
 
               def prefix_pages(obj):
