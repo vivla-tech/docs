@@ -1,0 +1,370 @@
+---
+title: 'Stays'
+description: 'Módulo de gestión de estadías'
+---
+
+## Descripción
+
+El módulo **Stays** gestiona las estadías del usuario organizadas por estado. Incluye filtrado, visualización por categoría, modales de acciones (cancelar, modificar, reseñar) y auto-prompt de reseñas al completar una estadía.
+
+- **Ubicación:** `src/modules/stays/`
+
+<Note>
+  Los usuarios visitantes ven `StayGuestScreen` en lugar de los Material Top Tabs. Los propietarios
+  (coowners) ven las 4 pestañas deslizables: activas, pasadas, canceladas y pendientes.
+</Note>
+
+## Screens
+
+| Screen                 | Ruta                         | Descripción                                   |
+| ---------------------- | ---------------------------- | --------------------------------------------- |
+| `ActiveStaysScreen`    | `/(tabs)/04_stays/active`    | Estadías activas o en curso                   |
+| `PastStaysScreen`      | `/(tabs)/04_stays/past`      | Estadías pasadas                              |
+| `CancelledStaysScreen` | `/(tabs)/04_stays/cancelled` | Estadías canceladas                           |
+| `PendingStaysScreen`   | `/(tabs)/04_stays/pending`   | Estadías pendientes de aprobación             |
+| `StayGuestScreen`      | `/(tabs)/04_stays`           | Vista para usuarios visitantes (sin pestañas) |
+
+## API Endpoints
+
+| Método | Path                           | Descripción                    |
+| ------ | ------------------------------ | ------------------------------ |
+| `GET`  | `/stays/mine`                  | Todas las estadías del usuario |
+| `GET`  | `/stays/mine?status=active`    | Estadías activas               |
+| `GET`  | `/stays/mine?status=past`      | Estadías pasadas               |
+| `GET`  | `/stays/mine?status=cancelled` | Estadías canceladas            |
+
+<Note>
+  La API retorna objetos `Booking` que son transformados internamente por `staysApi` para normalizar
+  el campo `property` (el backend puede devolver `home` en lugar de `property` en ciertos casos).
+</Note>
+
+## Hooks
+
+| Hook                  | Descripción                                                                 |
+| --------------------- | --------------------------------------------------------------------------- |
+| `useStays()`          | Fetch y categorización de estadías por estado (active, past, cancelled)     |
+| `useFilteredStays()`  | Filtrado de estadías por criterios múltiples (propiedad, temporada, fechas) |
+| `useAutoShowReview()` | Muestra automáticamente el modal de reseña al completar una estadía         |
+
+## Services
+
+| Servicio            | Descripción                                            |
+| ------------------- | ------------------------------------------------------ |
+| `stayFilterService` | Lógica de filtrado de estadías por criterios múltiples |
+
+## Tipos principales
+
+<CodeGroup>
+```typescript Stay
+type Stay = {
+  id: string;
+  startDate: string;
+  endDate: string;
+  season: {
+    slug: string;
+    allowConsecutive: boolean;
+  };
+  allowLastHour?: boolean;
+  available: boolean;
+  keys?: number;
+  instantKeys?: boolean;
+  booking?: {
+    id: string;
+    type: 'book' | 'exchange' | 'rent';
+  };
+};
+```
+
+```typescript AvailableStays
+// Conteo de estadías disponibles por categoría de temporada
+type AvailableStays = {
+  low: number;
+  mid: number;
+  high: number;
+  peak: number;
+};
+```
+
+```typescript AvailableExchangeStay
+type AvailableExchangeStay = {
+  id: string;
+  remainingStays: number;
+};
+```
+
+</CodeGroup>
+
+### Temporadas
+
+Las estadías se clasifican por temporada: **peak**, **high**, **mid** y **low** (con variantes ski/beach según la ubicación de la propiedad). Cada temporada tiene colores y traducciones asociadas definidas en las constantes `SEASONS`.
+
+| Temporada | Descripción                    |
+| --------- | ------------------------------ |
+| `peak`    | Temporada alta (mayor demanda) |
+| `high`    | Temporada alta intermedia      |
+| `mid`     | Temporada media                |
+| `low`     | Temporada baja                 |
+
+## Store
+
+El módulo utiliza `useReviewQueueStore` en **Zustand** para gestionar la cola de reseñas pendientes:
+
+| Estado                    | Tipo                | Descripción                                                 |
+| ------------------------- | ------------------- | ----------------------------------------------------------- |
+| `queue`                   | `ReviewQueueItem[]` | Cola de reseñas pendientes ordenadas por fecha de check-out |
+| `currentIndex`            | `number`            | Índice de la reseña actual en la cola                       |
+| `hasProcessedThisSession` | `boolean`           | Indica si ya se procesó la cola en la sesión actual         |
+
+<Tabs>
+  <Tab title="Acciones del store">
+    - `populateQueue(stays, getCheckOut)` — Llena la cola con estadías que requieren reseña. Solo se
+    ejecuta una vez por sesión. - `showNextReview()` — Avanza al siguiente item de la cola. -
+    `dismissCurrentReview()` — Descarta la reseña actual y avanza a la siguiente. -
+    `completeCurrentReview()` — Marca como completada y avanza. - `reset()` — Reinicia la cola y
+    permite reprocesar en la siguiente sesión.
+  </Tab>
+  <Tab title="ReviewQueueItem">
+    Cada item de la cola contiene: - `bookingId` — ID de la reserva asociada. - `propertyName` —
+    Nombre de la propiedad para mostrar en el modal. - `checkOut` — Fecha de check-out para ordenar
+    la cola cronológicamente.
+  </Tab>
+</Tabs>
+
+## StayCard Label System (v2)
+
+El sistema de labels de la StayCard usa un modelo de **5 StayRoles** con **dos mensajes** por tarjeta: un **top message** (texto contextual de acción) y un **badge** (indicador de approval).
+
+### StayRoles
+
+La función `getStayRole(stay)` en `src/modules/stays/utils/stayCardMessages.ts` detecta el rol:
+
+| StayRole           | Condición                                        | Top Message                                   | Badge Gender |
+| ------------------ | ------------------------------------------------ | --------------------------------------------- | ------------ |
+| `OWNER_BOOK`       | `role=coowner && type=book`                      | — (sin top message)                           | Femenino     |
+| `OWNER_RESERVED`   | `role=coowner && (rent\|exchange) && guests > 0` | Solicitud de alquiler/intercambio             | Masculino    |
+| `OWNER_PUBLISHED`  | `role=coowner && (rent\|exchange) && sin guests` | PUBLICADA EN ALQUILER/INTERCAMBIO (uppercase) | Femenino     |
+| `INVITED_GUEST`    | `role=guest`                                     | Has sido invitado / Fuiste invitado           | Femenino     |
+| `EXTERNAL_VISITOR` | `role=visitor`                                   | Solicitud / texto descriptivo por approval    | Masculino    |
+
+### Badge Variants
+
+| Variante       | Color    | Condición                      |
+| -------------- | -------- | ------------------------------ |
+| `pending`      | Amarillo | active + free/pending          |
+| `confirmed`    | Verde    | active/past + approved/swapped |
+| `rejected`     | Rojo     | active/past + rejected         |
+| `notConfirmed` | Gris     | past + free/pending            |
+| `cancelled`    | Rojo     | cancelled (cualquier approval) |
+
+### Reglas de normalización
+
+- `free` y `pending` siempre producen el mismo texto ("Pendiente") — spec regla 7
+- `cancelled` status siempre produce el mismo badge ("Cancelada/o") independiente del approval
+- `swapped` solo aplica a `type=exchange`
+
+### Matriz completa de labels (ES)
+
+#### OWNER_BOOK — Coowner reservó su casa (`role=coowner`, `type=book`)
+
+| Status    | Approval | Top Message | Badge         |
+| --------- | -------- | ----------- | ------------- |
+| active    | free     | —           | Pendiente     |
+| active    | pending  | —           | Pendiente     |
+| active    | approved | —           | Confirmada    |
+| active    | rejected | —           | Rechazada     |
+| past      | free     | —           | No confirmada |
+| past      | pending  | —           | No confirmada |
+| past      | approved | —           | Confirmada    |
+| past      | rejected | —           | Rechazada     |
+| cancelled | free     | —           | Cancelada     |
+| cancelled | pending  | —           | Cancelada     |
+| cancelled | approved | —           | Cancelada     |
+| cancelled | rejected | —           | Cancelada     |
+
+#### OWNER_RESERVED — Coowner reservó rent/exchange con guests (`role=coowner`, `type=rent|exchange`, con guests)
+
+**type=rent**
+
+| Status    | Approval | Top Message             | Badge         |
+| --------- | -------- | ----------------------- | ------------- |
+| active    | free     | Solicitud de alquiler   | Pendiente     |
+| active    | pending  | Solicitud de alquiler   | Pendiente     |
+| active    | approved | Solicitud de alquiler   | Confirmado    |
+| active    | rejected | Solicitud de alquiler   | Rechazado     |
+| past      | free     | Solicitaste un alquiler | No confirmado |
+| past      | pending  | Solicitaste un alquiler | No confirmado |
+| past      | approved | Solicitaste un alquiler | Confirmado    |
+| past      | rejected | Solicitaste un alquiler | Rechazado     |
+| cancelled | free     | Solicitaste un alquiler | Cancelado     |
+| cancelled | pending  | Solicitaste un alquiler | Cancelado     |
+| cancelled | approved | Solicitaste un alquiler | Cancelado     |
+| cancelled | rejected | Solicitaste un alquiler | Cancelado     |
+
+**type=exchange**
+
+| Status    | Approval | Top Message                | Badge         |
+| --------- | -------- | -------------------------- | ------------- |
+| active    | free     | Solicitud de intercambio   | Pendiente     |
+| active    | pending  | Solicitud de intercambio   | Pendiente     |
+| active    | approved | Solicitud de intercambio   | Confirmado    |
+| active    | rejected | Solicitud de intercambio   | Rechazado     |
+| past      | free     | Solicitaste un intercambio | No confirmado |
+| past      | pending  | Solicitaste un intercambio | No confirmado |
+| past      | approved | Solicitaste un intercambio | Confirmado    |
+| past      | rejected | Solicitaste un intercambio | Rechazado     |
+| cancelled | free     | Solicitaste un intercambio | Cancelado     |
+| cancelled | pending  | Solicitaste un intercambio | Cancelado     |
+| cancelled | approved | Solicitaste un intercambio | Cancelado     |
+| cancelled | rejected | Solicitaste un intercambio | Cancelado     |
+
+#### OWNER_PUBLISHED — Coowner publicó su casa (`role=coowner`, `type=rent|exchange`, sin guests)
+
+**type=rent**
+
+| Status    | Approval | Top Message           | Badge         |
+| --------- | -------- | --------------------- | ------------- |
+| active    | free     | PUBLICADA EN ALQUILER | Pendiente     |
+| active    | pending  | PUBLICADA EN ALQUILER | Pendiente     |
+| active    | approved | PUBLICADA EN ALQUILER | Alquilada     |
+| active    | rejected | PUBLICADA EN ALQUILER | Rechazada     |
+| past      | free     | PUBLICADA EN ALQUILER | No confirmada |
+| past      | pending  | PUBLICADA EN ALQUILER | No confirmada |
+| past      | approved | PUBLICADA EN ALQUILER | Completada    |
+| past      | rejected | PUBLICADA EN ALQUILER | Rechazada     |
+| cancelled | free     | PUBLICADA EN ALQUILER | Cancelada     |
+| cancelled | pending  | PUBLICADA EN ALQUILER | Cancelada     |
+| cancelled | approved | PUBLICADA EN ALQUILER | Cancelada     |
+| cancelled | rejected | PUBLICADA EN ALQUILER | Cancelada     |
+
+**type=exchange**
+
+| Status    | Approval | Top Message              | Badge         |
+| --------- | -------- | ------------------------ | ------------- |
+| active    | free     | PUBLICADA EN INTERCAMBIO | Pendiente     |
+| active    | pending  | PUBLICADA EN INTERCAMBIO | Pendiente     |
+| active    | approved | PUBLICADA EN INTERCAMBIO | Intercambiada |
+| active    | rejected | PUBLICADA EN INTERCAMBIO | Rechazada     |
+| active    | swapped  | PUBLICADA EN INTERCAMBIO | Confirmada    |
+| past      | free     | PUBLICADA EN INTERCAMBIO | No confirmada |
+| past      | pending  | PUBLICADA EN INTERCAMBIO | No confirmada |
+| past      | approved | PUBLICADA EN INTERCAMBIO | Completada    |
+| past      | rejected | PUBLICADA EN INTERCAMBIO | Rechazada     |
+| past      | swapped  | PUBLICADA EN INTERCAMBIO | Completada    |
+| cancelled | free     | PUBLICADA EN INTERCAMBIO | Cancelada     |
+| cancelled | pending  | PUBLICADA EN INTERCAMBIO | Cancelada     |
+| cancelled | approved | PUBLICADA EN INTERCAMBIO | Cancelada     |
+| cancelled | rejected | PUBLICADA EN INTERCAMBIO | Cancelada     |
+| cancelled | swapped  | PUBLICADA EN INTERCAMBIO | Cancelada     |
+
+#### INVITED_GUEST — Invitado a estancia (`role=guest`)
+
+| Status    | Approval | Top Message                      | Badge         |
+| --------- | -------- | -------------------------------- | ------------- |
+| active    | free     | Has sido invitado a una estancia | Pendiente     |
+| active    | pending  | Has sido invitado a una estancia | Pendiente     |
+| active    | approved | Has sido invitado a una estancia | Confirmada    |
+| active    | rejected | Has sido invitado a una estancia | Rechazada     |
+| active    | swapped  | Has sido invitado a una estancia | Confirmada    |
+| past      | free     | Fuiste invitado a esta estancia  | No confirmada |
+| past      | pending  | Fuiste invitado a esta estancia  | No confirmada |
+| past      | approved | Fuiste invitado a esta estancia  | Confirmada    |
+| past      | rejected | Fuiste invitado a esta estancia  | Rechazada     |
+| past      | swapped  | Fuiste invitado a esta estancia  | Confirmada    |
+| cancelled | free     | Fuiste invitado a esta estancia  | Cancelada     |
+| cancelled | pending  | Fuiste invitado a esta estancia  | Cancelada     |
+| cancelled | approved | Fuiste invitado a esta estancia  | Cancelada     |
+| cancelled | rejected | Fuiste invitado a esta estancia  | Cancelada     |
+| cancelled | swapped  | Fuiste invitado a esta estancia  | Cancelada     |
+
+#### EXTERNAL_VISITOR — Cliente externo (`role=visitor`)
+
+**type=rent**
+
+| Status    | Approval | Top Message                     | Badge         |
+| --------- | -------- | ------------------------------- | ------------- |
+| active    | free     | Solicitud de alquiler           | Pendiente     |
+| active    | pending  | Solicitud de alquiler           | Pendiente     |
+| active    | approved | Solicitud de alquiler           | Confirmado    |
+| active    | rejected | Solicitud de alquiler           | Rechazado     |
+| past      | free     | Alquilaste esta casa            | No confirmado |
+| past      | pending  | Tu alquiler quedó sin confirmar | No confirmado |
+| past      | approved | Alquilaste esta casa            | Confirmado    |
+| past      | rejected | Tu alquiler fue rechazado       | Rechazado     |
+| cancelled | free     | Alquiler cancelado              | Cancelado     |
+| cancelled | pending  | Solicitud de alquiler cancelada | Cancelado     |
+| cancelled | approved | Alquiler cancelado              | Cancelado     |
+| cancelled | rejected | Alquiler rechazado              | Cancelado     |
+
+**type=exchange**
+
+| Status    | Approval | Top Message                        | Badge         |
+| --------- | -------- | ---------------------------------- | ------------- |
+| active    | free     | Solicitud de intercambio           | Pendiente     |
+| active    | pending  | Solicitud de intercambio           | Pendiente     |
+| active    | approved | Solicitud de intercambio           | Confirmado    |
+| active    | rejected | Solicitud de intercambio           | Rechazado     |
+| active    | swapped  | Solicitud de intercambio           | Confirmado    |
+| past      | free     | Intercambiaste esta casa           | No confirmado |
+| past      | pending  | Tu intercambio quedó sin confirmar | No confirmado |
+| past      | approved | Intercambiaste esta casa           | Confirmado    |
+| past      | rejected | Tu intercambio fue rechazado       | Rechazado     |
+| past      | swapped  | Intercambiaste esta casa           | Confirmado    |
+| cancelled | free     | Intercambio cancelado              | Cancelado     |
+| cancelled | pending  | Solicitud de intercambio cancelada | Cancelado     |
+| cancelled | approved | Intercambio cancelado              | Cancelado     |
+| cancelled | rejected | Intercambio rechazado              | Cancelado     |
+| cancelled | swapped  | Intercambio cancelado              | Cancelado     |
+
+### Archivos clave
+
+- `src/modules/stays/utils/stayCardMessages.ts` — lógica de detección de StayRole y resolución de mensajes
+- `src/modules/stays/components/StayCard.tsx` — componente que renderiza top message + badge
+- `src/core/i18n/languages/es.ts` — claves `stayScreen.stayCard.*`
+- `src/core/i18n/languages/en.ts` — claves equivalentes en inglés
+
+## Componentes destacados
+
+<CardGroup cols={2}>
+  <Card title="StayCard" icon="calendar">
+    Tarjeta de estadía con información de fechas, propiedad y estado. Incluye indicador visual de
+    temporada.
+  </Card>
+  <Card title="StayList" icon="list">
+    Listado de estadías con soporte para skeletons de carga y estado vacío.
+  </Card>
+  <Card title="StayDetailsView" icon="circle-info">
+    Vista de detalle de una estadía con información completa y panel de acciones.
+  </Card>
+  <Card title="SeasonsDisplay" icon="sun">
+    Visualización de temporadas con colores y conteo de estadías disponibles por categoría.
+  </Card>
+  <Card title="StayActionsPanel" icon="ellipsis">
+    Panel de acciones contextuales: cancelar, modificar y gestionar invitados.
+  </Card>
+  <Card title="AutoShowReviewModal" icon="star">
+    Modal que se muestra automáticamente al completar una estadía. Embebe `SurveyScreen` del modulo
+    Surveys con `slug="stay-review"` y `onClose` callback. Utiliza `useReviewQueueStore` para
+    gestionar múltiples reseñas pendientes.
+  </Card>
+</CardGroup>
+
+### Modales
+
+| Modal                 | Descripción                                                                                        |
+| --------------------- | -------------------------------------------------------------------------------------------------- |
+| `AutoShowReviewModal` | Prompt automático de reseña post-estadía. Embebe `SurveyScreen slug="stay-review"` en un `<Modal>` |
+| `StayCancelModal`     | Confirmación de cancelación de estadía                                                             |
+| `StayModifyModal`     | Modificación de fechas de estadía                                                                  |
+
+### Reseñas de estadía
+
+Las reseñas de estadía usan el motor genérico de encuestas del módulo **Surveys** con `slug="stay-review"` y `scopeType="booking"`. El flujo tiene dos entry points:
+
+- **StayCard**: El botón "Dar tu opinión" en estancias pasadas navega a `/booking/review?bookingId={id}`, que renderiza `SurveyScreen`.
+- **AutoShowReviewModal**: Se muestra automáticamente tras el checkout. Embebe `SurveyScreen` dentro de un `<Modal>` con `onClose` callback para avanzar en la cola de reseñas.
+
+<Note>
+  Las reseñas de estadía se gestionan a través del módulo Surveys (endpoint
+  `/surveys/mobile/stay-review`), no a través de endpoints custom del módulo Property. El módulo
+  Stays gestiona la UX y la cola de reseñas.
+</Note>

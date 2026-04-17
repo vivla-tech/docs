@@ -1,0 +1,122 @@
+---
+title: "Autenticación"
+description: "Flujo de autenticación con Auth0, guards y sistema de permisos de la API"
+---
+
+# Autenticación
+
+La API usa **Auth0** como proveedor de identidad principal, con tokens JWT validados mediante JWKS. Además, soporta autenticación por API Key para integraciones y un flujo especial para la app mobile.
+
+## Flujos de autenticación
+
+### Auth0 (flujo principal)
+
+```
+Cliente → Authorization: Bearer <JWT> → Backend
+                                          │
+                                    Auth0AuthGuard
+                                          │
+                                   1. Extrae token
+                                   2. Decodifica header (kid)
+                                   3. Obtiene signing key de JWKS (cache 10 min)
+                                   4. Verifica firma, audience e issuer
+                                   5. Valida usuario en DB (cache 5 min)
+                                   6. Inyecta user en request
+```
+
+**Claims personalizados del JWT de Auth0:**
+
+| Claim | Descripción |
+|-------|-------------|
+| `sub` | ID de Auth0 del usuario |
+| `https://auth.vivla.com/email` | Email del usuario |
+| `https://auth.vivla.com/org_id` | ID de organización |
+| `https://auth.vivla.com/org_name` | Nombre de organización |
+| `https://auth.vivla.com/tools` | Permisos de herramientas (mapa tool → role) |
+
+**Primer login:** Si el usuario no existe en la base de datos, se crea automáticamente. Si ya existe un usuario con el mismo email, se vincula el `auth0_id`. El avatar se sube a Cloudinary si es necesario.
+
+### API Key
+
+```
+Cliente → X-API-Key: <key> → Backend
+                                │
+                           ApiKeyAuthGuard
+                                │
+                         Valida contra env var
+```
+
+Usado para integraciones del sistema (webhooks, n8n, creación de propiedades externas).
+
+### Mobile (vivla-mobile)
+
+```
+App mobile → { authToken, userId } → Backend
+                                        │
+                                  MobileAuthGuard
+                                        │
+                                 Valida authToken + userId
+                                 Busca usuario por vivla_user_id
+                                 Verifica chat_enabled
+                                 Genera Stream.io token (1h)
+```
+
+### Combinado (Auth0 o API Key)
+
+El guard `Auth0OrApiKeyGuard` intenta primero API Key (más rápido), luego Auth0 JWT. Usado en endpoints como inbox messages que pueden recibir requests de usuarios autenticados o de integraciones.
+
+## Guards disponibles
+
+| Guard | Ubicación | Uso |
+|-------|-----------|-----|
+| `Auth0AuthGuard` | `src/auth/guards/auth0-auth.guard.ts` | Guard principal para todas las rutas protegidas |
+| `RolesGuard` | `src/auth/guards/roles.guard.ts` | Verifica roles: `admin`, `moderator`, `user` |
+| `ToolAccessGuard` | `src/auth/guards/tool-access.guard.ts` | Verifica acceso a herramientas con jerarquía (viewer < editor < admin) |
+| `ApiKeyAuthGuard` | `src/auth/guards/api-key-auth.guard.ts` | Valida header `X-API-Key` |
+| `Auth0OrApiKeyGuard` | `src/auth/guards/auth0-or-api-key.guard.ts` | Intenta API Key, fallback a Auth0 |
+| `MobileAuthGuard` | `src/chat/mobile/guards/mobile-auth.guard.ts` | Valida credenciales mobile |
+
+## Decoradores
+
+| Decorador | Descripción |
+|-----------|-------------|
+| `@Public()` | Marca el endpoint como público (sin autenticación) |
+| `@Roles(role1, role2, ...)` | Requiere uno de los roles especificados |
+| `@RequireTool(toolSlug, level)` | Requiere acceso a una herramienta con nivel mínimo |
+| `@CurrentUser()` | Inyecta el objeto de usuario autenticado completo |
+| `@CurrentUserId()` | Inyecta solo el ID del usuario |
+
+## Jerarquía de permisos de herramientas
+
+El `ToolAccessGuard` implementa una jerarquía de acceso:
+
+```
+none → viewer → editor → admin
+```
+
+Si un endpoint requiere nivel `editor`, un usuario con nivel `admin` también tiene acceso. Los permisos se obtienen de:
+
+1. Claims del JWT de Auth0 (`https://auth.vivla.com/tools`)
+2. Metadata del usuario en la base de datos
+
+Ambas fuentes se combinan (merge) al validar el token.
+
+## Objeto de usuario autenticado
+
+```typescript
+interface AuthenticatedUser {
+  id: string              // UUID en Supabase
+  email: string
+  firstName?: string
+  lastName?: string
+  role: UserRole          // 'admin' | 'user' | 'moderator'
+  auth0Id: string
+  supabaseUserId?: string
+  organizationId?: string
+  toolPermissions?: Record<string, { role: string }>
+}
+```
+
+<Note>
+  El cache de usuarios tiene un TTL de **5 minutos**. Las signing keys de JWKS se cachean por **10 minutos**. Esto optimiza el rendimiento evitando consultas a Auth0 y a la base de datos en cada request.
+</Note>

@@ -1,31 +1,106 @@
 ---
-title: "Mobile App"
-description: "App móvil de VIVLA para copropietarios — React Native + Expo"
+title: 'Vivla Mobile App'
+description: 'Documentación técnica de la aplicación móvil de VIVLA'
 ---
 
-# Mobile App
+# Vivla Mobile App
 
-App móvil para copropietarios de VIVLA. Permite reservar estancias, comunicarse, gestionar propiedades y perfil desde iOS y Android.
+Vivla es una aplicación móvil para la gestión de propiedades compartidas (co-ownership). Permite a los copropietarios reservar estancias, comunicarse entre sí, gestionar su perfil y mantenerse informados sobre sus propiedades, todo desde una experiencia nativa en iOS y Android.
 
-<Note>
-  La documentación completa de la Mobile App se genera automáticamente desde el repositorio `vivla-mobile-app`. Si esta página aparece sin contenido detallado, la agregación aún no se ha ejecutado.
-</Note>
+## Versión actual
 
-## Repositorio
+<Note>La versión actual de la app es **2.1.12** (build **168**).</Note>
 
-- **Repo:** [vivla-tech/vivla-mobile-app](https://github.com/vivla-tech/vivla-mobile-app)
-- **Stack:** React Native 0.79, Expo SDK 53, TypeScript 5.8
-- **Hosting:** App Store (iOS), Google Play (Android)
+## Plataformas soportadas
 
-## Módulos principales
+| Plataforma | Versión mínima |
+| ---------- | -------------- |
+| iOS        | 17.0           |
+| Android    | API 34         |
 
-| Módulo | Descripción |
-|--------|-------------|
-| **Auth** | Login, registro, reset de contraseña, modo visitante |
-| **Booking** | Reservas de estancias con calendario |
-| **Chat** | Mensajería en tiempo real (via Tools API) |
-| **Property** | Gestión y detalle de propiedades |
-| **Stays** | Estancias actuales y pasadas |
-| **Surveys** | Encuestas NPS y de satisfacción |
-| **Profile** | Perfil de usuario y configuración |
-| **Notifications** | Notificaciones push y en app |
+## Stack tecnológico
+
+<CardGroup cols={2}>
+  <Card title="React Native 0.79.6" icon="mobile">
+    Framework base para desarrollo móvil multiplataforma.
+  </Card>
+  <Card title="Expo SDK 53" icon="rocket">
+    Plataforma de desarrollo y distribución sobre React Native.
+  </Card>
+  <Card title="Expo Router 5.1.8" icon="route">
+    Enrutamiento basado en archivos (file-based routing) con typed routes.
+  </Card>
+  <Card title="TypeScript 5.8.3" icon="code">
+    Tipado estático para mayor seguridad y productividad.
+  </Card>
+</CardGroup>
+
+<Note>La **New Architecture** de React Native está habilitada en este proyecto.</Note>
+
+## Librerías principales
+
+| Librería             | Versión | Propósito                                               |
+| -------------------- | ------- | ------------------------------------------------------- |
+| Zustand              | 5.0.3   | Estado del cliente                                      |
+| TanStack React Query | 5.71.5  | Estado del servidor (fetching, caching, sincronización) |
+| Stream Chat Expo     | 8.8.1   | Mensajería en tiempo real                               |
+| React Hook Form      | 7.55.0  | Gestión de formularios                                  |
+| Zod                  | 3.24.2  | Validación de esquemas                                  |
+| i18next              | 24.2.3  | Internacionalización                                    |
+| PostHog              | 4.35.1  | Analytics                                               |
+| Sentry               | 6.14.0  | Monitoreo de errores                                    |
+| Axios                | 1.8.4   | Cliente HTTP                                            |
+
+## Estructura del proyecto
+
+<Tabs>
+  <Tab title="Directorios principales">
+    ```
+    managua/
+    ├── app/              # Rutas (Expo Router file-based routing)
+    ├── src/
+    │   ├── modules/      # Módulos de negocio
+    │   ├── shared/       # Código compartido
+    │   └── core/         # Configuración central
+    ├── assets/           # Recursos estáticos (imágenes, fuentes)
+    └── docs/             # Documentación
+    ```
+  </Tab>
+  <Tab title="app/">
+    El directorio `app/` contiene las rutas de la aplicación siguiendo la convención de **Expo Router** (file-based routing). Cada archivo o carpeta dentro de `app/` se mapea directamente a una ruta navegable.
+  </Tab>
+  <Tab title="src/modules/">
+    Los módulos de negocio encapsulan la lógica, componentes y servicios de cada dominio funcional:
+
+    | Módulo | Descripción |
+    |--------|-------------|
+    | `auth` | Autenticación y gestión de sesión |
+    | `booking` | Reservas de estancias |
+    | `chat` | Mensajería en tiempo real |
+    | `home` | Pantalla principal y dashboard |
+    | `invitations` | Invitaciones a copropietarios |
+    | `notifications` | Notificaciones push y en app |
+    | `profile` | Perfil de usuario |
+    | `property` | Gestión de propiedades |
+    | `stays` | Estancias y calendario |
+
+  </Tab>
+  <Tab title="src/shared/">
+    Código reutilizable compartido entre módulos:
+
+    - **components/** — Componentes UI genéricos
+    - **hooks/** — Custom hooks compartidos
+    - **stores/** — Stores de Zustand globales
+    - **services/** — Servicios HTTP y utilidades de red
+    - **contexts/** — React Contexts compartidos
+
+  </Tab>
+  <Tab title="src/core/">
+    Configuración central de la aplicación:
+
+    - **analytics/** — Integración con PostHog
+    - **config/** — Configuración de entorno y constantes
+    - **featureFlags/** — Sistema de feature flags
+
+  </Tab>
+</Tabs>

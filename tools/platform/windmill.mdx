@@ -1,0 +1,171 @@
+---
+title: "Windmill (Automatizaciones)"
+description: "Plataforma de automatización para syncs programados, webhooks y notificaciones — desplegada en Railway"
+---
+
+# Windmill
+
+Windmill es la plataforma central de automatizaciones de Vivla. Desplegada en Railway como instancia self-hosted, gestiona syncs programados, webhooks y notificaciones desde un único workspace.
+
+## Arquitectura
+
+```
+┌──────────────┐     ┌──────────────────┐     ┌──────────────┐
+│  Windmill    │────▶│  Vivla Tools API │────▶│  Supabase    │
+│  (Railway)   │     │  (NestJS)        │     │  (PostgreSQL)│
+└──────────────┘     └──────────────────┘     └──────────────┘
+       │                     │
+       │              ┌──────────────┐
+       │              │  Firebase    │
+       │              │  (Firestore) │
+       │              └──────────────┘
+       │
+       ▼
+┌──────────────┐
+│  Slack       │
+│  (alertas)   │
+└──────────────┘
+```
+
+## Workspace
+
+Un único workspace `vivla` organizado por proyecto:
+
+| Carpeta | Proyecto | Contenido |
+|---------|----------|-----------|
+| `f/vivla_tools/sync/` | Vivla Tools | Sync jobs (users, properties, deals, bookings, firebase-legacy-responses) |
+| `f/vivla_tools/notifications/` | Vivla Tools | Reemplazo de Firebase Cloud Functions |
+| `f/vivla_tools/webhooks/` | Vivla Tools | Handlers de eventos externos |
+| `f/vivla_backend/` | vivla-backend | Automaciones de eventos y migraciones |
+| `f/shared/` | Compartido | Utilidades cross-project (HTTP clients) |
+
+## Variables de entorno
+
+Los scripts reciben un parámetro `env` (`'dev'` o `'prod'`) y resuelven variables con el sufijo correspondiente:
+
+```typescript
+const suffix = env === 'prod' ? '_prod' : '_dev'
+const apiUrl = await wmill.getVariable(`f/vivla_tools/api_url${suffix}`)
+const apiKey = await wmill.getVariable(`f/vivla_tools/api_key${suffix}`)
+```
+
+| Variable dev | Variable prod | Secret |
+|-------------|---------------|--------|
+| `f/vivla_tools/api_url_dev` | `f/vivla_tools/api_url_prod` | No |
+| `f/vivla_tools/api_key_dev` | `f/vivla_tools/api_key_prod` | Si |
+
+## Autenticación
+
+Los scripts se autentican contra la API con `x-api-key` header. El backend valida el key via `Auth0OrApiKeyGuard` — el mismo guard que acepta tokens Auth0 para usuarios humanos.
+
+No requiere Auth0 M2M, no expira, no necesita refresh.
+
+## Sync Jobs
+
+### Endpoints
+
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/chat/sync/users` | POST | Sync usuarios desde Firebase. Body: `{ chainDealsSync?: boolean }` |
+| `/chat/sync/properties` | POST | Sync propiedades |
+| `/chat/sync/deals` | POST | Sync deals |
+| `/chat/sync/bookings` | POST | Sync bookings |
+| `/chat/sync/firebase-legacy-responses` | POST | Sync respuestas NPS legacy (3 colecciones Firebase → `survey_legacy_responses`) |
+| `/chat/sync/jobs/:id` | GET | Estado del job (incluye `errorMessage` y `steps` en caso de fallo) |
+| `/chat/sync/jobs/:id/logs` | GET | Logs detallados del job |
+| `/chat/sync/jobs` | GET | Listar jobs recientes |
+
+### Flujo de ejecución
+
+1. Windmill llama `POST /chat/sync/{entity}` con `x-api-key`
+2. Backend crea un sync job en `chat_sync_jobs` y ejecuta el sync
+3. Windmill poll `GET /chat/sync/jobs/:id` cada 5 segundos hasta completion
+4. En caso de fallo, el error se guarda en `error_message` + `chat_sync_logs`
+
+## Flows programados
+
+### Daily Full Sync
+
+Sync completo diario de todas las entidades:
+
+- **Path:** `f/vivla_tools/sync/sync_full`
+- **Schedule:** `0 4 * * *` (4:00 AM UTC)
+- **Retry:** 2 reintentos, 5 minutos de backoff
+
+| Step | Script | Input |
+|------|--------|-------|
+| 1 | `sync_users` | `env = flow_input.env`, `chainDealsSync = true` |
+| 2 | `sync_properties` | `env = flow_input.env` |
+| 3 | `sync_bookings` | `env = flow_input.env` |
+| 4 | `sync_firebase_legacy_responses` | `env = flow_input.env` |
+| 5 | `slack_notify` | Resultado de steps anteriores |
+
+<Warning>
+  **Cada step debe tener `env` conectado a `flow_input.env`.** Si no se conecta, el step usa el default `'dev'` aunque el schedule pase `'prod'`. Esta es la misconfiguration más común — si el sync prod parece no funcionar, verificar primero este wiring.
+</Warning>
+
+### NPS Legacy Responses (Hourly)
+
+Sync independiente de respuestas NPS legacy:
+
+- **Path:** `f/vivla_tools/sync/sync_firebase_legacy_responses`
+- **Schedule:** `0 * * * *` (cada hora)
+- **Colecciones:** `nps-home-responses`, `nps-booking`, `nps-home-excellence-values`
+
+El sync es idempotente (upsert en `source_collection + source_doc_id`).
+
+## Slack Notifications
+
+El último step del flow envía un resumen a Slack usando Block Kit:
+
+- **Canal:** `#vivla-tools-sync`
+- **Resource:** `slack_auth` (tipo RT.Slack configurado en Windmill)
+
+## Scripts de referencia
+
+Todos los scripts están en el repo como referencia:
+
+```
+docs/internal/tools/chat/implementation/epics/3.2-sync-module-improvements/scripts/
+  sync_users.ts
+  sync_properties.ts
+  sync_deals.ts
+  sync_bookings.ts
+  sync_firebase_legacy_responses.ts
+  sync_full.ts
+  slack_notify.ts
+```
+
+## Debugging
+
+### Ver error de un sync job fallido
+
+```sql
+-- En Supabase SQL Editor
+SELECT id, status, error_message, steps, result
+FROM chat_sync_jobs
+WHERE id = '<job-id>';
+
+-- Logs detallados
+SELECT level, message, context, created_at
+FROM chat_sync_logs
+WHERE job_id = '<job-id>'
+ORDER BY created_at DESC;
+```
+
+### Errores comunes
+
+| Error | Causa | Solución |
+|-------|-------|----------|
+| `MODULE_NOT_FOUND` en CLI | El backend en prod ejecuta JS compilado pero el spawn apunta a `.ts` | Verificar que `sync.service.ts` detecta `dist/` y usa `node` + `.js` |
+| `variable not found` | Variable de Windmill no existe o tiene path incorrecto | Verificar sufijo `_dev`/`_prod` y el path exacto con `f/` prefix |
+| `401 Unauthorized` | API key no coincide con la del backend | Comparar variable de Windmill con `API_KEY` en Railway |
+| Job `failed` sin detalle | Script Windmill no lee `errorMessage` del job | Actualizar script para incluir `errorMessage` y `steps` en el throw |
+| Prod sync hitting dev | `env` no conectado a `flow_input.env` | Abrir flow editor, conectar cada step a `flow_input.env` |
+
+## Documentación técnica detallada
+
+Para guías paso a paso de configuración del workspace:
+
+- `docs/internal/tools/chat/implementation/epics/3.2-sync-module-improvements/02-windmill-setup-guide.md`
+- `docs/internal/tools/chat/implementation/epics/3.2-sync-module-improvements/03-windmill-configuration-walkthrough.md`

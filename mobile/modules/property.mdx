@@ -1,0 +1,220 @@
+---
+title: 'Property'
+description: 'Módulo de propiedades, reseñas e issues'
+---
+
+## Descripción
+
+El módulo **Property** gestiona el detalle completo de propiedades, disponibilidad, reportes de calificación e issues. Incluye propiedades propias y públicas (para intercambio y alquiler).
+
+- **Ubicación:** `src/modules/property/`
+
+## Screens
+
+| Screen                  | Ruta                       | Descripción                                                        |
+| ----------------------- | -------------------------- | ------------------------------------------------------------------ |
+| `PropertyDetailsScreen` | `/property/[id]`           | Detalle completo de la propiedad con galería, amenidades y accesos |
+| `ArrivalReviewScreen`   | `/property/arrival-review` | Revision de llegada (usa `SurveyScreen slug="arrival-review"`)     |
+| `RatingReportScreen`    | `/property/rating-report`  | Reporte de calificaciones e issues de la propiedad                 |
+
+<Note>
+  La ruta `/property/arrival-review` usa el motor genérico de encuestas del módulo **Surveys** con
+  `slug="arrival-review"` y `scopeType="booking"`. La implementación custom anterior
+  (`ArrivalReviewForm`) fue eliminada. Ver [Surveys](/modules/surveys) para detalles del motor.
+</Note>
+
+## API Endpoints
+
+| Método | Path                           | Descripción                                                |
+| ------ | ------------------------------ | ---------------------------------------------------------- |
+| `GET`  | `/properties/{id}`             | Detalle de propiedad (autenticado)                         |
+| `GET`  | `/properties/public/{id}`      | Detalle de propiedad pública (sin autenticación)           |
+| `GET`  | `/properties/{id}/calendar`    | Disponibilidad y calendario de la propiedad                |
+| `GET`  | `/bookings/exchange`           | Propiedades disponibles para intercambio                   |
+| `GET`  | `/bookings/rental`             | Propiedades disponibles para alquiler                      |
+| `GET`  | `/properties/public`           | Listado de propiedades públicas                            |
+| `POST` | `/properties/issue`            | Reportar un issue en la propiedad                          |
+| `GET`  | `/properties/{id}/nps-results` | Reporte de calificaciones de la propiedad                  |
+| `GET`  | `/properties/{id}/issues`      | Listado de issues (soporta filtro por status y paginación) |
+
+<Note>
+  Los endpoints de arrival-review y stay-review fueron migrados al módulo **Surveys**
+  (`/surveys/mobile/arrival-review`, `/surveys/mobile/stay-review`). Ver
+  [Surveys](/modules/surveys).
+</Note>
+
+## Hooks
+
+| Hook                      | Descripción                                               |
+| ------------------------- | --------------------------------------------------------- |
+| `useProperties()`         | Gestión de selección y listado de propiedades del usuario |
+| `useProperty(propertyId)` | Obtiene el detalle de una propiedad individual            |
+
+## Tipos principales
+
+<CodeGroup>
+```typescript Property
+type Property = {
+  id: string;
+  name: string;
+  type: string;
+  coverImage?: string;
+  description?: string;
+  gallery: { path: string }[];
+  score?: {
+    value: number;
+    ratings: number;
+    scoreInfo?: string;
+    showUrl?: boolean;
+  };
+  addressInfo: {
+    address: string;
+    city: string;
+    country?: string;
+    postalCode?: string;
+    latitude: number;
+    longitude: number;
+    location: { id: string; name: string; picture: string };
+  };
+  guestManager?: GuestManager;
+  characteristics: {
+    bedrooms: number;
+    bathrooms: number;
+    beds: number;
+    size?: number | null;
+    capacity?: number;
+    bathtubs?: number;
+    price?: number;
+  };
+  amenities?: { slug: string; room: string }[];
+  accessInfo?: { /* códigos de acceso, WiFi */ };
+  parkings?: { /* dirección, spot, código */ }[];
+  bookings?: Booking[];
+  documents?: { slug: string; url: string }[];
+  externalUrl?: string;
+  userRole?: UserRoleType;
+  matched?: boolean;
+  keys?: { peak: number; high: number; mid: number; low: number };
+};
+```
+
+```typescript Tipos derivados
+type PropertyDisplay = Pick<Property,
+  'id' | 'name' | 'type' | 'coverImage' | 'userRole'
+> & { addressInfo: Pick<...>; guestManager?: GuestManager };
+
+type PropertyList = Pick<Property,
+  'id' | 'name' | 'type' | 'coverImage' | 'userRole'
+> & { addressInfo: Pick<Property['addressInfo'], 'city'> };
+
+type PropertyCalendar = Stay[];
+```
+
+```typescript Issues
+type PropertyIssue = {
+  homeId: string;
+  description: string;
+  attachments?: string[];
+};
+
+type PropertyReview = {
+  id?: string;
+  propertyId: string;
+  userId?: string;
+  message: string;
+};
+```
+
+```typescript Season
+type Season = {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  startSlotDay: string;
+  endSlotDay: string;
+  allowsTwoConsecutiveWeeks: boolean;
+};
+```
+
+</CodeGroup>
+
+<Warning>
+  No documentar valores reales de precios ni códigos de acceso. Solo documentar la estructura de los
+  tipos. El campo `accessInfo` contiene datos sensibles (códigos, contraseñas WiFi) que se muestran
+  únicamente al usuario autenticado con el rol correspondiente.
+</Warning>
+
+## Store
+
+El módulo utiliza `usePropertyStore` en **Zustand** para gestionar el estado de propiedades:
+
+| Estado                 | Tipo                   | Descripción                                   |
+| ---------------------- | ---------------------- | --------------------------------------------- |
+| `selectedProperty`     | `Property \| null`     | Propiedad actualmente seleccionada            |
+| `selectedPropertyId`   | `string \| null`       | ID de la propiedad seleccionada               |
+| `selectedPropertyType` | `string \| null`       | Tipo de la propiedad seleccionada             |
+| `selectedPropertyRole` | `UserRoleType \| null` | Rol del usuario en la propiedad seleccionada  |
+| `ownedPropertiesList`  | `PropertyList[]`       | Lista de propiedades propias del usuario      |
+| `properties`           | `Property[]`           | Propiedades generales (para booking/exchange) |
+
+Ver [State Management](/mobile/architecture/state-management) para detalles de la arquitectura de estado.
+
+## Features
+
+El módulo organiza funcionalidades complejas en sub-features:
+
+<CardGroup cols={2}>
+  <Card title="rating-report" icon="chart-bar">
+    Reporte de calificaciones con secciones de score, feedback de llegada, mantenimiento y
+    habitaciones. Hook: `useRatingReport`.
+  </Card>
+  <Card title="issues" icon="triangle-exclamation">
+    Gestión de issues reportados con listado, detalle, filtro por status (active, pending, upgrade,
+    closed) y paginación. Hook: `useIssues`.
+  </Card>
+</CardGroup>
+
+<Note>
+  La feature `arrival-review` fue migrada al módulo **Surveys**. La ruta `/property/arrival-review`
+  ahora renderiza `SurveyScreen slug="arrival-review"`. El directorio `features/arrival-review/` y
+  sus componentes custom (`ArrivalReviewForm`, `ArrivalReviewCard`, `CommentInput`, `ProgressBar`)
+  fueron eliminados.
+</Note>
+
+## Componentes destacados
+
+<CardGroup cols={2}>
+  <Card title="PropertyDetails" icon="house">
+    Vista completa de la propiedad con todas sus secciones: héroe, galería, características,
+    amenidades y accesos.
+  </Card>
+  <Card title="PropertyHero" icon="image">
+    Imagen principal de la propiedad con overlay de información básica.
+  </Card>
+  <Card title="PropertyGalleryModal" icon="images">
+    Modal de galería de imágenes a pantalla completa con navegación.
+  </Card>
+  <Card title="PropertyCard" icon="id-card">
+    Tarjeta resumen de propiedad para listados, con imagen, nombre y ubicación.
+  </Card>
+  <Card title="PropertiesFilter" icon="filter">
+    Componente de filtrado de propiedades en listados.
+  </Card>
+  <Card title="PropertyLabels" icon="tag">
+    Etiquetas visuales de la propiedad (tipo, estado, temporada).
+  </Card>
+</CardGroup>
+
+<Tabs>
+  <Tab title="Propiedad autenticada">
+    El endpoint `GET /properties/{id}` requiere autenticación y devuelve información completa
+    incluyendo `accessInfo`, `parkings` y `bookings` asociados. Los datos sensibles solo se muestran
+    según el `userRole`.
+  </Tab>
+  <Tab title="Propiedad pública">
+    El endpoint `GET /properties/public/{id}` no requiere autenticación y devuelve un subconjunto de
+    datos sin información sensible. Se utiliza para la vista de propiedades de intercambio y
+    alquiler.
+  </Tab>
+</Tabs>

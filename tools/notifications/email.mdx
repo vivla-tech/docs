@@ -1,0 +1,65 @@
+---
+title: "Email"
+description: "Servicio de envio de emails transaccionales con templates HTML via Resend"
+---
+
+# Email
+
+El modulo de Email gestiona el envio de correos electronicos transaccionales usando Resend como proveedor. Incluye 8 templates HTML profesionales con soporte para variables dinamicas.
+
+## Proveedor
+
+**Resend** — servicio de email API-first. Configurado via `RESEND_API_KEY`.
+
+## Templates disponibles
+
+| Template | Uso | Variables |
+|----------|-----|-----------|
+| `welcome` | Onboarding de usuario | `firstName`, `lastName`, `loginUrl` |
+| `password-reset` | Recuperacion de password | `firstName`, `resetUrl`, `expiresIn` |
+| `subscription-confirmation` | Suscripcion completada | `firstName`, `planName`, `amount`, `currency`, `nextBillingDate`, `billingPortalUrl` |
+| `subscription-cancelled` | Cancelacion de suscripcion | `firstName`, `planName`, `cancellationDate`, `accessUntil` |
+| `payment-failed` | Fallo de pago | `firstName`, `planName`, `amount`, `currency`, `retryDate`, `updatePaymentUrl` |
+| `invoice` | Envio de factura | `firstName`, `invoiceNumber`, `amount`, `currency`, `dueDate`, `downloadUrl` |
+| `trial-ending` | Aviso fin de trial | `firstName`, `trialEndDate`, `upgradeUrl` |
+| `subscription-renewal` | Renovacion confirmada | `firstName`, `planName`, `renewalDate`, `amount`, `currency` |
+
+Cada template incluye version HTML (responsive con CSS inline) y version texto plano.
+
+## API Endpoints
+
+Todos los endpoints requieren rol `admin`.
+
+| Metodo | Endpoint | Descripcion |
+|--------|----------|-------------|
+| GET | `/email/templates` | Listar templates disponibles |
+| GET | `/email/templates/:name` | Detalle de un template |
+| POST | `/email/test` | Enviar email de prueba con variables custom |
+| POST | `/email/welcome` | Enviar email de bienvenida a usuario |
+
+## Opciones de envio
+
+```typescript
+{
+  to: string          // destinatario
+  subject: string     // asunto
+  html: string        // contenido HTML
+  text?: string       // texto plano (fallback)
+  from?: string       // remitente
+  replyTo?: string    // reply-to
+  cc?: string[]       // copia
+  bcc?: string[]      // copia oculta
+  attachments?: []    // adjuntos
+  tags?: string[]     // categorizacion
+}
+```
+
+## Estructura de modulo
+
+```
+apps/backend/src/email/
+  email.module.ts
+  email.controller.ts
+  email.service.ts
+  templates/           # Templates HTML
+```

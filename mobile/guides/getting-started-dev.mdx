@@ -1,0 +1,152 @@
+---
+title: 'Entorno de Desarrollo'
+description: 'Configuración completa del entorno de desarrollo local'
+---
+
+# Entorno de Desarrollo
+
+Esta guia cubre todo lo necesario para configurar el entorno de desarrollo local de la app movil de Vivla.
+
+## Prerrequisitos
+
+Antes de comenzar, asegurate de tener instaladas las siguientes herramientas:
+
+<CardGroup cols={2}>
+  <Card title="Node.js 20+" icon="node">
+    Runtime de JavaScript. Se recomienda usar `nvm` para gestionar versiones.
+  </Card>
+  <Card title="npm" icon="package">
+    Gestor de paquetes incluido con Node.js.
+  </Card>
+  <Card title="EAS CLI >= 16.16.0" icon="terminal">
+    CLI de Expo Application Services para builds y updates.
+  </Card>
+  <Card title="Git + Husky" icon="git">
+    Control de versiones con pre-commit hooks configurados.
+  </Card>
+</CardGroup>
+
+### Plataformas
+
+<Tabs>
+  <Tab title="iOS">
+    - **Xcode 15+** con Command Line Tools instaladas - Simulador de iOS configurado - CocoaPods (se
+    instala automaticamente con `npx pod-install`)
+  </Tab>
+  <Tab title="Android">
+    - **Android Studio** con API 34 (Android 14) - Emulador o dispositivo fisico configurado -
+    Variables de entorno `ANDROID_HOME` y `JAVA_HOME` correctamente definidas
+  </Tab>
+</Tabs>
+
+## Instalacion paso a paso
+
+Segui estos pasos para configurar el proyecto desde cero:
+
+<CodeGroup>
+```bash Clonar el repositorio
+git clone <url-del-repositorio>
+cd managua
+```
+
+```bash Instalar dependencias
+npm install
+```
+
+```bash Configurar variables de entorno
+cp .env.example .env.development
+```
+
+</CodeGroup>
+
+<Note>
+  Al ejecutar `npm install`, Husky se instala automaticamente a traves del script `prepare` definido
+  en `package.json`. Esto configura los git hooks de pre-commit.
+</Note>
+
+Despues de copiar el archivo de entorno, completa las variables necesarias en `.env.development` con los valores correspondientes a tu entorno local.
+
+## Variables de entorno
+
+La siguiente tabla lista todas las variables de entorno requeridas. Obtene los valores de tu equipo o del gestor de secretos del proyecto.
+
+<Warning>
+  Nunca incluyas valores reales de variables de entorno en el repositorio ni en documentacion
+  publica.
+</Warning>
+
+| Variable            | Descripcion                                                                    |
+| ------------------- | ------------------------------------------------------------------------------ |
+| `APP_ENV`           | Entorno de la aplicacion (`development`, `develop`, `beta-prod`, `production`) |
+| `API_URL`           | URL del backend API                                                            |
+| `CHAT_API_URL`      | URL del servicio de chat                                                       |
+| `STREAM_API_KEY`    | API key de Stream Chat                                                         |
+| `SENTRY_DSN`        | DSN de Sentry para reporte de errores                                          |
+| `SENTRY_ORG`        | Organizacion en Sentry                                                         |
+| `SENTRY_PROJECT`    | Proyecto en Sentry                                                             |
+| `SENTRY_AUTH_TOKEN` | Token de autenticacion de Sentry                                               |
+| `POSTHOG_API_KEY`   | API key de PostHog para analytics                                              |
+| `POSTHOG_HOST`      | Host de PostHog                                                                |
+| `EAS_PROJECT_ID`    | ID del proyecto en EAS                                                         |
+| `EAS_UPDATE_URL`    | URL de actualizaciones EAS                                                     |
+
+## Path aliases
+
+El proyecto tiene configurados path aliases para simplificar los imports. Estos estan definidos en `tsconfig.json` y en la configuracion de Babel.
+
+| Alias      | Ruta real      |
+| ---------- | -------------- |
+| `@shared`  | `src/shared/`  |
+| `@core`    | `src/core/`    |
+| `@modules` | `src/modules/` |
+| `@assets`  | `assets/`      |
+
+Ejemplo de uso:
+
+```typescript
+import { Button } from '@shared/components/Button';
+import { useAuth } from '@core/hooks/useAuth';
+import { BookingScreen } from '@modules/bookings/screens/BookingScreen';
+```
+
+## Herramientas de calidad de codigo
+
+El proyecto utiliza varias herramientas para mantener la calidad del codigo:
+
+### ESLint + Prettier
+
+- **ESLint** para analisis estatico del codigo
+- **Prettier** para formateo automatico
+- **lint-staged** ejecuta ambos en pre-commit via Husky, aplicandose solo a los archivos modificados
+
+### TypeScript
+
+- Configurado en **strict mode** para maxima seguridad de tipos
+
+### Testing
+
+- **Jest** como framework de testing
+- **@testing-library/react-native** para tests de componentes
+
+### Scripts disponibles
+
+| Script             | Descripcion                                             |
+| ------------------ | ------------------------------------------------------- |
+| `npm run lint`     | Ejecuta ESLint en todo el proyecto                      |
+| `npm run format`   | Formatea el codigo con Prettier                         |
+| `npm test`         | Ejecuta la suite de tests con Jest                      |
+| `npm run validate` | Ejecuta lint y tests en secuencia (validacion completa) |
+
+<Note>
+  Se recomienda ejecutar `npm run validate` antes de hacer push para asegurar que el codigo cumple
+  con todos los estandares del proyecto.
+</Note>
+
+## Configuracion con Conductor
+
+Si estas ejecutando el proyecto desde **Conductor**, el archivo `bin/conductor-setup` copia automaticamente los archivos `.env` necesarios. No es necesario configurar las variables de entorno manualmente en ese caso.
+
+```bash
+# Ejecutado automaticamente por Conductor
+./bin/conductor-setup
+```

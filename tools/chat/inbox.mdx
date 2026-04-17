@@ -1,0 +1,146 @@
+---
+title: "Inbox"
+description: "Sistema de bandeja de entrada con mensajes internos, push notifications y preferencias de usuario"
+---
+
+# Inbox
+
+El modulo de Inbox gestiona la bandeja de entrada de cada usuario: mensajes internos, notificaciones push (mobile y browser), y preferencias de notificacion. Es el punto central donde convergen alertas de todos los modulos.
+
+## Arquitectura
+
+```
+┌──────────────────┐     ┌──────────────────┐     ┌──────────────┐
+│  Chat Module     │────▶│  InboxService    │────▶│  Supabase    │
+│  Community       │     │                  │     │  inbox_messages│
+│  Notifications   │     │  InboxPushNotif. │     └──────────────┘
+│  AI              │     │  Service         │
+│  System          │     └──────────────────┘
+└──────────────────┘            │
+                         ┌──────────────┐
+                         │  Expo / Web  │
+                         │  Push        │
+                         └──────────────┘
+```
+
+## Tipos de mensaje
+
+| Tipo | Source Tool | Descripcion |
+|------|------------|-------------|
+| `chat_unread` | chat | Mensajes no leidos en canal |
+| `chat_booking_create` | chat | Nueva reserva creada |
+| `chat_booking_archive` | chat | Reserva archivada |
+| `chat_shift_created` | chat | Turno creado |
+| `chat_shift_assigned` | chat | Turno asignado |
+| `chat_shift_started` | chat | Turno iniciado |
+| `chat_shift_ended` | chat | Turno finalizado |
+| `chat_property_assigned` | chat | Propiedad asignada |
+| `chat_ticket_created` | chat | Ticket creado |
+| `chat_ticket_updated` | chat | Ticket actualizado |
+| `chat_ticket_assigned` | chat | Ticket asignado |
+| `chat_ticket_resolved` | chat | Ticket resuelto |
+| `restock_alert` | community | Alerta de reposicion |
+| `guide_incomplete` | community | Guia incompleta |
+| `guide_request` | community | Solicitud de guia |
+| `notification_sent` | notifications | Notificacion enviada |
+| `notification_failed` | notifications | Fallo de notificacion |
+| `ai_daily_summary` | ai | Resumen diario IA |
+| `ai_weekly_summary` | ai | Resumen semanal IA |
+| `general` | system | Mensaje general |
+
+## Prioridades
+
+| Prioridad | Comportamiento |
+|-----------|---------------|
+| `low` | Solo inbox, sin push |
+| `normal` | Inbox + push si habilitado |
+| `high` | Inbox + push (respeta quiet hours) |
+| `urgent` | Inbox + push (ignora quiet hours) |
+
+## Estados
+
+`unread` → `read` → `resolved` → `archived`
+
+Soft delete con campo `deleted_at`.
+
+## API Endpoints
+
+| Metodo | Endpoint | Auth | Descripcion |
+|--------|----------|------|-------------|
+| POST | `/inbox/messages` | Bearer / API Key | Crear mensaje (integracion externa) |
+| GET | `/inbox/messages` | Bearer | Listar mensajes del usuario con filtros |
+| GET | `/inbox/unread-count` | Bearer | Conteo desglosado por prioridad/tipo/tool |
+| GET | `/inbox/messages/:id` | Bearer | Detalle de mensaje |
+| PATCH | `/inbox/messages/:id` | Bearer | Actualizar estado/notas |
+| PATCH | `/inbox/messages/:id/read` | Bearer | Marcar como leido |
+| POST | `/inbox/messages/batch-read` | Bearer | Marcar multiples como leidos |
+| PATCH | `/inbox/messages/:id/resolve` | Bearer | Marcar como resuelto |
+| DELETE | `/inbox/messages/:id` | Bearer | Eliminar (soft delete) |
+| POST | `/inbox/push-subscription` | Bearer | Registrar suscripcion push browser |
+| DELETE | `/inbox/push-subscription` | Bearer | Desregistrar suscripcion push |
+| GET | `/inbox/vapid-public-key` | Bearer | Obtener clave publica VAPID |
+| GET | `/inbox/preferences` | Bearer | Obtener preferencias de notificacion |
+| PATCH | `/inbox/preferences` | Bearer | Actualizar preferencias |
+
+## Filtros
+
+Los endpoints de listado aceptan:
+
+- `sourceTool` — filtrar por herramienta origen (`chat`, `community`, `notifications`, `system`, `ai`)
+- `messageTypes` — array de tipos de mensaje
+- `priority` — filtrar por prioridad
+- `status` — filtrar por estado
+
+## Preferencias de usuario
+
+Cada usuario puede configurar:
+
+| Campo | Tipo | Descripcion |
+|-------|------|-------------|
+| `pushEnabled` | boolean | Activar push notifications |
+| `pushUrgentOnly` | boolean | Solo push para urgentes |
+| `pushCommunity` | boolean | Push de community |
+| `pushChat` | boolean | Push de chat |
+| `pushTickets` | boolean | Push de tickets |
+| `pushShifts` | boolean | Push de turnos |
+| `pushAi` | boolean | Push de IA |
+| `emailEnabled` | boolean | Activar emails |
+| `emailDigestFrequency` | string | Frecuencia de digest |
+| `quietHoursEnabled` | boolean | Horas silenciosas |
+| `quietHoursTimezone` | string | Timezone para quiet hours |
+
+## Push Notifications
+
+El inbox soporta dos canales de push:
+
+- **Expo Push** — para vivla-mobile (iOS/Android)
+- **Web Push** — para el panel web via VAPID/service worker
+
+Las notificaciones respetan las preferencias del usuario y las horas silenciosas (excepto prioridad `urgent`).
+
+## Helpers del servicio
+
+`InboxService` expone metodos helper para crear mensajes tipados desde otros modulos:
+
+- `createChatBookingCreateMessage()` — notificacion de reserva
+- `createChatTicketCreatedMessage()` — nuevo ticket
+- `createChatTicketAssignedMessage()` — ticket asignado
+- `createChatShiftCreatedMessage()` — turno creado
+- `createChatPropertyAssignedMessage()` — propiedad asignada
+- `createGuideIncompleteMessage()` — guia incompleta
+- `createAIDailySummaryMessage()` — resumen IA diario
+
+## Estructura de modulo
+
+```
+apps/backend/src/inbox/
+  inbox.module.ts
+  inbox.controller.ts
+  inbox.service.ts
+  inbox-push-notification.service.ts
+  dto/
+    create-message.dto.ts
+    update-message.dto.ts
+    inbox-filters.dto.ts
+    preferences.dto.ts
+```

@@ -1,0 +1,359 @@
+---
+title: 'Surveys'
+description: 'Motor de encuestas dinamicas con soporte multi-step, condicionales y persistencia'
+---
+
+## Descripcion
+
+- **Ubicacion:** `src/modules/surveys/`
+
+El modulo **Surveys** implementa un motor generico de encuestas dinamicas. Las definiciones de encuestas (pasos, preguntas, condicionales) se obtienen como JSON desde el backend de **Vivla Tools** (`useToolsBackend`). Las encuestas son completamente editables desde el backend sin necesidad de deploys de la app.
+
+<Note>
+  El motor de encuestas es generico y reutilizable. Actualmente soporta multiples tipos de encuesta:
+  **Home Annual Review** (`home-review`), **Arrival Review** (`arrival-review`), **Stay Review**
+  (`stay-review`), y cualquier nuevo tipo definido desde el backend (ej: `onboarding-review`,
+  `financial-review`) sin necesidad de nuevas pantallas ni deploys.
+</Note>
+
+## Tipos de encuesta
+
+| Slug                | Descripcion                                                    | scopeType  | scopeId    | Entry points                                     |
+| ------------------- | -------------------------------------------------------------- | ---------- | ---------- | ------------------------------------------------ |
+| `home-review`       | Encuesta anual de satisfaccion del propietario                 | `property` | propertyId | Home card, deep link                             |
+| `arrival-review`    | Revision del estado de la casa al llegar (1 dia post check-in) | `booking`  | bookingId  | Deep link, notification, dev button              |
+| `stay-review`       | Valoracion post-estancia (home rating + stay experience)       | `booking`  | bookingId  | StayCard, auto-show modal, deep link, dev button |
+| `onboarding-review` | Feedback del proceso de onboarding                             | `property` | propertyId | Deep link, notification                          |
+| `financial-review`  | Valoracion de la gestion financiera                            | `property` | propertyId | Deep link, notification                          |
+
+<Note>
+  Los tipos `onboarding-review` y `financial-review` no tienen rutas especificas — usan la ruta
+  generica `/survey` que abre como modal. Solo necesitan que el backend defina la encuesta con ese
+  slug.
+</Note>
+
+## Arquitectura
+
+```
+src/modules/surveys/
+  index.ts
+  types/
+    survey.types.ts           # Tipos de definicion, respuestas, estados
+  api/
+    surveyApi.ts              # Capa de API con Vivla Tools backend
+  stores/
+    surveyAnswerStore.ts      # Store Zustand con persistencia AsyncStorage
+  hooks/
+    useSurveyDefinition.ts    # React Query para GET definicion
+    useSurveySubmit.ts        # Mutations para save/complete
+    useSurveyEngine.ts        # Hook principal de orquestacion
+  components/
+    SurveyScreen.tsx           # Orquestador de vistas
+    SurveyIntroScreen.tsx      # Pantalla de introduccion
+    SurveyStepScreen.tsx       # Pantalla de preguntas
+    SurveyCompletionScreen.tsx # Pantalla de finalizacion
+    QuestionProgressBar.tsx    # Barra de progreso segmentada
+    DynamicQuestionRenderer.tsx # Router de tipos de pregunta
+    questions/
+      StarRatingQuestion.tsx
+      SingleChoiceQuestion.tsx
+      MultiChoiceQuestion.tsx
+      OpenTextQuestion.tsx
+      SwipeBooleanQuestion.tsx
+```
+
+<CardGroup cols={2}>
+  <Card title="Motor generico" icon="gears">
+    El `useSurveyEngine` maneja navegacion, persistencia, resume y condicionales de forma
+    independiente del contenido de la encuesta.
+  </Card>
+  <Card title="Backend-driven" icon="server">
+    La definicion completa (pasos, preguntas, opciones, condicionales) viene del backend. La app
+    solo renderiza y recopila respuestas.
+  </Card>
+  <Card title="Persistencia dual" icon="database">
+    Progreso guardado tanto en AsyncStorage (local) como en el backend. Resume automatico comparando
+    timestamps.
+  </Card>
+  <Card title="Analytics integrado" icon="chart-line">
+    Callbacks de analytics en el engine permiten trackear cada paso sin acoplar el motor a PostHog.
+  </Card>
+</CardGroup>
+
+## API Endpoints
+
+Todos los endpoints usan el backend de Vivla Tools (`useToolsBackend: true`). Definidos en `src/shared/constants/api.ts`:
+
+| Metodo | Path                                        | Descripcion                               |
+| ------ | ------------------------------------------- | ----------------------------------------- |
+| `GET`  | `/surveys/mobile/{slug}`                    | Obtener definicion de la encuesta         |
+| `POST` | `/surveys/mobile/{slug}/responses`          | Guardar progreso parcial                  |
+| `POST` | `/surveys/mobile/{slug}/responses/complete` | Marcar encuesta como completada           |
+| `POST` | `/surveys/mobile/{slug}/responses/resume`   | Obtener progreso guardado en el backend   |
+| `GET`  | `/surveys/mobile/{slug}/results`            | Obtener resultados (si estan disponibles) |
+| `POST` | `/surveys/mobile/{slug}/status`             | Consultar estado por scope IDs            |
+
+## Hook principal: `useSurveyEngine`
+
+Core de orquestacion. Recibe `slug`, `scopeId` y `scopeType`.
+
+```typescript
+const engine = useSurveyEngine('home-review', propertyId, 'property');
+const engine = useSurveyEngine('arrival-review', bookingId, 'booking');
+const engine = useSurveyEngine('stay-review', bookingId, 'booking');
+```
+
+### View States
+
+El engine maneja las siguientes vistas:
+
+| Estado       | Descripcion                                             |
+| ------------ | ------------------------------------------------------- |
+| `loading`    | Cargando definicion o restaurando progreso              |
+| `intro`      | Pantalla inicial de la encuesta                         |
+| `stepIntro`  | Intro intermedia entre pasos (titulo, descripcion, CTA) |
+| `questions`  | Renderizando preguntas del paso actual                  |
+| `completion` | Encuesta enviada exitosamente                           |
+| `error`      | Error en carga o envio                                  |
+
+### Flujo de navegacion
+
+```
+intro → questions(step 1) → stepIntro(step 2) → questions(step 2) → ... → completion
+```
+
+<Tabs>
+  <Tab title="Resume on mount">
+    Al montar el componente: 1. Carga progreso local desde AsyncStorage 2. POST `/resume` al backend
+    3. Compara `updatedAt` timestamps, usa el mas reciente 4. Si el remoto dice `completed` →
+    muestra pantalla de completado
+  </Tab>
+  <Tab title="Guardado automatico">
+    - **En cada "Continuar":** `flushToBackend()` guarda en local + backend - **Al ir a
+    background:** `AppState` listener llama `flushToBackend()` - **Errores de guardado son
+    silenciosos** — no interrumpen el flujo del usuario
+  </Tab>
+  <Tab title="Navegacion hacia atras">
+    Back navigation completo: - Desde pregunta → pregunta anterior del mismo paso - Desde primera
+    pregunta → intro del paso actual - Desde intro del paso → ultima pregunta del paso anterior
+  </Tab>
+</Tabs>
+
+### Evaluacion de condicionales
+
+```typescript
+function evaluateCondition(rule: ConditionalRule, answer: Answer): boolean;
+```
+
+**Operadores:** `lt`, `lte`, `gt`, `gte`, `eq`, `neq`, `in`
+
+**Modos de display:**
+
+- `display: 'inline'` (default) — preguntas hijas aparecen debajo del padre en la misma pantalla. Al aparecer, auto-scroll posiciona el titulo de la primera condicional en la parte superior.
+- `display: 'next_screen'` — preguntas hijas se muestran como pantallas independientes
+
+### Resolucion de idioma (I18nString)
+
+Todos los campos de texto del backend (`title`, `description`, `options.label`, `text_placeholder`, `cta_label`) son `I18nString` (`Record<string, string>`, ej: `{ en: "Start", es: "Empezar" }`).
+
+Se resuelven usando `resolveI18n()` de `src/core/i18n/index.ts`, que selecciona el valor del idioma actual de la app con fallback a ingles. Todos los componentes de survey usan este helper en lugar de `Object.values(...)[0]`.
+
+Los textos de UI de la app (botones, validaciones, contadores) usan i18n keys via `useTranslation()`. No hay strings hardcodeados.
+
+### Progreso
+
+- `totalQuestionsGlobal`: cuenta de preguntas principales en TODOS los pasos (no condicionales)
+- `currentQuestionGlobal`: calculado desde `currentStepIndex` + `currentQuestionIndex`
+- La barra de progreso muestra la posicion en el formulario, no la cantidad respondida
+
+---
+
+## Answer Store
+
+**Archivo:** `src/modules/surveys/stores/surveyAnswerStore.ts`
+
+Store Zustand con persistencia en **AsyncStorage**.
+
+```typescript
+// State
+surveyId: string;
+scopeId: string;
+currentStepIndex: number;
+currentQuestionIndex: number;
+answers: AnswersMap;
+updatedAt: string;
+
+// Actions
+setAnswer(questionId, answer);
+removeAnswer(questionId);
+setCurrentPosition(stepIndex, questionIndex);
+clear();
+clearStorage();
+loadFromStorage();
+restoreProgress();
+initProgress();
+```
+
+**Storage key:** `survey_progress_{slug}_{scopeId}`
+
+---
+
+## Tipos de pregunta
+
+<CardGroup cols={2}>
+  <Card title="Star Rating" icon="star">
+    Rating con estrellas interactivas. Muestra sublabel de feedback dinamico segun la calificacion
+    seleccionada ("Excelente en todo", "Muy bien en general", etc.).
+  </Card>
+  <Card title="Single Choice" icon="circle-dot">
+    Opciones con radio buttons. Filas full-width con indicador circular a la derecha. Opciones no
+    seleccionadas se atenuan cuando hay una seleccion.
+  </Card>
+  <Card title="Multi Choice" icon="square-check">
+    Opciones con checkboxes. Similar a single choice pero permite multiples selecciones. Respeta
+    `max_selections` del backend.
+  </Card>
+  <Card title="Open Text" icon="keyboard">
+    Campo de texto libre. Minimo 10 caracteres (sin whitespace). Contador progresivo de caracteres:
+    "Min. 10 caracteres" (gris) → "5/10 caracteres" (ambar) → "10 caracteres" (verde con checkmark).
+    Dispara scroll-to-end para visibilidad con teclado.
+  </Card>
+</CardGroup>
+
+---
+
+## Componentes UI
+
+### SurveyScreen
+
+Orquestador principal. Usa `useSurveyEngine(slug, scopeId, scopeType)` y enruta entre las pantallas segun `viewState`. Maneja estados de error/loading y la logica de analytics. Al cerrar, invalida el cache de `survey-scope-status` para que la home card refleje el estado actualizado (ej: "Continuar" en vez de "Completar").
+
+```typescript
+interface Props {
+  slug: string;
+  scopeId: string;
+  scopeType?: string; // default: 'property'
+  entryPoint?: string;
+  onClose?: () => void; // si se provee, se llama en vez de navigateBackOrFallback()
+}
+```
+
+La prop `onClose` permite usar `SurveyScreen` tanto como ruta standalone como embebido dentro de un `<Modal>` (usado por `AutoShowReviewModal` para stay-review).
+
+### SurveyStepScreen
+
+Pantalla de preguntas con header ("Guardar y salir" + barra de progreso), ScrollView con question renderers, y footer con labels i18n (`surveyScreen.continue` / `surveyScreen.submit`). Auto-scroll a condicionales inline cuando aparecen. Tutorial de star rating en la primera pregunta de tipo estrella por sesion.
+
+### SurveyCompletionScreen
+
+Pantalla de agradecimiento slug-aware con safe area insets para padding superior (notch/dynamic island).
+
+- **Slugs con contenido custom** (definidos en `COMPLETION_I18N_PREFIX`): Renderizan su timeline de bullet points especifica. Actualmente solo `home-review` tiene contenido custom (`homeScreen.home_review_completion.*`).
+- **Otros slugs**: Renderizan una pantalla generica con icono de check, titulo "Gracias" y subtitulo "Tu respuesta ha sido enviada" (i18n keys `surveyScreen.completion.*`).
+
+Para agregar contenido custom a un nuevo slug, se anade su prefijo i18n al mapa `COMPLETION_I18N_PREFIX` y se crean los keys correspondientes en los archivos de idiomas.
+
+### QuestionProgressBar
+
+Barra segmentada de progreso. Una linea delgada por pregunta total, animada con `withSpring`. Sin contador numerico — la barra sola muestra la posicion.
+
+### FormFooter
+
+Componente compartido (`src/shared/components/FormFooter.tsx`). Boton primario con labels i18n, soporte para boton de retroceso, mensaje de validacion y estados de loading/disabled.
+
+---
+
+## Integracion con Home Screen
+
+El Home Annual Review se integra en la pantalla home mediante:
+
+| Componente              | Archivo                                                 | Feature Flag          |
+| ----------------------- | ------------------------------------------------------- | --------------------- |
+| `HomeReviewCard`        | `src/modules/home/components/HomeReviewCard.tsx`        | `home-review`         |
+| `HomeReviewResultsCard` | `src/modules/home/components/HomeReviewResultsCard.tsx` | `home-review-results` |
+
+La card no tiene borde (`borderWidth` eliminado). Entry points: card CTA y deep links.
+
+### Hooks de integracion
+
+| Hook                     | Descripcion                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------------- |
+| `useHomeReview()`        | Lee feature flag, retorna `{ isEnabled, showCard }`                                                     |
+| `useHomeReviewResults()` | Lee flag + fetch de endpoint de resultados via React Query                                              |
+| `useHomeReviewStatus()`  | POST `/status` con property IDs. Retorna `statusMap: Record<string, ScopeStatusValue>` para lookup O(1) |
+
+### Estados por propiedad
+
+| Status        | Card CTA                   |
+| ------------- | -------------------------- |
+| `not_started` | "Completar" / "Complete"   |
+| `in_progress` | "Continuar" / "Continue"   |
+| `completed`   | "Completada" (no tappable) |
+
+---
+
+## Rutas y navegacion
+
+### Rutas especificas (backward compatible)
+
+| Ruta                       | Archivo                           | Params                                   | Survey         |
+| -------------------------- | --------------------------------- | ---------------------------------------- | -------------- |
+| `/property/home-review`    | `app/property/home-review.tsx`    | `propertyId`, `entryPoint?`              | home-review    |
+| `/property/arrival-review` | `app/property/arrival-review.tsx` | `propertyId`, `bookingId`, `entryPoint?` | arrival-review |
+| `/booking/review`          | `app/booking/review.tsx`          | `bookingId`, `entryPoint?`               | stay-review    |
+
+### Ruta generica (extensible)
+
+| Ruta      | Archivo          | Params                                                             | Presentacion |
+| --------- | ---------------- | ------------------------------------------------------------------ | ------------ |
+| `/survey` | `app/survey.tsx` | `slug`, `scopeId`, `scopeType?` (default: property), `entryPoint?` | Modal        |
+
+La ruta generica esta registrada con `presentation: 'modal'` en `app/_layout.tsx`. Permite abrir cualquier encuesta nueva sin crear archivos de ruta.
+
+### Deep links soportados
+
+```
+vivla://property/home-review?propertyId=X&entryPoint=deep_link
+vivla://property/arrival-review?propertyId=X&bookingId=Y
+vivla://booking/review?bookingId=X
+vivla://survey?slug=onboarding-review&propertyId=X
+vivla://survey/financial-review?propertyId=X
+```
+
+El `linkingService.ts` infiere automaticamente el `scopeType` del deep link: si `bookingId` esta presente se usa `'booking'`, sino `'property'`.
+
+### Configuracion
+
+- `app/_layout.tsx` — `<Stack.Screen name="survey" options={{ presentation: 'modal' }} />`
+- `src/shared/services/linkingService.ts` — URL mapping para deep links (rutas especificas + generica `/survey`)
+- `src/modules/notifications/utils/notificationHelpers.ts` — validacion de rutas
+
+---
+
+## Analytics
+
+El modulo trackea 7 eventos especificos del Home NPS con el prefijo `home_nps_*`. La documentacion completa de eventos, propiedades y guia de dashboard se encuentra en:
+
+- **Referencia de eventos:** `docs/specs/home-annual-review/posthog-analytics.md`
+- **Pagina Mintlify:** [Eventos del Home NPS](/modules/surveys/home-nps-events)
+
+---
+
+## Integracion con otros modulos
+
+### Stay Review (modulo Stays)
+
+El `AutoShowReviewModal` del modulo Stays embebe `SurveyScreen` directamente dentro de un `<Modal>` con `slug="stay-review"` y `onClose` callback. Cuando el feature flag `home-review` esta activo, `useAutoShowReview.ts` suprime los modales automaticos para no abrumar al usuario durante el periodo de revision anual.
+
+El `StayCard` navega a `/booking/review?bookingId={id}` en vez de abrir un modal. La ruta `booking/review.tsx` renderiza `SurveyScreen slug="stay-review"` e invalida las queries de stays al volver.
+
+### Arrival Review (modulo Property)
+
+La ruta `/property/arrival-review` renderiza `SurveyScreen slug="arrival-review"` con `scopeType="booking"`. Las preguntas se definen en el backend por propiedad pero las respuestas se trackean por booking.
+
+### Dev Testing
+
+En modo `__DEV__`:
+
+- **Active stays list**: Boton "_DEV_ Test Arrival Review" que navega a `/property/arrival-review` con IDs fake
+- **Past stays list**: Boton "_DEV_ Test Stay Review" que navega a `/booking/review` con ID fake

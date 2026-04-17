@@ -1,0 +1,124 @@
+---
+title: 'Notifications'
+description: 'Módulo del centro de notificaciones in-app'
+---
+
+## Descripción
+
+Ubicación: `src/modules/notifications/`
+
+Gestiona las notificaciones dentro de la app (distintas de las push notifications del sistema). Incluye listado, lectura y eliminación de notificaciones almacenadas en backend.
+
+<Note>
+  Este módulo gestiona notificaciones in-app (almacenadas en backend). Para push notifications del
+  sistema, ver [Push Notifications](/mobile/integrations/push-notifications).
+</Note>
+
+## Screens
+
+| Screen                | Ruta | Descripción                     |
+| --------------------- | ---- | ------------------------------- |
+| `NotificationsScreen` | —    | Centro de notificaciones in-app |
+
+## API Endpoints
+
+| Método   | Path                       | Descripción                                  |
+| -------- | -------------------------- | -------------------------------------------- |
+| `GET`    | `/notifications`           | Obtener todas las notificaciones del usuario |
+| `DELETE` | `/notifications/{id}`      | Eliminar una notificación                    |
+| `POST`   | `/notifications/{id}/read` | Marcar una notificación como leída           |
+
+## Hooks
+
+| Hook                 | Descripción                                                                                   |
+| -------------------- | --------------------------------------------------------------------------------------------- |
+| `useNotifications()` | Hook principal del módulo. Expone fetch, eliminación y marcado de notificaciones como leídas. |
+
+<Tabs>
+  <Tab title="Uso básico">
+    ```typescript
+    const {
+      notifications,
+      isLoading,
+      markAsRead,
+      deleteNotification,
+      refetch,
+    } = useNotifications();
+    ```
+  </Tab>
+  <Tab title="Marcar como leída">
+    ```typescript
+    const { markAsRead } = useNotifications();
+
+    // Marca la notificación como leída y actualiza el estado local
+    await markAsRead(notificationId);
+    ```
+
+  </Tab>
+  <Tab title="Eliminar">
+    ```typescript
+    const { deleteNotification } = useNotifications();
+
+    // Elimina la notificación del backend y del estado local
+    await deleteNotification(notificationId);
+    ```
+
+  </Tab>
+</Tabs>
+
+## Tipos principales
+
+```typescript
+interface Notification {
+  id: string;
+  title: string;
+  description: string;
+  content: string;
+  createdAt: string;
+  readAt: string | null;
+  navigation: NavigationData | null;
+  imageUrl: string | null;
+  videoUrl: string | null;
+  user: UserSummary | null;
+  message: MessageSummary | null;
+  home: PropertySummary | null;
+  linkTo: string | null;
+}
+```
+
+<CardGroup cols={2}>
+  <Card title="navigation">
+    Contiene los datos necesarios para realizar deep linking cuando el usuario toca la notificación.
+    Incluye ruta de destino y parámetros.
+  </Card>
+  <Card title="readAt">
+    `null` indica que la notificación no ha sido leída. Se actualiza automáticamente al llamar a
+    `markAsRead`.
+  </Card>
+  <Card title="user / message / home">
+    Referencias opcionales a entidades relacionadas. Permiten mostrar contexto enriquecido (avatar
+    del usuario, preview del mensaje, nombre de la propiedad).
+  </Card>
+  <Card title="linkTo">
+    URL de destino alternativa. Se usa cuando la navegación no es a una pantalla interna sino a un
+    recurso externo.
+  </Card>
+</CardGroup>
+
+## Componentes destacados
+
+<CardGroup cols={2}>
+  <Card title="NotificationsList">
+    Lista principal de notificaciones con soporte para pull-to-refresh y estados vacíos. Renderiza
+    cada notificación según su tipo.
+  </Card>
+  <Card title="NotificationCard">
+    Tarjeta individual de notificación. Muestra título, descripción, timestamp y estado de lectura.
+    Soporta swipe para eliminar.
+  </Card>
+</CardGroup>
+
+<Warning>
+  Las notificaciones eliminadas no se pueden recuperar. La operación de eliminación es permanente
+  tanto en el cliente como en el backend.
+</Warning>

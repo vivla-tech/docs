@@ -1,0 +1,421 @@
+---
+title: "Encuestas"
+description: "Sistema de encuestas dinámicas con builder visual, versionado, rewards y action plans"
+---
+
+# Encuestas (Surveys)
+
+El módulo de Encuestas es un sistema centralizado para gestionar encuestas dinámicas en Vivla. Permite crear encuestas con un builder visual, versionarlas, recopilar respuestas desde la app mobile, y analizar resultados — todo sin necesidad de cambios en código.
+
+## Arquitectura
+
+El backend es un módulo NestJS independiente (`SurveysModule`) registrado en `AppModule`. El frontend vive bajo la navegación del chat como parte del hub de customer happiness.
+
+```
+┌──────────────┐     ┌──────────────────┐     ┌──────────────┐
+│  Panel Web   │────▶│  SurveysModule   │────▶│  Supabase    │
+│  (Admin)     │     │  (NestJS)        │     │  (PostgreSQL)│
+└──────────────┘     └──────────────────┘     └──────────────┘
+                            │
+┌──────────────┐            │            ┌──────────────┐
+│ vivla-mobile │────────────┘            │  Firestore   │
+│ (responses)  │     surveys/mobile/*    │  (legacy)    │
+└──────────────┘                         └──────────────┘
+                            │
+┌──────────────┐            │
+│  Windmill    │────────────┘
+│  (cron 1h)   │  POST /chat/sync/firebase-legacy-responses
+└──────────────┘
+```
+
+## Tipos de encuesta
+
+| Slug | Nombre | Scope | Estado |
+|------|--------|-------|--------|
+| `home-review` | Casa (NPS Casa) | property | Activo en nuevo sistema + legacy. v1 "NPS Casa - Q1 2026" publicada. |
+| `stay-review` | Estancia y Experiencia | booking | Legacy (vivla-backend) — migración posterior |
+| `arrival-review` | Llegada | booking | Legacy (vivla-backend) — migración posterior |
+| `onboarding-review` | Onboarding | user | Legacy (Firebase) |
+| `financial-review` | Financiero | user | Legacy importado. 42 respuestas CSV en migration 059, escala 1-10. |
+
+## Motor de encuestas
+
+### Tipos de pregunta
+
+| Tipo | Descripción | Display styles |
+|------|-------------|----------------|
+| `star_rating` | Rating numérico (estrellas) | — |
+| `single_choice` | Selección única | `list`, `chips` |
+| `multi_choice` | Selección múltiple | `list`, `chips` |
+| `open_text` | Texto libre | — |
+| `swipe_boolean` | Swipe yes/no (tinder-style) | — |
+
+### Lógica condicional
+
+Cada pregunta puede tener `conditionals: ConditionalRule[]` — un array de reglas condicionales. Cada regla tiene:
+
+- **operator**: `lt`, `lte`, `gt`, `gte`, `eq`, `neq`, `in`
+- **value**: valor contra el que se compara la respuesta
+- **display**: `inline` (default) o `next_screen` — cómo la app renderiza las preguntas hijas
+- **then**: `Question[]` — array de preguntas hijas mostradas cuando la condición se cumple
+
+Máximo 1 nivel de anidación (las preguntas hijas no pueden tener sus propios conditionals).
+
+### i18n
+
+Cada texto es un `I18nString = Record<string, string>` (ej: `{"es": "Texto", "en": "Text"}`). La API acepta `?lang=es` y devuelve strings resueltos. La app mobile recibe texto listo para mostrar.
+
+### Versionado
+
+- `survey_types`: agrupa versiones (ej: slug `home-review`)
+- `surveys`: cada row es una versión con definición completa en JSONB
+- Flujo: `draft` → `active` → `archived`
+- Partial unique index: máximo 1 versión activa por tipo
+- Cambio de versión invalida respuestas parciales
+
+## Backend
+
+### Estructura de módulo
+
+```
+apps/backend/src/surveys/
+  surveys.module.ts
+  surveys.controller.ts             # CRUD survey types + surveys (admin)
+  surveys.service.ts                # CRUD + publishing + i18n resolution
+  mobile/
+    mobile.controller.ts            # GET definition, POST responses, complete, resume
+    dto/mobile-submit-response.dto.ts
+  responses/
+    responses.service.ts            # Upsert parcial, complete con inmutabilidad
+  results/
+    results.controller.ts           # Resultados agregados + CSV export (enriched)
+    results.service.ts              # Aggregation por tipo de pregunta + CSV con nombres resueltos
+    legacy-results.controller.ts    # Resultados legacy desde Firestore
+    legacy-results.service.ts       # Lee de Firestore (nps-home-responses, etc.)
+    legacy-responses-query.controller.ts  # Per-user/per-property tables from survey_legacy_responses
+    legacy-responses-query.service.ts     # Typed queries: stay, arrival, onboarding, financial, home-review + PG score extraction
+  scores/
+    score-summary.service.ts        # Pre-computed scores: recompute, query, user matrix (multi-source)
+    score-summary.controller.ts     # GET /survey-scores, /user-matrix, /summary, /analytics
+    home-review-results.service.ts  # Custom home-review results with consensus
+  rewards/
+    rewards.controller.ts           # Rewards mobile endpoints
+    rewards.service.ts              # Auto-award on complete, niveles, ciclo reset
+  action-plans/
+    action-plans.controller.ts      # CRUD + generate
+    action-plans.service.ts         # Generate desde consenso, approve/send
+    consensus.service.ts            # Configurable thresholds from result_config
+  public/
+    public-results.controller.ts    # Public endpoints for home-excellence app
+  dto/                              # DTOs de validación
+  entities/                         # Entities (survey-type, survey, response)
+  types/
+    survey.types.ts                 # Contratos TypeScript completos
+
+# Sync module (chat/sync/) — extended for surveys
+  sync.controller.ts                # POST /chat/sync/firebase-legacy-responses (+ users, properties, deals, bookings)
+  sync.service.ts                   # triggerSyncFirebaseLegacyResponses() — spawns CLI as child process
+
+# CLI scripts
+  cli/
+    sync-firebase-legacy-responses.ts  # Individual response migration (--dry-run, --report-only)
+    sync-firebase-scores.ts            # Aggregated scores migration
+
+# Migrations (schema + seeds)
+  database/migrations/
+    050_create_surveys_tables.sql       # Core schema + seed 3 survey types
+    054_seed_home_review.sql            # Home Review v1 (active) + v2 (draft) with cleanup
+    058_create_survey_legacy_responses.sql  # Legacy responses table + onboarding-review type
+    059_seed_financial_review.sql       # Financial-review type + 42 CSV legacy responses
+```
+
+### Permisos
+
+Los endpoints admin usan `RequireTool('tool-chat', 'editor')`. Los endpoints mobile usan `MobileAuthGuard` (POST) o son públicos (GET).
+
+## Frontend
+
+### Rutas
+
+```
+apps/frontend/app/routes/app.chat/
+  surveys.tsx                       # Layout: SurveysSubNav + <Outlet />
+  surveys.index.tsx                 # Actividad (response log, quick actions)
+  surveys.admin.tsx                 # Layout: <Outlet />
+  surveys.admin.index.tsx           # Lista tipos por scope
+  surveys.admin.$surveyTypeId.edit.$surveyId.tsx  # Builder
+  surveys.results.tsx               # Resultados + legacy viewer
+  surveys.action-plans.tsx          # Action plans list + detail
+  surveys.rewards.tsx               # Rewards (bar chart + nivel 5 config)
+```
+
+### Componentes
+
+```
+apps/frontend/app/components/chat/surveys/
+  SurveysActivityPage.tsx           # Response log, inline link builder, filtros, CSV export enriquecido
+  SurveysSubNav.tsx                 # Sub-nav de 5 items
+  SurveysAdminPage.tsx              # Tipos por scope en 2 columnas
+  SurveysRewardsPage.tsx            # Gráfico de barras por nivel
+  DeepLinkGeneratorModal.tsx        # Generador inline de deep links
+  NpsScoreBadge.tsx                 # Badge de puntuación NPS (escala cromática 11 colores)
+  builder/
+    SurveyBuilder.tsx               # Builder completo con i18n tabs
+    StepEditor.tsx                  # Editor de steps
+    QuestionEditor.tsx              # 5 tipos, display_style, allow_audio
+    ConditionalEditor.tsx           # Conditionals múltiples con hijas
+    SurveyPreview.tsx               # Preview en vivo
+  results/
+    ResultsListPage.tsx             # URL-navigable tabs + sub-tabs, version selector,
+                                    # typed tables (user/property columns with avatars),
+                                    # expandable property rows, CSV export (green button),
+                                    # LegacyDashboardContent, LegacyResponsesSubTab,
+                                    # UserStatusTab (multi-source, date-filtered)
+    SurveyResultsPage.tsx           # Averages, distributions, CSV export (backend enriched)
+  action-plans/
+    ActionPlansPage.tsx             # Lista + detalle + approve/send
+```
+
+### API Client
+
+```
+apps/frontend/app/lib/surveys/surveys-api.ts   # Métodos API
+apps/frontend/app/types/surveys.ts              # Tipos TypeScript frontend
+```
+
+## Gamificación (Rewards)
+
+- 1 reward point por encuesta completada (auto-award al completar)
+- 5 niveles de rewards; al nivel 5: experiencia Vivla sorpresa
+- Ciclo se reinicia tras completar nivel 5
+- Toggle de recomendación + identificación de súper promotores (3+ recomendaciones)
+
+## Survey Scores (Métricas pre-computadas)
+
+El sistema mantiene una tabla `survey_score_summaries` con métricas headline pre-computadas por propiedad y usuario. Esto evita recalcular en cada request y permite mostrar scores en cards, tablas y dashboards.
+
+### Métricas por tipo de encuesta
+
+| Survey Type | Métrica | Fórmula | Escala |
+|-------------|---------|---------|--------|
+| `home-review` | `avg_space_rating` | Promedio ratings de 6 espacios | 1-5 |
+| `stay-review` | `avg_nps_score` | Promedio NPS (stay + experience) | 0-10 |
+| `arrival-review` | `approval_rate` | Aprobados / total × 100 | 0-100% (display: /10) |
+| `onboarding-review` | `avg_score` | Promedio directo NPS | 0-10 |
+| `financial-review` | `avg_score` | Promedio directo NPS | 0-10 |
+
+### Fuentes de datos
+
+- **PostgreSQL** (`source: 'postgresql'`): se recomputa automáticamente al completar una encuesta
+- **Firebase** (`source: 'firebase'`): se sincroniza via CLI/Windmill (`pnpm sync:firebase-scores`)
+- **Legacy individual** (`survey_legacy_responses`): respuestas individuales per-user migradas via `pnpm sync:firebase-legacy-responses`. Sync automático cada hora via Windmill (`POST /chat/sync/firebase-legacy-responses`)
+
+### Endpoints
+
+| Endpoint | Auth | Descripción |
+|----------|------|-------------|
+| `GET /survey-scores` | Admin | Scores filtrados por propertyId, userId, surveyTypeSlug |
+| `GET /survey-scores/user-matrix` | Admin | Tabla de usuarios × tipos de encuesta (multi-source, date-filterable, property drill-down con owner/guest) |
+| `GET /survey-scores/analytics` | Admin | Trend data por mes y por propiedad para dashboards |
+| `GET /survey-scores/summary` | Admin | Resumen agregado por tipo de encuesta (con breakdown por propiedad) |
+| `GET /surveys/public/scores` | Public | Headline scores para una propiedad (por HID) |
+| `GET /surveys/public/home-review-results` | Public | Resultados custom del home-review: participación, top rated, oportunidades, action plan |
+
+### Thresholds configurables
+
+Cada `survey_type` tiene un campo `result_config` (JSONB) con umbrales configurables:
+
+```json
+{
+  "negative_threshold": 4,
+  "participation_threshold": 0.75,
+  "consensus_threshold": 0.75,
+  "min_owners_for_plan": 4
+}
+```
+
+### Fracciones de propiedad
+
+La tabla `user_properties` almacena `fractions` (número de fracciones del deal) e `is_vivla_property` (boolean) para cada relación usuario-propiedad. Estos datos se populan automáticamente durante la sincronización de deals desde Firebase.
+
+### Filtrado de owners internos
+
+En los dashboards de resultados (by-property y detalle de propiedad), los owners con emails `@vivla.com` se excluyen del cálculo de participación y scores — se consideran cuentas internas de prueba. Las fracciones restantes se asignan a un placeholder "Vivla Property".
+
+Excepción: `carlos@vivla.com` está en el allowlist (`VIVLA_EMAIL_ALLOWLIST` en `get-property-owners.ts`) y se trata como owner real.
+
+## Diseño visual — Escala NPS cromática
+
+Todos los scores numéricos en el backoffice de encuestas usan el componente compartido `NpsScoreBadge` — un badge cuadrado con la escala cromática NPS de 11 colores.
+
+### Escala NPS (0-1000)
+
+| NPS | Color | Estrellas |
+|-----|-------|-----------|
+| 0 | `#B72224` | 0.0 |
+| 100 | `#D52029` | 0.5 |
+| 200 | `#E95223` | 1.0 |
+| 300 | `#EA6F22` | 1.5 |
+| 400 | `#F6A726` | 2.0 |
+| 500 | `#FDC729` | 2.5 |
+| 600 | `#EBDB0A` | 3.0 |
+| 700 | `#E5E044` | 3.5 |
+| 800 | `#E5E044` | 4.0 |
+| 900 | `#AEC93C` | 4.5 |
+| 1000 | `#66B44E` | 5.0 |
+
+### Conversión
+
+- **NPS a estrellas**: `stars = npsScore / 200`
+- **Estrellas a NPS**: `npsScore = stars * 200`
+- Los colores se interpolan entre paradas para gradientes suaves
+- Texto auto-contraste (blanco sobre fondos oscuros, oscuro sobre fondos claros/amarillos)
+
+### Componente
+
+```
+NpsScoreBadge.tsx
+  Props: value (0-5), size ('sm' | 'md')
+  sm: 32×32px (tablas, inline)
+  md: 40×40px (cards dashboard, héroes)
+```
+
+## Action Plans (Consenso)
+
+Los planes de acción se generan automáticamente basados en consenso entre propietarios. Los umbrales son configurables via `result_config` en el survey type:
+
+| Condición | Umbral (default) |
+|-----------|--------|
+| Participación suficiente | ≥75% de propietarios (excluyendo Vivla Property) |
+| Consenso en categoría negativa | ≥75% de los que respondieron coinciden en rating < threshold |
+| Threshold negativo | < 4 estrellas (configurable) |
+| Mínimo propietarios | 4 (con menos no se genera plan) |
+
+**Vivla Property** no vota en propuestas de mejora pero sí paga proporcionalmente según fracciones que posee. El coste se reparte por número de fracciones de cada propietario.
+
+**Flujo**: `pending_review` → `approved` → `sent` → `archived`
+
+## Exportación CSV
+
+Todas las vistas del módulo de encuestas incluyen exportación a CSV enriquecida con datos completos (IDs + nombres legibles), BOM para compatibilidad con Excel, y quoting correcto.
+
+| Vista | Archivo | Columnas clave |
+|-------|---------|---------------|
+| Actividad | `actividad-encuestas-{date}.csv` | ID Respuesta, ID Usuario, Usuario, Email, ID Propiedad, Propiedad, Ubicación, Encuesta, Fecha, Estado, Fuente |
+| Estado de usuarios | `estado_usuarios_{date}.csv` | ID Usuario, Usuario, Email, scores dinámicos por tipo, Media NPS |
+| Resultados por usuario | `{tipo}_{usuarios}_{date}.csv` | ID Usuario, Email, ID Propiedad + columnas específicas del tipo de encuesta |
+| Resultados por propiedad | `{tipo}_{propiedades}_{date}.csv` | ID Propiedad + métricas agregadas |
+| Resultados por propietario | `{tipo}_{propietarios}_{date}.csv` | ID Usuario, Email, ID Propiedad + métricas |
+| Encuesta individual (backend) | `survey-{id}-results.csv` | response_id, respondent_id/name/email, scope_id/name, completed_at, preguntas con texto legible |
+
+La exportación del backend (`ResultsService.exportCsv`) resuelve UUIDs de preguntas a texto legible, nombres de usuarios y propiedades desde sus tablas respectivas, y formatea respuestas (`.value`, `.text`, `.selected`, `.approved`) en lugar de JSON crudo.
+
+## Datos legacy individual (`survey_legacy_responses`)
+
+Los datos individuales por usuario de Firebase se migran a PostgreSQL en la tabla `survey_legacy_responses` para habilitar tablas per-user, per-property y per-owner con filtrado.
+
+### Endpoints
+
+| Endpoint | Auth | Descripción |
+|----------|------|-------------|
+| `GET /survey-legacy-responses/:slug/table` | Admin | Tabla paginada per-user (typed per survey type) |
+| `GET /survey-legacy-responses/:slug/by-owner` | Admin | Home-review agrupado por propietario |
+| `GET /survey-legacy-responses/:slug/by-property` | Admin | Agrupado por propiedad (expandable con detalle por owner) |
+| `GET /survey-legacy-responses/:slug/dashboard-stats` | Admin | Stats para dashboard: total, usuarios, propiedades, medias |
+
+Todos aceptan: `propertyId`, `userId`, `dateFrom`, `dateTo`, `page`, `limit`, `surveyId`.
+
+### Sync CLI
+
+```bash
+# Desde apps/backend/
+pnpm sync:firebase-legacy-responses              # Migra respuestas individuales
+pnpm sync:firebase-legacy-responses --dry-run     # Preview sin escribir
+pnpm sync:firebase-legacy-responses --report-only # Solo genera reporte diagnóstico (JSON + MD)
+pnpm sync:firebase-legacy-responses --collection=nps-booking  # Solo una colección
+```
+
+El flag `--report-only` genera un reporte en `tools/scripts/output/` con:
+- Usuarios no resueltos (enriquecidos con Firebase Auth: email, nombre, teléfono, estado)
+- Propiedades no resueltas (nombre, dirección desde el doc de Firebase)
+- Upserts fallidos con mensajes de error de Supabase
+
+### Windmill (sync automático)
+
+El sync se ejecuta automáticamente cada hora via Windmill:
+
+1. Windmill cron (`0 * * * *`) → llama `POST /chat/sync/firebase-legacy-responses`
+2. Backend crea sync job → ejecuta CLI script como child process
+3. Windmill polls `GET /chat/sync/jobs/:id` hasta completion
+4. Script Windmill: `docs/internal/tools/chat/implementation/epics/3.2-sync-module-improvements/scripts/sync_firebase_legacy_responses.ts`
+
+El sync es **idempotente** (upsert en `source_collection + source_doc_id`) — ejecutar múltiples veces no duplica datos.
+
+## Datos legacy (Firestore — lectura directa)
+
+Los resultados históricos también pueden leerse directamente de Firestore:
+
+1. **Lectura directa** via `LegacyResultsService` (para resultados detallados por propiedad)
+2. **Scores pre-computados** via `sync-firebase-scores.ts` CLI/Windmill (para métricas headline en `survey_score_summaries`)
+
+| Colección Firestore | Contenido | Estructura clave |
+|---------------------|-----------|-----------------|
+| `nps-home-responses` | Respuestas NPS Home | `data.responses[].stepN` (numeric direct or `.options`) |
+| `nps-home-excellence-values` | Respuestas tinder (arrival review) | `results[].{key, value: boolean}` |
+| `nps-booking` | Respuestas stay-review | `{nps: number, round: 'stay'\|'home', hid, uid}` |
+
+### Sync de scores legacy (agregados)
+
+```bash
+# Desde apps/backend/
+pnpm sync:firebase-scores          # Sincroniza scores agregados → survey_score_summaries
+pnpm sync:firebase-scores --dry-run # Preview sin escribir
+```
+
+### Sync API endpoints (para Windmill)
+
+| Endpoint | Descripción |
+|----------|-------------|
+| `POST /chat/sync/firebase-legacy-responses` | Trigger sync de respuestas individuales legacy (crea sync job, ejecuta CLI en background) |
+| `GET /chat/sync/jobs/:id` | Consultar estado del sync job |
+| `GET /chat/sync/jobs` | Listar sync jobs recientes |
+
+<Note>
+  El Home Review v1 ("NPS Casa - Q1 2026") fue insertado como `active` via Migration 054 con 5 steps, 12 preguntas principales y ~24 preguntas hijas condicionales, con i18n completo (ES + EN), `conditional_mode: "any"` en espacios, y `accepting_responses = true`. El Financial Review fue importado via Migration 059 con 42 respuestas legacy CSV en escala 1-10.
+</Note>
+
+## Home Excellence (Portal propietarios)
+
+La app `apps/home-excellence` consume los endpoints públicos del módulo de surveys para mostrar resultados del Home Review 2026 a propietarios.
+
+### Endpoints públicos
+
+| Endpoint | Descripción |
+|----------|-------------|
+| `GET /surveys/public/results?property={HID}&surveyType=home-review` | Resultados agregados del home-review |
+| `GET /surveys/public/legacy-results?property={HID}&surveyType=home-review` | Datos legacy de Firestore |
+| `GET /surveys/public/legacy-results/notes?property={HID}` | Notas legacy agregadas |
+| `GET /surveys/public/action-plans?property={HID}` | Planes de acción por scope |
+| `GET /surveys/public/scores?property={HID}` | Headline scores por propiedad |
+| `GET /surveys/public/home-review-results?property={HID}` | Resultados custom: participación, top rated, oportunidades |
+
+Estos endpoints usan `@Public()` y no requieren autenticación — el HID delimita el scope de datos.
+
+### Flujo de datos
+
+```
+Home Excellence (Next.js 14, port 3003)
+  └─ /api/surveys/* (rewrite)
+       └─ Backend (NestJS, port 3001)
+            ├─ PublicResultsController
+            │   ├─ ResultsService (agregación desde PostgreSQL)
+            │   ├─ LegacyResultsService (lectura Firestore)
+            │   └─ ActionPlansService (planes por scope)
+            └─ ScoreSummaryController
+                └─ HomeReviewResultsService (consenso, participación)
+```
+
+### Documentación relacionada
+
+- [Home Excellence — Descripción](../../internal/apps/home-excellence/project-description.md)
+- [Home Excellence — Arquitectura](../../internal/apps/home-excellence/architecture.md)

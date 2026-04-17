@@ -1,0 +1,95 @@
+---
+title: "AI (Anthropic)"
+description: "Integracion con Claude API para generacion de insights y texto"
+---
+
+# AI (Anthropic)
+
+Modulo global que proporciona integracion con la API de Anthropic (Claude) para generacion de texto. Actualmente utilizado para insights automaticos en el modulo de encuestas.
+
+## Configuracion
+
+| Variable de entorno | Requerida | Descripcion |
+|---------------------|-----------|-------------|
+| `ANTHROPIC_API_KEY` | Si | API key de Anthropic |
+| `AI_DEFAULT_MODEL` | No | Modelo por defecto. Default: `claude-sonnet-4-20250514` |
+
+El modulo es **global** — disponible en toda la aplicacion sin necesidad de importarlo.
+
+Si `ANTHROPIC_API_KEY` no esta configurada, el servicio retorna `null` silenciosamente (graceful degradation).
+
+## Servicio
+
+`AiService` expone un unico metodo:
+
+```typescript
+generateText(options: {
+  systemPrompt: string
+  userPrompt: string
+  model?: string        // default: claude-sonnet-4-20250514
+  maxTokens?: number    // default: 1024
+  temperature?: number  // default: 0.3
+}): Promise<{
+  text: string
+  model: string
+  inputTokens: number
+  outputTokens: number
+} | null>
+```
+
+**Timeout**: 30 segundos por request.
+
+## Survey Insights
+
+La principal aplicacion del modulo AI es la generacion de insights para encuestas.
+
+### Tabla `survey_insights`
+
+| Campo | Tipo | Descripcion |
+|-------|------|-------------|
+| `id` | UUID | Primary key |
+| `survey_id` | UUID | FK a surveys |
+| `scope_type` | string | `global`, `property`, `user` |
+| `scope_id` | string | ID del scope (o `__global__`) |
+| `section` | string | `summary`, `trends`, `recommendations` |
+| `insights_data` | JSONB | `{ main: string, questions: Record<string, string> }` |
+| `model` | string | Modelo usado |
+| `input_tokens` | integer | Tokens de input |
+| `output_tokens` | integer | Tokens de output |
+| `total_responses` | integer | Respuestas al momento de generacion |
+| `daily_generation_count` | integer | Generaciones hoy |
+| `generation_count_date` | date | Fecha para reset diario |
+
+**Unique constraint**: `(survey_id, scope_type, scope_id, section)`
+
+### Cache e invalidacion
+
+- Los insights se cachean en la tabla `survey_insights`
+- Se invalidan automaticamente cuando `total_responses` actual difiere del cacheado (nuevas respuestas)
+- La regeneracion es fire-and-forget (no bloquea el request del usuario)
+- Deduplicacion de requests en vuelo (prevencion de thundering herd)
+
+### Rate limiting
+
+- Maximo **3 generaciones por dia** por combinacion `survey_id + scope_type + scope_id + section`
+- Cuando se alcanza el limite, se sirve el cache existente (aunque sea stale)
+- El contador se resetea diariamente
+
+### Prompts
+
+Los prompts estan en espanol y analizan:
+- Distribucion de respuestas por pregunta
+- Tendencias y patrones
+- Recomendaciones accionables
+
+## Estructura de modulo
+
+```
+apps/backend/src/shared/ai/
+  ai.module.ts          # Global module
+  ai.service.ts         # Anthropic SDK wrapper
+  ai.types.ts           # TypeScript interfaces
+
+apps/backend/src/surveys/insights/
+  survey-insights.service.ts   # Cache, rate limiting, insight generation
+```

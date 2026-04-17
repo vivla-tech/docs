@@ -1,0 +1,301 @@
+---
+title: 'Analytics'
+description: 'Integración con PostHog para product analytics y event tracking'
+---
+
+## Vision general
+
+La app utiliza **PostHog React Native SDK (v4.35.1)** para product analytics, conectandose a la instancia EU (`eu.i.posthog.com`).
+
+<Note>
+  Session replay y autocapture estan **deshabilitados**. Todos los eventos se capturan de forma
+  explicita mediante la API publica.
+</Note>
+
+## Arquitectura
+
+<CardGroup cols={2}>
+  <Card title="Cliente singleton" icon="plug">
+    Definido en `src/core/analytics/client.posthog.ts`. Inicializa y exporta la instancia unica de
+    PostHog.
+  </Card>
+  <Card title="API publica" icon="code">
+    Expuesta desde `src/core/analytics/index.ts`. Todas las interacciones con analytics pasan por
+    esta capa.
+  </Card>
+  <Card title="Eventos" icon="list">
+    Catalogo de eventos definido en `src/core/analytics/events.ts`.
+  </Card>
+  <Card title="Configuracion" icon="gear">
+    Parametros de conexion en `src/core/config/posthog.ts`.
+  </Card>
+</CardGroup>
+
+## API publica
+
+La API se exporta desde `src/core/analytics/index.ts` y expone los siguientes metodos:
+
+| Metodo                         | Descripcion                                  |
+| ------------------------------ | -------------------------------------------- |
+| `capture(event, properties)`   | Captura un evento con propiedades opcionales |
+| `screen(name, properties)`     | Registra una vista de pantalla               |
+| `identify(userId, properties)` | Identifica al usuario autenticado            |
+| `reset()`                      | Resetea la sesion (al hacer logout)          |
+| `set(properties)`              | Establece propiedades del perfil del usuario |
+
+<Tabs>
+  <Tab title="Capturar evento">
+    ```typescript
+    import { analytics, analyticsEvents } from '@core/analytics';
+
+    analytics.capture(analyticsEvents.booking.completed, {
+      booking_type: 'exchange',
+      booking_id: '123',
+      property_id: 'abc',
+    });
+    ```
+
+  </Tab>
+  <Tab title="Identificar usuario">
+    ```typescript
+    import { analytics } from '@core/analytics';
+
+    analytics.identify(user.id, {
+      email: user.email,
+    });
+
+    analytics.profile.set({ home_types: ['beach', 'city'] });
+    ```
+
+  </Tab>
+  <Tab title="Registrar pantalla">
+    ```typescript
+    import { analytics } from '@core/analytics';
+
+    analytics.screen('StayDetail', {
+      stayId: '123',
+    });
+    ```
+
+  </Tab>
+</Tabs>
+
+---
+
+## Convencion de nombres
+
+Todos los eventos de la app usan la convencion `{category}_{action}`:
+
+```
+{category}_{action}
+```
+
+**Ejemplos:**
+
+- `app_opened` — evento de ciclo de vida de la app
+- `tab_viewed` — navegacion entre tabs principales
+- `booking_started` — accion en el flujo de booking
+- `home_nps_survey_opened` — evento del NPS de home review
+
+Las constantes se definen en `src/core/analytics/events.ts` y se referencian siempre via `analyticsEvents.*` — nunca se usan strings hardcodeados.
+
+---
+
+## Eventos generales de la app
+
+Estos eventos se disparan automaticamente a nivel global y no requieren integracion manual en cada pantalla.
+
+### Ciclo de vida
+
+| Evento       | Trigger                                          | Propiedades                             |
+| ------------ | ------------------------------------------------ | --------------------------------------- |
+| `app_opened` | App se abre (cold start) o vuelve a primer plano | `trigger: 'cold_start' \| 'foreground'` |
+
+**Implementacion:** Hook `useAppOpenedTracking` en `app/_layout.tsx`. Usa `AppState` de React Native para detectar transiciones entre background/inactive y active.
+
+### Navegacion entre tabs
+
+| Evento       | Trigger                         | Propiedades                                                     |
+| ------------ | ------------------------------- | --------------------------------------------------------------- |
+| `tab_viewed` | Usuario cambia de tab principal | `tab_name: 'Home' \| 'Book' \| 'Inbox' \| 'Stays' \| 'Profile'` |
+
+**Implementacion:** `screenListeners.focus` en `app/(tabs)/_layout.tsx`.
+
+### Vistas de pantalla
+
+| Evento          | Trigger                       | Propiedades             |
+| --------------- | ----------------------------- | ----------------------- |
+| `screen_viewed` | Cada cambio de ruta en la app | `screen_name: pathname` |
+
+**Implementacion:** `usePathname()` de expo-router con `useEffect` en `RootLayoutNav` (`app/_layout.tsx`).
+
+### Cambio de propiedad
+
+| Evento              | Trigger                                                | Propiedades                    |
+| ------------------- | ------------------------------------------------------ | ------------------------------ |
+| `property_switched` | Usuario cambia la propiedad activa en el selector Home | `property_id`, `property_type` |
+
+**Implementacion:** En `HomePropertySelector.tsx`, se captura en ambos paths (iOS bottom sheet y Android modal).
+
+---
+
+## Eventos de booking
+
+Eventos relacionados con el flujo de reservas, intercambios y alquileres. Todos en la seccion `analyticsEvents.booking.*`.
+
+### Navegacion en booking
+
+| Evento               | Trigger                                  | Propiedades                                    |
+| -------------------- | ---------------------------------------- | ---------------------------------------------- |
+| `booking_tab_viewed` | Cambio entre sub-tabs Book/Exchange/Rent | `sub_tab_name: 'Book' \| 'Exchange' \| 'Rent'` |
+
+### Seleccion de calendario
+
+| Evento                   | Trigger                                   | Propiedades                                                        |
+| ------------------------ | ----------------------------------------- | ------------------------------------------------------------------ |
+| `calendar_date_selected` | Usuario selecciona fecha en el calendario | `date`, `selection_type: 'check_in' \| 'check_out'`, `property_id` |
+
+### Flujo de creacion de reserva
+
+| Evento              | Trigger                            | Propiedades                                                                            |
+| ------------------- | ---------------------------------- | -------------------------------------------------------------------------------------- |
+| `booking_started`   | Usuario inicia creacion de reserva | `booking_type: 'book' \| 'exchange' \| 'rent'`, `property_id`, `check_in`, `check_out` |
+| `booking_completed` | Reserva creada exitosamente        | `booking_type`, `booking_id`, `property_id`, `check_in`, `check_out`                   |
+
+### Filtros
+
+| Evento           | Trigger                                 | Propiedades                                              |
+| ---------------- | --------------------------------------- | -------------------------------------------------------- |
+| `filter_applied` | Usuario aplica filtros en Exchange/Rent | `filter_type: 'city' \| 'date'`, `screen_type`, `values` |
+
+### Gestion de reservas
+
+| Evento                 | Trigger                        | Propiedades              |
+| ---------------------- | ------------------------------ | ------------------------ |
+| `booking_cancelled`    | Reserva cancelada exitosamente | `booking_id`             |
+| `booking_type_changed` | Tipo de reserva modificado     | `booking_id`, `new_type` |
+
+---
+
+## Eventos del Home NPS
+
+El flujo del Home Annual Review (NPS) tiene su propio conjunto de 7 eventos con el prefijo `home_nps_*`. Estos eventos trackean el funnel completo desde la exposicion (card) hasta la finalizacion del survey y la visualizacion de resultados. Entry points: home card y deep link.
+
+<Card
+  title="Documentacion completa de eventos NPS"
+  icon="chart-line"
+  href="/modules/surveys/home-nps-events"
+>
+  Ver la referencia detallada de los 7 eventos del Home NPS, propiedades, flujos y guia de dashboard
+  en PostHog.
+</Card>
+
+---
+
+## Eventos del Version Gate
+
+Eventos relacionados con el flujo de version gate (actualizaciones de la app). Seccion `analyticsEvents.versionGate.*`.
+
+| Evento                     | Trigger                                                              | Propiedades |
+| -------------------------- | -------------------------------------------------------------------- | ----------- |
+| `version_update_dismissed` | Usuario toca "Maybe later" en el banner de actualización recomendada | —           |
+
+**Implementacion:** En el hook `useVersionCheck` (`src/shared/services/versionGate/useVersionCheck.ts`), la función `dismiss()` captura el evento antes de ocultar el banner.
+
+<Note>
+  El evento solo se dispara para actualizaciones recomendadas. Las actualizaciones obligatorias no
+  tienen opción de dismiss y por tanto no generan este evento.
+</Note>
+
+---
+
+## Eventos del Financial Report
+
+| Evento                                 | Trigger                                     | Propiedades |
+| -------------------------------------- | ------------------------------------------- | ----------- |
+| `financial_report_2025_card_rendering` | Card del reporte financiero visible         | `mode`      |
+| `financial_report_2025_card_click`     | Usuario toca el card                        | —           |
+| `financial_report_2025_link_rendering` | Link del reporte visible en PropertyActions | `mode`      |
+| `financial_report_2025_link_click`     | Usuario toca el link                        | —           |
+
+---
+
+## Identificacion de usuarios
+
+### Identify
+
+Se llama a `analytics.identify()` en los siguientes momentos:
+
+- Durante la inicializacion de autenticacion
+- Tras login exitoso
+- Tras registro exitoso
+- En cada token refresh
+
+Propiedades enviadas: `email`, `name`.
+
+**Archivo:** `src/modules/auth/store/authStore.ts`
+
+### Reset
+
+Se llama a `analytics.reset()` al hacer logout o eliminar cuenta.
+
+### Sincronizacion de perfil
+
+El hook `useAnalyticsProfileSync` sincroniza automaticamente `home_types` (array de tipos de propiedad del usuario) con el perfil de PostHog.
+
+**Archivo:** `src/shared/hooks/useAnalyticsProfileSync.ts`
+
+---
+
+## Feature flags
+
+PostHog gestiona los feature flags de la aplicacion. Se evaluan del lado del cliente y permiten activar o desactivar funcionalidades de forma remota.
+
+```typescript
+import { useFeatureFlag } from 'posthog-react-native';
+
+const isEnabled = useFeatureFlag('home-review');
+```
+
+Flags activos:
+
+| Flag                    | Descripcion                            |
+| ----------------------- | -------------------------------------- |
+| `home-review`           | Home annual review card en home screen |
+| `home-review-results`   | Card de resultados del review          |
+| `financial-report-2025` | Reporte financiero 2025                |
+
+---
+
+## Configuracion del SDK
+
+| Parametro      | Valor                          |
+| -------------- | ------------------------------ |
+| Instancia      | `eu.i.posthog.com` (EU)        |
+| Session replay | Deshabilitado                  |
+| Autocapture    | Deshabilitado                  |
+| SDK            | `posthog-react-native` v4.35.1 |
+
+<Warning>
+  No incluyas la API key de PostHog en el codigo fuente directamente. La configuracion se gestiona a
+  traves del archivo de configuracion en `src/core/config/posthog.ts`.
+</Warning>
+
+## Archivos clave
+
+| Archivo                                       | Responsabilidad                        |
+| --------------------------------------------- | -------------------------------------- |
+| `src/core/analytics/client.posthog.ts`        | Cliente singleton de PostHog           |
+| `src/core/analytics/index.ts`                 | API publica de analytics               |
+| `src/core/analytics/events.ts`                | Definicion de eventos (con constantes) |
+| `src/core/config/posthog.ts`                  | Configuracion de conexion              |
+| `src/shared/hooks/useAppOpenedTracking.ts`    | Tracking de apertura de app            |
+| `src/shared/hooks/useAnalyticsProfileSync.ts` | Sincronizacion de perfil               |
+
+## Guia para agregar nuevos eventos
+
+1. **Definir la constante** en `src/core/analytics/events.ts` dentro del grupo correspondiente
+2. **Usar siempre** `analyticsEvents.grupo.evento` — nunca strings hardcodeados
+3. **Seguir la convencion** `{category}_{action}`
+4. **Capturar en el lugar correcto**: preferir callbacks de exito para acciones async, `useEffect` para exposiciones
+5. **Propiedades relevantes**: incluir IDs de entidades, tipos/categorias, y contexto necesario para segmentacion
