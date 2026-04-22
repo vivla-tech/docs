@@ -1,0 +1,175 @@
+---
+title: "Panel de soporte"
+description: "Interfaz del panel de soporte y hub de operaciones para agentes y administradores"
+---
+
+# Panel de soporte
+
+El panel de soporte es la interfaz principal del módulo de Chat en el frontend (`/app/chat/`). Funciona como hub central de operaciones, integrando chat, tickets, encuestas, usuarios, propiedades y analytics.
+
+## Sidebar principal (8 items)
+
+La navegación lateral organiza las herramientas por frecuencia de uso diario:
+
+| # | ID | Label | Icono | Ruta |
+|---|-----|-------|-------|------|
+| 1 | chats | Chats | MessageSquare | `/app/chat` |
+| 2 | tickets | Tickets | Ticket | `/app/chat/tickets` |
+| 3 | users | Usuarios | Users | `/app/chat/users` |
+| 4 | properties | Propiedades | Building2 | `/app/chat/properties` |
+| 5 | surveys | Encuestas | ClipboardList | `/app/chat/surveys` |
+| 6 | analytics | Analítica | BarChart3 | `/app/chat/analytics` |
+| 7 | news | Novedades | Megaphone | `/app/chat/news` |
+| 8 | settings | Configuración | Settings | `/app/chat/settings` |
+
+Usuarios y Propiedades están promovidos desde Settings al sidebar principal para facilitar flujos diarios de soporte (buscar casa → copiar enlace encuesta → enviar por chat).
+
+## Vistas principales
+
+### Lista de canales
+
+Ruta: `/app/chat/`
+
+Panel lateral redimensionable (320px por defecto, rango 240-600px) que muestra la lista de canales con:
+
+- **Scroll virtualizado** con paginación infinita (50 canales por página)
+- **Filtros**: por propiedad, agente, tipo de canal
+- **Búsqueda** de mensajes a través de canales
+- **Conteo de no leídos** en tiempo real por canal
+- **Pestañas** para diferentes vistas de canales
+- **Asistente de creación** de canales (wizard multi-paso)
+
+### Conversación
+
+Ruta: `/app/chat/$channelId`
+
+Vista principal de la conversación con:
+
+- **Lista de mensajes** con scroll virtualizado
+- **Búsqueda en conversación** con navegación entre resultados
+- **Sidebar de respuestas rápidas** (quick replies)
+- **Modo de selección de mensajes** para crear tickets o agregar a tickets existentes
+- **Sidebar lateral** con metadata del canal (propiedad, booking, información del huésped)
+- **Seguimiento de estado de lectura**
+- **Salto a mensaje** (jump-to-message)
+
+### Tickets
+
+Ruta: `/app/chat/tickets/`
+
+Panel de administración de tickets con:
+
+- Filtros por estado, prioridad, propiedad y agente
+- Paginación (100 tickets por página)
+- Búsqueda rápida por ID o título
+- Badges de prioridad y estado
+- Vista detallada por ticket (`/app/chat/tickets/$ticketId`) con comentarios
+
+## Usuarios
+
+Ruta: `/app/chat/users/`
+
+Vista de usuarios promovida desde Settings al sidebar principal. Incluye lista de usuarios con vista detallada por usuario (`/app/chat/users/$userId`).
+
+## Propiedades
+
+Ruta: `/app/chat/properties/`
+
+Vista de propiedades promovida desde Settings al sidebar principal. Muestra un grid de tarjetas con imagen de portada, nombre, ubicación, selector de agente asignado y botón "Ver NPS" que navega a `/app/chat/surveys/results?property={id}`. Soporta modo batch para asignaciones masivas.
+
+## Encuestas
+
+Ruta: `/app/chat/surveys/`
+
+Hub de encuestas integrado en el panel de soporte. Incluye 5 sub-secciones con navegación propia:
+
+| # | ID | Label | Icono | Ruta | Exact |
+|---|-----|-------|-------|------|-------|
+| 1 | activity | Actividad | Activity | `/app/chat/surveys` | true |
+| 2 | admin | Administrar | PenTool | `/app/chat/surveys/admin` | false |
+| 3 | results | Resultados | BarChart3 | `/app/chat/surveys/results` | false |
+| 4 | action-plans | Planes de Acción | FileCheck | `/app/chat/surveys/action-plans` | false |
+| 5 | rewards | Rewards | Trophy | `/app/chat/surveys/rewards` | false |
+
+<Tabs>
+  <Tab title="Actividad">
+    **`/app/chat/surveys`**
+
+    Tabla de respuestas con filtros (búsqueda, tipo encuesta, destino, rango de fechas con DateRangePicker), quick actions (generador inline de deep links, resumen de rewards) y exportación CSV.
+  </Tab>
+  <Tab title="Administrar">
+    **`/app/chat/surveys/admin`**
+
+    Tipos de encuesta agrupados por scope (Casa / Reserva) en layout de 2 columnas. Cada tipo muestra sus versiones con acciones: publicar, duplicar, editar. El builder (`/app/chat/surveys/admin/$surveyTypeId/edit/$surveyId`) permite crear y editar encuestas con 5 tipos de pregunta, condicionales múltiples, i18n (ES/EN) y preview en vivo.
+  </Tab>
+  <Tab title="Resultados">
+    **`/app/chat/surveys/results`**
+
+    Grid de 2 columnas con una tarjeta por tipo de encuesta. Incluye DateRangePicker (default 30 días), filtro por propiedad, resultados agregados del Home Review (responses, promedio, peor espacio, ratings por espacio, últimas 10 respuestas) y vista legacy de resultados desde Firestore.
+  </Tab>
+  <Tab title="Planes de Acción">
+    **`/app/chat/surveys/action-plans`**
+
+    Lista de planes de acción con vista de detalle: stats grid, action items, y botones de aprobar/enviar. Los planes se generan automáticamente por consenso (75% participación + 75% acuerdo).
+  </Tab>
+  <Tab title="Rewards">
+    **`/app/chat/surveys/rewards`**
+
+    Gráfico de barras de usuarios por nivel de reward (1-5) y configuración del premio de nivel 5.
+  </Tab>
+</Tabs>
+
+## Configuración (Settings)
+
+Todas las rutas bajo `/app/chat/settings/`. Reducido a 4 secciones (Usuarios y Propiedades promovidos al sidebar principal):
+
+<Tabs>
+  <Tab title="Agentes">
+    **`/app/chat/settings/agents`**
+
+    Gestión de agentes de soporte: crear, editar, asignar a canales.
+  </Tab>
+  <Tab title="Canales">
+    **`/app/chat/settings/channels`**
+
+    Tres pestañas:
+    - **Todos los canales**: búsqueda, filtros (tipo/agente/propiedad/ubicación), operaciones batch (cambiar agente activo/default, agregar moderadores, eliminar)
+    - **Bookings**: gestión de reservas con vista de calendario
+    - **Tipos**: (solo admin) crear y editar tipos de canal
+  </Tab>
+  <Tab title="Turnos">
+    **`/app/chat/settings/shifts`**
+
+    Programación de turnos de agentes de soporte.
+  </Tab>
+  <Tab title="Sincronización">
+    **`/app/chat/settings/sync`** (solo admin)
+
+    Visualización de jobs de sincronización, logs y trigger manual.
+  </Tab>
+</Tabs>
+
+## News (Notificaciones embebidas)
+
+Sección de broadcast y notificaciones integrada en el módulo de chat, bajo `/app/chat/news/`:
+
+| Ruta | Descripción |
+|------|-------------|
+| `/app/chat/news/` | Hub principal de noticias |
+| `/app/chat/news/dashboard` | Dashboard de analytics |
+| `/app/chat/news/templates` | Templates de mensajes |
+| `/app/chat/news/send` | Envío manual de notificaciones |
+| `/app/chat/news/history` | Historial de mensajes enviados |
+| `/app/chat/news/deep-links` | Configuración de deep links |
+| `/app/chat/news/automations` | Reglas de automatización |
+| `/app/chat/news/settings` | Configuración general de news |
+
+## Analytics
+
+Ruta: `/app/chat/analytics`
+
+Métricas de uso del chat: actividad por canal, por usuario y estadísticas generales.
+
+<Note>
+  El acceso a las secciones está controlado por el sistema de permisos. Los agentes con rol `editor` en `tool-chat` pueden gestionar canales, tickets y encuestas. Las operaciones de configuración avanzada (tipos de canal, sync) requieren rol `admin`.
+</Note>

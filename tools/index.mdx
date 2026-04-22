@@ -1,29 +1,104 @@
 ---
 title: "Vivla Tools"
-description: "Plataforma interna de Vivla: chat, encuestas, community, notificaciones y gestión de equipos"
+description: "Monorepo de herramientas internas para la gestión de propiedades, comunicación y operaciones de Vivla"
 ---
 
 # Vivla Tools
 
-Monorepo que contiene las herramientas internas de Vivla: chat de soporte en tiempo real, encuestas NPS, community guidelines, notificaciones push, gestión de equipos y permisos.
+Monorepo que contiene las herramientas internas de Vivla: un conjunto de aplicaciones para gestionar comunicación con huéspedes, propiedades, guías de mantenimiento, notificaciones y operaciones del equipo.
 
-<Note>
-  La documentación completa de Vivla Tools se genera automáticamente desde el repositorio `vivla-tools`. Si esta página aparece sin contenido detallado, la agregación aún no se ha ejecutado.
-</Note>
+## Estructura del monorepo
 
-## Repositorio
+<CardGroup cols={2}>
+  <Card title="Frontend" icon="desktop">
+    **`apps/frontend`** — Panel interno principal construido con TanStack Start (React). Incluye los módulos de Chat, Community, Notificaciones, Teams y Dashboard.
 
-- **Repo:** [vivla-tech/vivla-tools](https://github.com/vivla-tech/vivla-tools)
-- **Stack:** TanStack Start (frontend) + NestJS (backend) + Supabase (PostgreSQL)
-- **Hosting:** Railway
+    Puerto: `3000`
+  </Card>
+  <Card title="Backend" icon="server">
+    **`apps/backend`** — API NestJS que sirve a todos los frontales y a la app mobile (vivla-mobile). Gestiona autenticación, permisos, chat, surveys, community, notificaciones e inbox.
+
+    Puerto: `3001`
+  </Card>
+  <Card title="Community Frontend" icon="globe">
+    **`apps/community-frontend`** — Portal público Next.js 14 para que huéspedes y personal de limpieza accedan a guías de propiedades, inventario, planos y sesiones de limpieza.
+
+    Puerto: `3002`
+  </Card>
+  <Card title="Home Excellence" icon="chart-line">
+    **`apps/home-excellence`** — Portal público Next.js 14 para propietarios: métricas de satisfacción NPS, estado de calidad, tickets, protocolos y resultados del Home Review 2026.
+
+    Puerto: `3003`
+  </Card>
+  <Card title="Packages compartidos" icon="cube">
+    **`packages/common`** — Tipos, utilidades, constantes y validaciones compartidas (Zod).
+
+    **`packages/ui`** — Librería de componentes React con shadcn/ui y Tailwind CSS.
+
+    **`packages/eslint-config`** — Configuración ESLint compartida.
+  </Card>
+</CardGroup>
 
 ## Módulos principales
 
-| Módulo | Descripción |
-|--------|-------------|
-| **Chat** | Mensajería en tiempo real con Stream Chat, tickets de soporte, gestión de canales y agentes |
-| **Surveys** | Encuestas dinámicas con builder visual, 5 tipos (Casa, Estancia, Llegada, Onboarding, Financiero) |
-| **Community** | Guías de propiedades, inventario, limpieza, planos |
-| **Notificaciones** | Push notifications con templates, automaciones y deep links |
-| **Teams** | Gestión de equipos, miembros y roles |
-| **Permisos** | Control de acceso granular por módulo |
+| Módulo | Frontend | Backend | Descripción |
+|--------|----------|---------|-------------|
+| **Chat** | `/app/chat/` | `/api/chat/` | Mensajería en tiempo real con Stream Chat, tickets de soporte, gestión de canales y agentes |
+| **Surveys** | `/app/chat/surveys/` | `/api/surveys/`, `/api/survey-types/`, `/api/survey-legacy-responses/`, `/api/survey-scores/`, `/api/chat/sync/firebase-legacy-responses` | Encuestas dinámicas con builder visual, versionado, 5 tipos (Casa, Estancia, Llegada, Onboarding, Financiero), resultados con sub-tabs, user matrix multi-source, rewards, action plans y sync automático desde Firebase via Windmill |
+| **Community** | `/app/community/` | `/api/community/` | Gestión de propiedades: guías, inventario, limpieza, planos, fotos, styling |
+| **Notificaciones** | `/app/notifications/` | `/api/notifications/` | Push notifications con templates, automaciones, deep links y analytics |
+| **Teams** | `/app/teams/` | `/api/teams/` | Gestión de equipos, miembros y roles |
+| **Inbox** | Sidebar | `/api/inbox/` | Bandeja de entrada unificada con notificaciones en tiempo real |
+| **Permisos** | Integrado | `/api/permissions/` | Control de acceso granular por módulo (none/view/edit/admin) |
+| **Home Excellence** | `apps/home-excellence/` | `/api/surveys/public/*` | Portal propietarios: NPS, satisfacción, tickets, Home Review 2026 |
+
+## Stack tecnológico
+
+| Capa | Tecnología |
+|------|------------|
+| Frontend | TanStack Start, TanStack Router, TanStack Query, React 18, Tailwind CSS |
+| Community Frontend | Next.js 14 (App Router), React PDF |
+| Backend | NestJS 10, Express |
+| Base de datos | Supabase (PostgreSQL con RLS) |
+| Autenticación | Auth0 (JWT/JWKS), Stream Chat tokens para mobile |
+| Chat en tiempo real | Stream Chat SDK |
+| Push notifications | Firebase Admin SDK, Expo Server SDK, Web Push (VAPID) |
+| Almacenamiento | Cloudinary (imágenes) |
+| Email | Resend |
+| Build | Turborepo, pnpm workspaces |
+
+## Relación entre aplicaciones
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌──────────────────┐
+│  vivla-mobile    │     │  Frontend        │     │ Home Excellence   │
+│  (app externa)   │     │  (TanStack)      │     │ (Next.js, :3003)  │
+└────────┬────────┘     └────────┬────────┘     └────────┬─────────┘
+         │                       │                       │
+         │  /api/chat/mobile/*   │  /api/*               │ /api/surveys/public/*
+         │  /api/surveys/mobile/*│                       │
+         │                       │                       │
+         └───────────┬───────────┴───────────┬───────────┘
+                     │                       │
+              ┌──────▼──────┐         ┌──────▼──────────┐
+              │   Backend    │         │ dashboard.vivla  │
+              │  (NestJS)    │         │ api.vivla.com    │
+              └──────┬──────┘         └─────────────────┘
+                     │
+         ┌───────────┼───────────┐
+         │           │           │
+    ┌────▼───┐  ┌───▼────┐  ┌──▼───────┐
+    │Supabase│  │Stream  │  │Cloudinary│
+    │  (DB)  │  │ Chat   │  │ (media)  │
+    └────────┘  └────────┘  └──────────┘
+                     │
+              ┌──────▼──────┐
+              │  Community   │
+              │  Frontend    │
+              │  (Next.js)   │
+              └─────────────┘
+```
+
+<Note>
+  La app mobile (**vivla-mobile**) consume endpoints específicos de este backend (`/api/chat/mobile/*` para chat, `/api/surveys/mobile/*` para encuestas), no del backend principal de Vivla.
+</Note>

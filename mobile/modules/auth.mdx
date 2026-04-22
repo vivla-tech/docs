@@ -1,0 +1,105 @@
+---
+title: 'Auth'
+description: 'Módulo de autenticación, login y gestión de sesión'
+---
+
+## Descripción
+
+El módulo **Auth** maneja login, registro, reset de contraseña, gestión de tokens y modo visitante.
+
+- **Ubicación:** `src/modules/auth/`
+
+<Note>
+  Este módulo implementa un sistema de bloqueo por intentos fallidos: tras 5 intentos incorrectos,
+  la cuenta se bloquea durante 15 minutos.
+</Note>
+
+## Screens
+
+| Screen         | Ruta                      | Descripción                                           |
+| -------------- | ------------------------- | ----------------------------------------------------- |
+| `LoginScreen`  | `/(auth)/login`           | Login con email/contraseña, soporte para invitaciones |
+| `ResendScreen` | `/(auth)/resend-password` | Reenvío de email de reset                             |
+| `ResetScreen`  | `/(auth)/reset-password`  | Formulario de nueva contraseña                        |
+
+## API Endpoints
+
+| Método | Path                   | Descripción                   |
+| ------ | ---------------------- | ----------------------------- |
+| `POST` | `/auth/login`          | Login con credenciales        |
+| `POST` | `/auth/register`       | Registro de nuevo usuario     |
+| `PUT`  | `/auth/reset-password` | Solicitar reset de contraseña |
+| `POST` | `/auth/logout`         | Cerrar sesión                 |
+| `POST` | `/auth/delete-account` | Eliminar cuenta               |
+| `POST` | `/auth/refresh-token`  | Renovar access token          |
+| `GET`  | `/users/me`            | Obtener usuario actual        |
+
+## Hooks
+
+| Hook             | Descripción                                                                            |
+| ---------------- | -------------------------------------------------------------------------------------- |
+| `useAuth()`      | Hook principal: `login`, `logout`, `resetPassword`, `resendPassword`, `initializeAuth` |
+| `useAuthState()` | Selector de estado de autenticación                                                    |
+| `useRegister()`  | Lógica de registro con manejo de errores                                               |
+
+## Tipos principales
+
+<CodeGroup>
+```typescript Constantes
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_DURATION = 15; // minutos
+
+const TOKEN*KEY = "token";
+const REFRESH_TOKEN_KEY = "refreshToken";
+const USER_KEY = "user";
+const SESSION_TIMEOUT = 24 * 60 \_ 60 \* 1000; // 24 horas
+
+```
+</CodeGroup>
+
+## Store
+
+El módulo utiliza `authStore` en **Zustand** con almacenamiento híbrido (`AsyncStorage` + `SecureStore`).
+
+<Warning>
+  Los tokens se almacenan en `SecureStore` para mayor seguridad. No acceder directamente a ellos fuera de este módulo.
+</Warning>
+
+Ver [Autenticación](/mobile/architecture/authentication) para detalles del flujo JWT.
+
+## Componentes destacados
+
+<CardGroup cols={2}>
+  <Card title="LoginForm" icon="right-to-bracket">
+    Formulario de login con validación y manejo de errores inline.
+  </Card>
+  <Card title="ResendForm" icon="envelope">
+    Formulario para reenvío de email de reseteo de contraseña.
+  </Card>
+  <Card title="ResetPasswordForm" icon="key">
+    Formulario para establecer una nueva contraseña tras el reset.
+  </Card>
+  <Card title="AuthError" icon="triangle-exclamation">
+    Componente de visualización de errores de autenticación con mapeo de códigos.
+  </Card>
+</CardGroup>
+
+## authService
+
+Servicio singleton que centraliza la lógica de autenticación:
+
+- **Login attempt lockout:** Máximo 5 intentos (`MAX_LOGIN_ATTEMPTS`), bloqueo de 15 minutos (`LOCKOUT_DURATION`).
+- **Manejo de errores:** Mapeo de códigos de error del backend a mensajes legibles.
+- **Gestión de tokens:** Almacenamiento seguro y renovación automática.
+
+## Modo visitante
+
+<Tabs>
+  <Tab title="Acceso">
+    El método `loginAsVisitor()` permite explorar la app sin necesidad de crear una cuenta. Los visitantes tienen acceso limitado a funcionalidades de solo lectura.
+  </Tab>
+  <Tab title="Salida">
+    El método `logoutAsVisitor()` limpia el estado del visitante y redirige al flujo de login/registro.
+  </Tab>
+</Tabs>
+```

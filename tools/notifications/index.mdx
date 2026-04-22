@@ -1,0 +1,100 @@
+---
+title: "Notificaciones"
+description: "Plataforma de push notifications con templates, automaciones y analytics"
+---
+
+# Notificaciones
+
+El módulo de Notificaciones permite enviar push notifications a usuarios de la app mobile, gestionar templates reutilizables, configurar automaciones y analizar métricas de entrega.
+
+## Dashboard
+
+Ruta: `/app/notifications/dashboard`
+
+Panel de métricas principales:
+
+| Métrica | Icono | Descripción |
+|---------|-------|-------------|
+| Total enviadas | Bell | Cantidad total de notificaciones enviadas |
+| Tasa de entrega | CheckCircle | Porcentaje de entrega exitosa |
+| Templates activos | FileText | Cantidad de templates disponibles |
+| Programadas | Clock | Notificaciones pendientes de envío |
+
+Incluye indicadores de tendencia semanal y timeline de actividad reciente.
+
+## Funcionalidades
+
+### Envío manual
+
+Ruta: `/app/notifications/send`
+
+Crear y enviar notificaciones manualmente con:
+- Título y mensaje personalizado
+- Contenido enriquecido e imagen/video
+- Selección de audiencia (filtros)
+- Estimación de audiencia antes del envío
+- Opción de programar para envío futuro
+- Envío de test a usuarios específicos
+
+### Templates
+
+Ruta: `/app/notifications/templates`
+
+Librería de templates reutilizables con:
+- Categorías: `reminder`, `announcement`, `feedback`, `promotional`
+- Título, mensaje, contenido, imagen y video
+- Asociación con deep links
+- Contador de uso
+- Duplicar templates existentes
+
+### Historial
+
+Ruta: `/app/notifications/history`
+
+Registro de todas las notificaciones enviadas con:
+- Estado: `draft`, `scheduled`, `sending`, `sent`, `failed`
+- Estadísticas de entrega por notificación
+- Detalle de recipients y su estado individual (`pending`, `sent`, `failed`, `opened`, `clicked`)
+
+### Deep Links
+
+Ruta: `/app/notifications/deep-links`
+
+Configuración de deep links para que las notificaciones abran pantallas específicas en la app mobile:
+- Nombre y patrón del deep link
+- Parámetros configurables (JSON)
+- Estado activo/inactivo
+
+## Canales de entrega
+
+Las notificaciones se pueden enviar por:
+
+| Canal | Tecnología | Descripción |
+|-------|------------|-------------|
+| Push | Firebase Admin SDK, Expo Server SDK | Notificaciones push nativas (iOS/Android) |
+| In-app | Web Push (VAPID) | Notificaciones dentro de la aplicación web |
+| Ambos | — | Entrega simultánea push + in-app |
+
+## API endpoints
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| POST | `/api/notifications` | Crear notificación |
+| GET | `/api/notifications` | Listar notificaciones (filtros: status, type, page, limit) |
+| GET | `/api/notifications/:id` | Obtener notificación por ID |
+| GET | `/api/notifications/:id/recipients` | Recipients de una notificación |
+| GET | `/api/notifications/:id/stats` | Estadísticas de entrega |
+| POST | `/api/notifications/audience/estimate` | Estimar tamaño de audiencia |
+| POST | `/api/notifications/audience/resolve` | Resolver IDs de audiencia |
+| PUT | `/api/notifications/:id` | Actualizar notificación (solo draft) |
+| DELETE | `/api/notifications/:id` | Eliminar notificación (solo draft) |
+| POST | `/api/notifications/:id/duplicate` | Duplicar notificación |
+| POST | `/api/notifications/:id/send` | Enviar notificación |
+| POST | `/api/notifications/:id/test` | Envío de test |
+| POST | `/api/notifications/batch/send` | Envío batch (admin) |
+| POST | `/api/notifications/scheduled/send` | Enviar programadas pendientes (admin) |
+| POST/GET | `/api/notifications/templates` | CRUD de templates |
+
+<Note>
+  Los usuarios no-admin solo pueden ver sus propias notificaciones. Los endpoints de envío batch y programado requieren rol de administrador.
+</Note>

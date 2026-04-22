@@ -1,0 +1,114 @@
+---
+title: 'Monitoreo de Errores'
+description: 'Integración con Sentry para tracking de errores'
+---
+
+## Visión general
+
+La app utiliza **Sentry React Native SDK (v6.14.0)** junto con el plugin de Expo para el monitoreo de errores en producción.
+
+<Note>
+  Sentry solo se inicializa si el DSN está configurado. En entorno de **test**, la integración se
+  deshabilita completamente.
+</Note>
+
+## Configuración
+
+### SDK de Sentry
+
+La configuración principal se encuentra en `src/core/config/sentry.ts`:
+
+| Parámetro          | Valor                                  |
+| ------------------ | -------------------------------------- |
+| SDK                | `@sentry/react-native` v6.14.0         |
+| Inicialización     | Condicional (requiere DSN configurado) |
+| Entorno de test    | Deshabilitado                          |
+| Source maps upload | Deshabilitado por defecto              |
+
+### Plugin de Expo
+
+En `app.config.ts`, el plugin `@sentry/react-native/expo` se integra con el sistema de build de Expo:
+
+<CodeGroup>
+  ```typescript app.config.ts (ejemplo) // Plugin integrado en la configuración de Expo plugins: [ [
+  '@sentry/react-native/expo',
+  {
+    // Source maps upload deshabilitado por defecto
+  }
+  , ], ], ```
+</CodeGroup>
+
+<Warning>
+  El upload de source maps está deshabilitado por defecto. Para habilitarlo en builds de producción,
+  configura las credenciales de Sentry en el pipeline de CI/CD.
+</Warning>
+
+## Integración en la app
+
+### Root layout
+
+El root layout de la aplicación está envuelto con `Sentry.wrap()`, lo que permite a Sentry capturar errores no manejados y monitorear la navegación automáticamente.
+
+```typescript
+export default Sentry.wrap(RootLayout);
+```
+
+## Error Handler centralizado
+
+El error handler en `src/shared/services/api/errorHandler.ts` proporciona una capa de manejo de errores que se integra directamente con Sentry.
+
+### Clasificación de errores de red
+
+<Tabs>
+  <Tab title="Tipos de error">
+    El handler clasifica los errores de red en las siguientes categorías:
+
+    | Tipo | Descripción |
+    |---|---|
+    | `timeout` | La solicitud excedió el tiempo límite |
+    | `dns` | Error de resolución DNS |
+    | `tls` | Error en el handshake TLS |
+    | `cancelled` | Solicitud cancelada por el usuario o el sistema |
+    | `unknown` | Error de red no clasificado |
+
+  </Tab>
+  <Tab title="Breadcrumbs">
+    Cada error registra breadcrumbs en Sentry para proporcionar contexto adicional:
+
+    - URL de la solicitud
+    - Método HTTP
+    - Código de estado (si aplica)
+    - Tipo de error de red clasificado
+
+  </Tab>
+  <Tab title="Mensajes amigables">
+    El handler mapea cada tipo de error a mensajes comprensibles para el usuario, evitando exponer detalles técnicos en la UI.
+  </Tab>
+</Tabs>
+
+## Breadcrumbs en stores
+
+Los stores de Zustand registran breadcrumbs en Sentry durante operaciones clave, proporcionando una traza de las acciones del usuario previas a un error.
+
+<Note>
+  Los breadcrumbs se agregan automáticamente en operaciones como login, logout, cambios de estado de
+  conexión y acciones críticas de negocio.
+</Note>
+
+## Integración con el API client
+
+Los errores de red capturados por el API client se reportan automáticamente a Sentry. El flujo es:
+
+1. El API client detecta un error de red
+2. El error handler clasifica el tipo de error
+3. Se agregan breadcrumbs con contexto de la solicitud
+4. El error se reporta a Sentry
+5. Se muestra un mensaje amigable al usuario
+
+## Archivos clave
+
+| Archivo                                   | Responsabilidad                          |
+| ----------------------------------------- | ---------------------------------------- |
+| `src/core/config/sentry.ts`               | Configuración e inicialización de Sentry |
+| `src/shared/services/api/errorHandler.ts` | Error handler centralizado               |
+| `app.config.ts`                           | Plugin de Expo para Sentry               |

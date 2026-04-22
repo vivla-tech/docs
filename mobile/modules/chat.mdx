@@ -1,0 +1,158 @@
+---
+title: 'Chat'
+description: 'Módulo de mensajería en tiempo real con Stream Chat'
+---
+
+## Descripción
+
+El módulo **Chat** implementa mensajería en tiempo real usando **Stream Chat SDK**. Es el módulo más complejo de la aplicación con más de 38 componentes custom.
+
+- **Ubicación:** `src/modules/chat/`
+
+<Warning>
+  Este módulo depende del servicio externo Stream Chat. Asegúrate de revisar la configuración del
+  cliente antes de modificar componentes de conexión.
+</Warning>
+
+## Screens
+
+| Screen                 | Ruta                                    | Descripción                 |
+| ---------------------- | --------------------------------------- | --------------------------- |
+| `ChatsListScreen`      | `/(tabs)/03_inbox`                      | Lista de conversaciones     |
+| `ChatDetailScreen`     | `/chat/[channelType]/[channelId]`       | Conversación individual     |
+| `ChannelInfoScreen`    | `/chat/[channelType]/[channelId]/info`  | Información del canal       |
+| `ChannelMediaScreen`   | `/chat/[channelType]/[channelId]/media` | Galería de medios del canal |
+| `ChatSearchScreen`     | `/(tabs)/03_inbox/search`               | Búsqueda de mensajes        |
+| `ArchivedChatsScreen`  | `/(tabs)/03_inbox/archived`             | Chats archivados            |
+| `ChatOnboardingScreen` | `/chat/invite/onboarding`               | Onboarding de chat          |
+
+## API Endpoints
+
+| Método  | Path                             | Descripción                |
+| ------- | -------------------------------- | -------------------------- |
+| `POST`  | `/chat/login`                    | Autenticación con Stream   |
+| `POST`  | `/chat/refresh`                  | Renovar token de chat      |
+| `PATCH` | `/chat/profile`                  | Actualizar perfil de chat  |
+| `POST`  | `/chat/invitations/generate`     | Generar invitación de chat |
+| `GET`   | `/chat/invitations/info/{token}` | Información de invitación  |
+
+<Note>
+  La autenticación con Stream Chat es independiente del login principal. El token de chat se
+  gestiona a través de `chatAuthService`.
+</Note>
+
+## Hooks
+
+| Hook                        | Descripción                                |
+| --------------------------- | ------------------------------------------ |
+| `useStreamClient()`         | Gestión del cliente Stream Chat            |
+| `useStreamClientEvents()`   | Manejo de eventos (mensajes, typing, etc.) |
+| `useUnreadCount()`          | Conteo de mensajes no leídos               |
+| `useChannelPreviewData()`   | Datos de preview de canal                  |
+| `useChannelMedia()`         | Gestión de medios del canal                |
+| `useChannelMessageSearch()` | Búsqueda dentro del canal                  |
+| `useAttachmentHandlers()`   | Manejo de archivos/imágenes adjuntas       |
+| `useVoiceRecorder()`        | Grabación de mensajes de voz               |
+| `useAudioPlayer()`          | Reproducción de audio                      |
+| `useChatTheme()`            | Personalización de tema                    |
+| `useKeyboardVisibility()`   | Estado del teclado                         |
+
+## Tipos principales
+
+<Tabs>
+  <Tab title="Tipos de canal">
+    ```typescript
+    type ChannelType =
+      | "PROPERTY"   // Canal de propiedad
+      | "ISSUES"     // Reportes de incidencias
+      | "NEWS"       // Noticias y actualizaciones
+      | "FEEDBACK"   // Feedback de usuarios
+      | "BOOKING";   // Canal asociado a una reserva
+    ```
+  </Tab>
+  <Tab title="Tipos de mensaje">
+    ```typescript
+    type MessageType =
+      | "text"
+      | "image"
+      | "video"
+      | "file"
+      | "voice"
+      | "poll"
+      | "private_note"
+      | "system"
+      | "ai_suggestion";
+    ```
+  </Tab>
+  <Tab title="Permisos">
+    ```typescript
+    // Permisos por usuario/canal
+    interface ChatPermissions {
+      userCanWrite: boolean;
+      userCanInvite: boolean;
+      userCanReact: boolean;
+    }
+    ```
+  </Tab>
+  <Tab title="Delivery status">
+    ```typescript
+    type DeliveryStatus =
+      | "sending"
+      | "sent"
+      | "delivered"
+      | "read"
+      | "failed";
+    ```
+  </Tab>
+</Tabs>
+
+## Store
+
+El módulo utiliza `chatStore` en **Zustand** para gestionar el estado del chat:
+
+- `StreamClient` — instancia del cliente de Stream Chat
+- `isConnected` — estado de conexión
+- `activeChannel` — canal actualmente activo
+- `unreadCount` — conteo de mensajes no leídos
+- Token management — almacenamiento y renovación de tokens de chat
+
+Ver [Chat Integration](/mobile/integrations/chat) para detalles de la integración con Stream.
+
+## Componentes destacados
+
+El módulo cuenta con más de 38 componentes custom organizados en tres categorías principales:
+
+<CardGroup cols={3}>
+  <Card title="message-input/" icon="keyboard">
+    **14+ componentes** para entrada de mensajes: `InputMicButton`, `InputSendButton`,
+    `VoiceRecordingPreview`, `AttachmentMenu`, `LocationPicker`, `ContactPicker`, entre otros.
+  </Card>
+  <Card title="message-attachments/" icon="paperclip">
+    **11 componentes** para renderizado de diferentes tipos de adjuntos: imágenes, videos, archivos,
+    notas de voz, ubicaciones, etc.
+  </Card>
+  <Card title="message/" icon="message">
+    **13 componentes** para display de mensajes con diferentes layouts según tipo, estado y
+    permisos.
+  </Card>
+</CardGroup>
+
+## Services
+
+<Tabs>
+  <Tab title="chatAuthService">
+    Servicio de autenticación específico para Stream Chat: - **Token provider:** Obtiene y cachea el
+    token de Stream. - **Refresh:** Renueva el token cuando expira. - **Cache:** Almacena el token
+    para evitar llamadas innecesarias al backend.
+  </Tab>
+  <Tab title="channel-name">
+    Servicio de resolución de nombres de canal basado en el tipo y los participantes.
+  </Tab>
+  <Tab title="featureFlagService">
+    Control de funcionalidades habilitadas/deshabilitadas por feature flags para el módulo de chat.
+  </Tab>
+</Tabs>
+
+## Context
+
+El módulo expone `SearchContext` para gestionar el estado de búsqueda de mensajes a través de los componentes de la pantalla de búsqueda.

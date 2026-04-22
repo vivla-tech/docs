@@ -1,0 +1,77 @@
+---
+title: "Chat"
+description: "Sistema de mensajería y soporte en tiempo real basado en Stream Chat"
+---
+
+# Chat
+
+El módulo de Chat es el sistema central de comunicación de Vivla Tools. Permite gestionar conversaciones con huéspedes, administrar canales de soporte, crear tickets y coordinar agentes de atención.
+
+## Arquitectura
+
+El sistema se basa en **Stream Chat** como proveedor de mensajería en tiempo real. El backend actúa como orquestador: gestiona canales, usuarios, permisos y sincronización, mientras que Stream Chat maneja el transporte de mensajes y la presencia.
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│   Frontend   │────▶│   Backend    │────▶│  Stream Chat │
+│  (React SDK) │◀────│  (NestJS)    │◀────│   (SaaS)     │
+└──────────────┘     └──────────────┘     └──────────────┘
+                            │
+                     ┌──────▼──────┐
+                     │  Supabase   │
+                     │  (metadata) │
+                     └─────────────┘
+```
+
+## Sub-módulos
+
+El módulo de Chat está compuesto por **15 sub-módulos** en el backend:
+
+| Sub-módulo | Descripción |
+|------------|-------------|
+| **Channels** | CRUD de canales, operaciones batch (agente activo, moderadores, archivado, eliminación), filtros avanzados |
+| **Messages** | Registro de mensajes para analytics, consulta de historial por canal |
+| **Bookings** | Creación de canales por reserva, batch create/archive de canales de booking |
+| **Tickets** | Sistema de tickets de soporte con prioridad, estado y comentarios |
+| **Shifts** | Programación de turnos de agentes de soporte |
+| **Invitations** | Invitaciones a canales con tokens y deep links |
+| **Mobile** | Autenticación y endpoints específicos para vivla-mobile |
+| **Users** | Gestión de usuarios de chat |
+| **Notifications** | Notificaciones específicas del chat |
+| **Analytics** | Métricas de uso: canales, usuarios, mensajes |
+| **Webhooks** | Recepción de eventos de Stream.io, Zendesk e invitaciones |
+| **Sync** | Sincronización de datos entre Supabase y Stream Chat |
+| **Property Assignments** | Mapeo de propiedades a canales |
+| **Channel Types** | Definición de tipos de canal (configuración de templates) |
+| **Integrations** | Integraciones con servicios externos |
+
+## Flujo principal
+
+### Creación de canales por booking
+
+1. Se reciben las reservas (bookings) desde el sistema externo
+2. Un agente o proceso automático crea canales asociados a cada booking
+3. Cada canal se vincula a una propiedad y un tipo de canal
+4. Se asignan agentes (activo y por defecto) y moderadores
+5. El huésped accede al canal desde la app mobile
+
+### Gestión de tickets
+
+1. Un agente selecciona mensajes de una conversación
+2. Crea un ticket con título, prioridad y los mensajes seleccionados
+3. El ticket se puede actualizar, agregar más mensajes y resolver
+4. Filtros por estado, prioridad, propiedad y agente asignado
+
+## Webhooks
+
+El sistema recibe eventos externos en:
+
+| Endpoint | Origen | Validación |
+|----------|--------|------------|
+| `POST /api/chat/webhooks/stream` | Stream.io | Firma de Stream |
+| `POST /api/chat/webhooks/zendesk` | Zendesk | HMAC-SHA256 |
+| `POST /api/chat/webhooks/invitation-accepted` | Vivla | HMAC-SHA256 (X-Vivla-Signature) |
+
+<Note>
+  Los webhooks son públicos (sin Bearer token) pero están protegidos por validación de firma criptográfica.
+</Note>

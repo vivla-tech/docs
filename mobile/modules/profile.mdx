@@ -1,0 +1,137 @@
+---
+title: 'Profile'
+description: 'Módulo de perfil de usuario y configuración'
+---
+
+## Descripción
+
+El módulo **Profile** gestiona el perfil del usuario, la foto de perfil, la configuración de notificaciones push y el registro de device tokens.
+
+- **Ubicación:** `src/modules/profile/`
+
+## Screens
+
+| Screen          | Ruta                 | Descripción                                   |
+| --------------- | -------------------- | --------------------------------------------- |
+| `ProfileScreen` | `/(tabs)/05_profile` | Perfil de usuario, ajustes y cierre de sesión |
+
+## API Endpoints
+
+| Método | Path                                  | Descripción                                         |
+| ------ | ------------------------------------- | --------------------------------------------------- |
+| `GET`  | `/properties/mine`                    | Propiedades del usuario (filtradas por rol COOWNER) |
+| `GET`  | `/users/available-stays/{propertyId}` | Estadías disponibles del usuario para una propiedad |
+| `POST` | `/push-notifications/register-token`  | Registrar device token para notificaciones push     |
+| `PUT`  | `/push-notifications/{deviceToken}`   | Habilitar o deshabilitar notificaciones push        |
+| `PUT`  | `/users/{id}`                         | Actualizar perfil del usuario (nombre, imagen)      |
+
+## Hooks
+
+| Hook                        | Descripción                                                                    |
+| --------------------------- | ------------------------------------------------------------------------------ |
+| `useUserQueries()`          | Queries de datos del usuario y sus propiedades                                 |
+| `useProfilePictureUpload()` | Subida de foto de perfil utilizando `uploadService`                            |
+| `useNotifications()`        | Gestión de configuración de notificaciones push (registro de token y permisos) |
+
+<Note>
+  El servicio de notificaciones push (`notificationsService`) reside en este módulo en
+  `services/notificationsService.ts`. Es diferente al módulo de notificaciones in-app. Ver [Push
+  Notifications](/mobile/integrations/push-notifications) para detalles de la integración.
+</Note>
+
+## Tipos principales
+
+<CodeGroup>
+```typescript User
+interface User {
+  id: string;
+  email: string;
+  displayName: string;
+  profileImage?: string;
+  phone?: string;
+}
+```
+
+```typescript UserRole
+const UserRole = {
+  COOWNER: 'coowner',
+  GUEST: 'guest',
+  ADMIN: 'admin',
+} as const;
+
+type UserRoleType = (typeof UserRole)[keyof typeof UserRole];
+```
+
+```typescript Guests
+type GuestManager = {
+  name: string;
+  profileImage?: string;
+  phone: string;
+  whatsapp: string;
+};
+
+type GuestUser = {
+  id: string;
+  user: { id: string; email: string };
+  name: string;
+  phone?: string;
+};
+```
+
+```typescript Notificaciones
+interface RegisterDeviceTokenRequest {
+  deviceToken: string;
+  acceptNotifications: boolean;
+}
+
+interface EnableNotificationsRequest {
+  acceptNotifications: boolean;
+}
+
+interface NotificationPermissionStatus {
+  granted: boolean;
+  canAskAgain: boolean;
+  status: 'granted' | 'denied' | 'undetermined';
+}
+```
+
+</CodeGroup>
+
+## Componentes destacados
+
+<CardGroup cols={2}>
+  <Card title="ProfileInfo" icon="user">
+    Muestra la información del usuario: nombre, email y foto de perfil con opción de edición.
+  </Card>
+  <Card title="ProfileActions" icon="gear">
+    Acciones disponibles en el perfil: editar datos, cerrar sesión y otras configuraciones.
+  </Card>
+  <Card title="NotificationsSwitcher" icon="bell">
+    Toggle para habilitar o deshabilitar las notificaciones push del dispositivo.
+  </Card>
+  <Card title="LanguageSwitcher" icon="language">
+    Selector de idioma de la aplicación.
+  </Card>
+</CardGroup>
+
+## notificationsService
+
+Servicio que centraliza la lógica de notificaciones push:
+
+<Tabs>
+  <Tab title="Registro">
+    El método `registerDeviceToken()` envía el token del dispositivo al backend junto con la
+    preferencia de aceptación de notificaciones. Se ejecuta durante el inicio de sesión o al
+    habilitar notificaciones.
+  </Tab>
+  <Tab title="Permisos">
+    El método `enableNotifications()` actualiza la preferencia de notificaciones del dispositivo en
+    el backend. Verifica el estado de permisos del sistema operativo a través de
+    `NotificationPermissionStatus`.
+  </Tab>
+</Tabs>
+
+<Warning>
+  La API de `profileApi` filtra las propiedades del usuario para retornar solo aquellas con rol
+  `COOWNER`. Los usuarios con rol `GUEST` o `ADMIN` no verán propiedades en este endpoint.
+</Warning>

@@ -1,0 +1,243 @@
+---
+title: "Base de datos"
+description: "Schema de base de datos PostgreSQL en Supabase con Row Level Security"
+---
+
+# Base de datos
+
+La API usa **Supabase** (PostgreSQL) como base de datos, con **Row Level Security (RLS)** habilitado en tablas sensibles. Las migraciones se gestionan con archivos SQL en `apps/backend/src/database/migrations/`.
+
+## Tablas principales
+
+### Users y autenticación
+
+| Tabla | Descripción |
+|-------|-------------|
+| `users` | Cuentas de usuario |
+| `user_preferences` | Preferencias (tema, notificaciones, privacidad) |
+| `teams` | Equipos |
+| `team_members` | Membresía de equipos |
+
+**Tabla `users`:**
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `id` | UUID (PK) | Identificador único |
+| `email` | VARCHAR(255) UNIQUE | Email |
+| `first_name` | VARCHAR(100) | Nombre |
+| `last_name` | VARCHAR(100) | Apellido |
+| `role` | VARCHAR(20) | Rol: `admin`, `user`, `moderator` |
+| `status` | VARCHAR(20) | Estado: `active`, `inactive`, `suspended`, `pending` |
+| `avatar` | TEXT | URL del avatar |
+| `bio` | TEXT | Biografía |
+| `phone` | VARCHAR(20) | Teléfono |
+| `timezone` | VARCHAR(50) | Zona horaria |
+| `language` | VARCHAR(10) | Idioma (default: `en`) |
+| `email_verified` | BOOLEAN | Email verificado |
+| `two_factor_enabled` | BOOLEAN | 2FA habilitado |
+| `last_login_at` | TIMESTAMP | Último login |
+| `metadata` | JSONB | Metadata adicional (permisos de herramientas, etc.) |
+| `auth0_id` | VARCHAR(255) | ID de Auth0 |
+| `created_at` | TIMESTAMP | Fecha de creación |
+| `updated_at` | TIMESTAMP | Última actualización (trigger automático) |
+
+### Chat
+
+| Tabla | Descripción |
+|-------|-------------|
+| `channels` | Canales de chat (stream_channel_id, tipo, nombre, usuario principal) |
+| `channel_members` | Miembros de canales |
+| `channel_moderators` | Moderadores de canales |
+| `message_logs` | Registro de mensajes para analytics |
+| `bookings` | Reservas asociadas a canales |
+| `booking_snapshots` | Snapshots de bookings para sync |
+| `tickets` | Tickets de soporte |
+| `shifts` | Turnos de agentes |
+| `invitations` | Invitaciones a canales (con token UUID) |
+| `activity_logs` | Logs de actividad de canales |
+| `sync_jobs` | Jobs de sincronización |
+| `sync_logs` | Logs de operaciones de sync |
+
+### Community
+
+| Tabla | Descripción |
+|-------|-------------|
+| `properties` | Propiedades (nombre, ubicación, tipo, estado) |
+| `rooms` | Estancias/ambientes de propiedades |
+| `locations` | Datos de ubicación |
+| `items` | Ítems individuales de inventario |
+| `inventory` | Inventario por propiedad |
+| `photos` | Fotos de propiedades |
+| `cleaning_rules` | Reglas de limpieza por estancia |
+| `cleaning_sessions` | Sesiones de limpieza realizadas |
+| `floor_plans` | Planos de planta (imágenes/PDF) |
+| `guides` | Guías de uso de propiedades |
+| `appliance_guides` | Guías de electrodomésticos |
+| `qr_codes` | QR codes generados para acceso público |
+| `styling_rules` | Reglas de estilo visual |
+
+### Surveys
+
+| Tabla | Descripción |
+|-------|-------------|
+| `survey_types` | Tipos de encuesta (slug, nombre, scope: `home` o `booking`) |
+| `surveys` | Versiones de encuestas con definición JSONB (steps, questions, i18n) |
+| `survey_responses` | Respuestas de usuarios con estado (`in_progress`, `completed`) y answers JSONB |
+| `survey_rewards` | Rewards otorgados por encuesta completada (1 por response) |
+| `survey_reward_levels` | Definición de los 5 niveles de reward |
+| `survey_recommendations` | Recomendaciones toggle (1 por response) |
+| `survey_action_plans` | Planes de acción generados por consenso (status: `pending_review` → `approved` → `sent`) |
+| `survey_response_audios` | Metadata de audios grabados (URL, duración, transcripción IA — schema preparado) |
+| `survey_score_summaries` | Métricas pre-computadas por propiedad/usuario/tipo (avgs, approval rates). Source: `postgresql` o `firebase` |
+| `survey_legacy_responses` | Respuestas individuales migradas desde Firebase (per-user, per-property). Sync automático via Windmill |
+| `survey_insights` | Insights generados por IA (Anthropic) por sección/scope. Incluye token tracking y rate limiting |
+
+**Tabla `surveys`:**
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `id` | UUID (PK) | Identificador único |
+| `survey_type_id` | UUID (FK → survey_types) | Tipo de encuesta |
+| `version` | INTEGER | Número de versión (auto-incrementado) |
+| `status` | VARCHAR | Estado: `draft`, `active`, `archived` |
+| `definition` | JSONB | Definición completa (steps, questions, i18n) |
+| `created_at` | TIMESTAMP | Fecha de creación |
+| `updated_at` | TIMESTAMP | Última actualización (trigger automático) |
+
+**Tabla `survey_responses`:**
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `id` | UUID (PK) | Identificador único |
+| `survey_id` | UUID (FK → surveys) | Versión de encuesta respondida |
+| `respondent_id` | VARCHAR | ID del usuario que responde |
+| `scope_id` | VARCHAR | ID del scope (home o booking) |
+| `status` | VARCHAR | Estado: `in_progress`, `completed` |
+| `current_step` | VARCHAR | Step actual (para resume) |
+| `current_question` | VARCHAR | Pregunta actual (para resume) |
+| `answers` | JSONB | Mapa de respuestas `{ questionId: Answer }` |
+| `completed_at` | TIMESTAMP | Fecha de completado |
+| `created_at` | TIMESTAMP | Fecha de creación |
+| `updated_at` | TIMESTAMP | Última actualización (trigger automático) |
+
+**Índices y constraints:**
+- Partial unique index: máximo 1 versión `active` por `survey_type_id`
+- Índices en `survey_responses`: por `survey_id` + `status`, `scope_id` + `survey_id`, `respondent_id`
+- Unique constraint: 1 reward por response, 1 recommendation por response, 1 action plan por survey + scope
+
+### Notificaciones e inbox
+
+| Tabla | Descripción |
+|-------|-------------|
+| `deep_links` | Deep links configurados (nombre, patrón, parámetros) |
+| `notification_templates` | Templates de notificación (categoría, contenido, deep link) |
+| `notifications` | Notificaciones enviadas/programadas |
+| `notification_recipients` | Recipients con estado de entrega individual |
+| `automation_configs` | Configuración de automatizaciones |
+| `inbox_messages` | Mensajes de bandeja de entrada |
+| `push_subscriptions` | Suscripciones de push notifications |
+| `preferences` | Preferencias de notificación por usuario |
+| `push_notification_logs` | Historial de push notifications |
+
+**Tabla `inbox_messages`:**
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `id` | UUID (PK) | Identificador |
+| `recipient_id` | UUID (FK → users) | Usuario destinatario |
+| `message_type` | VARCHAR(50) | Tipo: `restock_alert`, `guide_incomplete`, `guide_request`, `chat_unread`, `chat_booking_create`, `chat_ticket_*`, `chat_shift_*`, `ai_daily_summary`, `general` |
+| `title` | VARCHAR(255) | Título |
+| `body` | TEXT | Contenido |
+| `priority` | VARCHAR(50) | Prioridad: `urgent`, `high`, `normal`, `low` |
+| `property_id` | UUID (FK → properties) | Propiedad relacionada |
+| `item_id` | UUID (FK → items) | Ítem relacionado |
+| `metadata` | JSONB | Datos adicionales |
+| `status` | VARCHAR(50) | Estado: `unread`, `read`, `resolved` |
+| `read_at` | TIMESTAMP | Fecha de lectura |
+| `resolved_at` | TIMESTAMP | Fecha de resolución |
+| `resolved_by` | UUID (FK → users) | Usuario que resolvió |
+| `notes` | TEXT | Notas adicionales |
+| `deleted_at` | TIMESTAMP | Soft delete |
+
+### Permisos
+
+| Tabla | Descripción |
+|-------|-------------|
+| `permissions` | Definiciones de permisos |
+| `user_permissions` | Permisos asignados a usuarios |
+| `role_permissions` | Permisos basados en roles |
+
+### Sync (Windmill)
+
+| Tabla | Descripción |
+|-------|-------------|
+| `chat_sync_jobs` | Jobs de sincronización (status, steps, result, error_message). Tipos: `sync_users`, `sync_properties`, `sync_deals`, `sync_bookings`, `sync_firebase_legacy_responses` |
+| `chat_sync_logs` | Logs detallados por job (level, message, context) |
+
+### AI / Insights
+
+| Tabla | Descripción |
+|-------|-------------|
+| `survey_insights` | Insights generados por IA. Unique: `(survey_id, scope_type, scope_id, section)`. Rate limit: 3/día por combinación |
+
+**Tabla `survey_insights`:**
+
+| Columna | Tipo | Descripción |
+|---------|------|-------------|
+| `id` | UUID (PK) | Identificador |
+| `survey_id` | UUID (FK → surveys) | Encuesta |
+| `scope_type` | VARCHAR | `global`, `property`, `user` |
+| `scope_id` | VARCHAR | ID del scope (`__global__` para global) |
+| `section` | VARCHAR | `summary`, `trends`, `recommendations` |
+| `insights_data` | JSONB | `{ main: string, questions: Record<string, string> }` |
+| `model` | VARCHAR | Modelo IA usado (ej: `claude-sonnet-4-20250514`) |
+| `input_tokens` | INTEGER | Tokens de input |
+| `output_tokens` | INTEGER | Tokens de output |
+| `total_responses` | INTEGER | Respuestas al momento de generación (para invalidación) |
+| `daily_generation_count` | INTEGER | Generaciones hoy (rate limit) |
+| `generation_count_date` | DATE | Fecha para reset diario |
+
+### Integraciones
+
+| Tabla | Descripción |
+|-------|-------------|
+| `webhooks` | Configuraciones de webhooks |
+| `integrations` | Integraciones externas (Zendesk, Stream, etc.) |
+| `modules` | Registro de módulos del sistema (nombre, slug, activo). Incluye módulo NPS |
+
+## Row Level Security (RLS)
+
+Las tablas sensibles tienen políticas RLS habilitadas:
+
+- **`inbox_messages`**: Los usuarios solo pueden leer y actualizar sus propios mensajes. Los admin pueden acceder a todos. El service role puede insertar mensajes (para integraciones y notificaciones del sistema).
+- Otras tablas con datos de usuario siguen patrones similares.
+
+<Warning>
+  El backend usa el **service role** de Supabase para operaciones del servidor, lo que permite bypasear RLS. Las operaciones directas desde el cliente no están habilitadas.
+</Warning>
+
+## Migraciones
+
+Las migraciones SQL se encuentran en `apps/backend/src/database/migrations/` y se ejecutan en orden numérico. Cada migración crea tablas, índices y políticas RLS necesarias.
+
+### Migraciones de Surveys (050-066)
+
+| Migración | Descripción |
+|-----------|-------------|
+| `050_create_surveys_tables.sql` | Tablas core: `survey_types`, `surveys`, `survey_responses`. Seeds 3 tipos (home-review, stay-review, arrival-review). RLS service_role only. |
+| `051_create_survey_rewards_tables.sql` | Tablas: `survey_rewards`, `survey_reward_levels`, `survey_recommendations`. Seeds 5 niveles de reward. |
+| `052_create_survey_action_plans.sql` | Tabla: `survey_action_plans` con consensus_data, action_items, cost_distribution. |
+| `053_create_survey_response_audios.sql` | Tabla: `survey_response_audios` para metadata de audios (schema preparado). |
+| `054_seed_home_review.sql` | Seed del Home Review v1: 5 steps, 12 preguntas principales, ~24 hijas condicionales, i18n ES+EN. |
+| `055_surveys_accepting_and_filled_by.sql` | Añade `surveys.accepting_responses` (boolean) y `survey_responses.filled_by` (UUID) para tracking de agente. |
+| `056_rename_scope_type_home_to_property.sql` | Renombra scope_type `home` → `property` en `survey_types`. |
+| `057_create_survey_score_summaries.sql` | Crea `survey_score_summaries` para métricas pre-computadas (avgs, approval rates) por propiedad/usuario. |
+| `058_create_survey_legacy_responses.sql` | Crea `survey_legacy_responses` para respuestas individuales migradas desde Firebase. Tipo `onboarding-review`. |
+| `059_seed_financial_review.sql` | Seed tipo `financial-review` + 42 respuestas CSV legacy (NPS Financiero Q1 2026, escala 1-10). |
+| `060_fix_scope_type_home_to_property.sql` | Fix de migración 056 incompleta en producción. |
+| `061_widen_legacy_nps_score.sql` | Amplía `nps_score` de NUMERIC(4,2) a NUMERIC(5,2) para approval rates hasta 999.99. |
+| `062_add_home_review_space.sql` | Añade `rooms.home_review_space` (varchar) para tagear espacios en encuestas home-review. |
+| `063_add_firebase_legacy_responses_job_type.sql` | Añade `sync_firebase_legacy_responses` al check constraint de `chat_sync_jobs.job_type`. |
+| `064_register_nps_module.sql` | Registra módulo NPS en tabla `modules` para home screen. |
+| `065_create_survey_insights.sql` | Crea `survey_insights` para insights generados por IA con token tracking. |
+| `066_add_insight_rate_limit_columns.sql` | Añade `daily_generation_count` y `generation_count_date` para rate limiting de IA (3/día). |

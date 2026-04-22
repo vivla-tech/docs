@@ -1,0 +1,126 @@
+---
+title: "Home Excellence"
+description: "Portal de propietarios con metricas NPS, calidad, tickets e inspecciones"
+---
+
+# Home Excellence
+
+`apps/home-excellence` es una aplicacion Next.js 14 para propietarios de Vivla. Muestra metricas de satisfaccion NPS, estado de calidad, tickets, protocolos y resultados del Home Review 2026.
+
+**Dominio**: `hx.vivla.com`  
+**Puerto**: 3003  
+**Acceso**: publico via HID (Home ID) en query parameter — sin login.
+
+## Arquitectura
+
+La app consume tres backends a traves de rewrites en Next.js:
+
+```
+Browser → Next.js (port 3003)
+  │
+  ├─ /api/surveys/*    → Monorepo Backend (port 3001)
+  │   └─ Home Review 2026: resultados, action plans, legacy NPS
+  │
+  ├─ /api/dashboard/*  → dashboard.vivla.com
+  │   └─ NPS scores, propiedades, factores, clientes, tickets calidad
+  │
+  └─ /api/vivla/*      → api.vivla.com/v1
+      └─ Homes, tickets Zendesk, inspecciones, checkpoints, estancias
+```
+
+Este patron proxy evita CORS, permite inyeccion de tokens server-side, y mantiene un unico origen.
+
+## Rutas
+
+| Ruta | Descripcion |
+|------|-------------|
+| `/` | Landing page para propietarios |
+| `/home-status?hid=XXX` | Dashboard principal: NPS, satisfaccion, factores, calidad, tickets |
+| `/protocols?hid=XXX` | Protocolos de limpieza y mantenimiento |
+| `/opportunities?hid=XXX` | Propuestas de mejora con tabla filtrable y formulario de envio |
+| `/home-review?hid=XXX` | Resultados del Home Review 2026 (encuestas del monorepo) |
+
+## Stack tecnico
+
+| Tecnologia | Uso |
+|------------|-----|
+| Next.js 14 | Framework (App Router, standalone output) |
+| React Query | Cache de estado del servidor |
+| Axios | HTTP client con interceptor de auth |
+| Recharts | Graficos (area, bar, radial, ring) |
+| Tailwind CSS | Estilos con tokens de Vivla |
+| Radix UI | Componentes (dialog, select, tooltip) |
+| i18next | Internacionalizacion (ES/EN) |
+| PostHog | Analytics |
+| Sneak + Teodor | Fuentes custom (bundled via next/font/local) |
+
+## Variables de entorno
+
+| Variable | Requerida | Descripcion |
+|----------|-----------|-------------|
+| `NEXT_PUBLIC_VIVLA_API_TOKEN` | Si | Bearer token para Vivla API |
+| `NEXT_PUBLIC_API_URL` | No | Backend monorepo. Default: `http://localhost:3001/api` |
+| `DASHBOARD_API_URL` | No | Dashboard API. Default: `https://dashboard.vivla.com/api` |
+| `VIVLA_API_URL` | No | Vivla API. Default: `https://api.vivla.com/v1` |
+| `NEXT_PUBLIC_POSTHOG_KEY` | No | PostHog analytics key |
+| `NEXT_PUBLIC_POSTHOG_HOST` | No | PostHog API host |
+
+### Feature flags
+
+| Variable | Efecto |
+|----------|--------|
+| `NEXT_PUBLIC_DISABLE_MENU` | Oculta menu de navegacion |
+| `NEXT_PUBLIC_ANONYMIZE_DATA` | Anonimiza datos de propietarios |
+| `NEXT_PUBLIC_HIDE_MAINTENANCE_LIST_BUTTON` | Oculta boton de mantenimiento |
+
+## Endpoints consumidos
+
+### Monorepo Backend (publicos, sin auth)
+
+| Endpoint | Descripcion |
+|----------|-------------|
+| `GET /surveys/public/results?property={HID}&surveyType=home-review` | Resultados agregados del Home Review |
+| `GET /surveys/public/legacy-results?property={HID}&surveyType=home-review` | Datos legacy NPS de Firestore |
+| `GET /surveys/public/legacy-results/notes?property={HID}` | Notas de texto de respuestas |
+| `GET /surveys/public/action-plans?property={HID}` | Planes de accion por scope |
+| `GET /surveys/public/scores?property={HID}` | Headline scores por propiedad |
+| `GET /surveys/public/home-review-results?property={HID}` | Participacion, top rated, oportunidades |
+
+### Dashboard API (via rewrite `/api/dashboard/*`)
+
+- NPS scores y evolucion por propiedad
+- Factores de calidad (limpieza, confort, equipamiento, mantenimiento)
+- Informacion de clientes
+- Tickets de calidad
+
+### Vivla API (via rewrite `/api/vivla/*`)
+
+| Endpoint | Descripcion |
+|----------|-------------|
+| `GET /homes/{HID}` | Metadata del home (Firebase, dashboard, Zendesk) |
+| `GET /homes/list-with-dashboard` | Listado de homes con integracion dashboard |
+| `GET /tickets?home={name}` | Tickets Zendesk por propiedad |
+| `GET /tickets/home-repair-stats/{name}` | Estadisticas de reparaciones |
+| `GET /tickets/repairs?home={name}` | Tickets de reparacion |
+| `GET /tickets/improvement-proposals?home={name}` | Propuestas de mejora |
+| `GET /checkpoints?homeName={name}` | Checkpoints de mantenimiento |
+| `GET /stays/{HID}/inspections` | Inspecciones programadas |
+| `GET /stays/{HID}/stats` | Estadisticas de estancias |
+| `GET /getAnnualHomeRevision?homeName={name}` | Estado de revision anual |
+| `GET /homes/{HID}/room-images` | Imagenes por habitacion |
+
+## Funcionalidades principales
+
+- **Dashboard de satisfaccion**: metricas tridimensionales (Home Excellence, Stay Experience, Design) con graficos radiales
+- **Evolucion NPS**: graficos area/bar con escala cromatica de 11 pasos
+- **Calidad por habitacion**: mapa visual de scores por espacio
+- **Tickets de calidad**: tabla con estado y seguimiento
+- **Incidencias**: reporte con severidad y resolucion
+- **Oportunidades**: tabla filtrable con envio de propuestas y upload de imagenes
+- **Home Review**: participacion, ratings por espacio, distribucion de sentimiento
+
+## Despliegue
+
+- **Modo**: standalone (binario autocontenido)
+- **Plataforma**: Railway / Vercel
+- **Auth**: acceso publico via HID — sin login

@@ -1,0 +1,57 @@
+---
+title: "PostHog"
+description: "Analytics y event tracking para monitoreo de comportamiento de usuarios"
+---
+
+# PostHog
+
+Modulo global de analytics que envia eventos de usuario a PostHog para monitoreo y analisis de comportamiento.
+
+## Configuracion
+
+| Variable de entorno | Requerida | Descripcion |
+|---------------------|-----------|-------------|
+| `POSTHOG_API_KEY` | Si | API key de PostHog |
+| `POSTHOG_HOST` | No | URL de la instancia. Default: `https://eu.i.posthog.com` |
+
+El modulo es **global** — disponible en toda la aplicacion.
+
+## Servicio
+
+`PostHogService` expone un unico metodo fire-and-forget:
+
+```typescript
+capture(params: {
+  distinctId: string              // ID del usuario
+  event: string                   // nombre del evento
+  properties?: Record<string, any> // propiedades adicionales
+}): void
+```
+
+La captura es asincrona pero no se espera su resultado (no bloquea el request).
+
+## Eventos rastreados
+
+| Evento | Modulo | Propiedades |
+|--------|--------|-------------|
+| `home_nps_survey_completed` | Surveys | `survey_type`, `survey_id`, `survey_version`, `home_id`, `source`, `filled_by`, `total_steps` |
+
+## MCP Server
+
+PostHog tambien esta disponible como MCP server en Claude Code, permitiendo consultar datos de analytics directamente:
+
+- Feature flags
+- Dashboards
+- Experiments
+- Cohorts
+- Insights y queries
+
+Ver la configuracion en `.mcp.json` del proyecto.
+
+## Estructura de modulo
+
+```
+apps/backend/src/shared/posthog/
+  posthog.module.ts    # Global module
+  posthog.service.ts   # PostHog Node client wrapper
+```
