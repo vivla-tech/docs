@@ -1,0 +1,116 @@
+---
+title: "Conectar la wiki a tu IA (MCP)"
+description: "Cómo instalar el MCP de wiki.vivla.com en Claude, Cursor o VS Code para que tu IA lea la documentación directamente."
+---
+
+Esta wiki expone un servidor [MCP](https://modelcontextprotocol.io) — un endpoint que cualquier asistente compatible (Claude, Cursor, VS Code Copilot…) puede consultar para buscar y leer la documentación de Vivla en tiempo real.
+
+Una vez conectado, deja de hacer falta copiar y pegar contenido al chat. Puedes preguntar cosas como:
+
+- *"Según la wiki, ¿cómo se despliega el panel?"*
+- *"Búscame en la wiki la guía de onboarding del bot de Slack."*
+- *"¿Qué repos están en producción según `repositories`?"*
+
+<Note>
+  La URL del MCP es **`https://wiki.vivla.com/mcp`**. Se sirve automáticamente desde el path `/mcp` de esta misma wiki.
+</Note>
+
+## Instalación por herramienta
+
+<Tabs>
+  <Tab title="Claude Code">
+    Ejecuta este comando en tu terminal:
+
+    ```bash
+    claude mcp add --transport http vivla-docs https://wiki.vivla.com/mcp
+    ```
+
+    Verifica que aparece con:
+
+    ```bash
+    claude mcp list
+    ```
+
+    A partir de ahí, Claude Code puede invocar las tools `search_vivla_docs` y `query_docs_filesystem_vivla_docs` automáticamente cuando le preguntes sobre la wiki.
+  </Tab>
+
+  <Tab title="Claude Desktop / claude.ai">
+    1. Abre **Settings → Connectors**.
+    2. Pulsa **"Add custom connector"**.
+    3. Rellena:
+       - **Name:** `vivla-docs`
+       - **URL:** `https://wiki.vivla.com/mcp`
+    4. Guarda y selecciona el conector cuando quieras que Claude lea la wiki.
+  </Tab>
+
+  <Tab title="Cursor">
+    Abre la paleta de comandos (`Cmd+Shift+P`) → **"Open MCP settings"** → añade en `mcp.json`:
+
+    ```json
+    {
+      "mcpServers": {
+        "vivla-docs": {
+          "url": "https://wiki.vivla.com/mcp"
+        }
+      }
+    }
+    ```
+
+    Reinicia Cursor para que cargue el servidor.
+  </Tab>
+
+  <Tab title="VS Code (Copilot / MCP)">
+    Crea `.vscode/mcp.json` en la raíz del workspace:
+
+    ```json
+    {
+      "servers": {
+        "vivla-docs": {
+          "type": "http",
+          "url": "https://wiki.vivla.com/mcp"
+        }
+      }
+    }
+    ```
+
+    También puedes ponerlo en tu config de usuario para tenerlo disponible en todos los proyectos.
+  </Tab>
+</Tabs>
+
+## Cómo usarlo
+
+Una vez conectado, basta con mencionar la wiki en tu prompt y la IA usará el MCP por su cuenta. Ejemplos reales:
+
+<CardGroup cols={2}>
+  <Card title="Buscar contexto" icon="magnifying-glass">
+    *"Antes de proponer una solución, busca en la wiki cómo está montada nuestra infra de Railway."*
+  </Card>
+  <Card title="Onboarding" icon="rocket">
+    *"Soy nuevo en el equipo de panel — léete las páginas relevantes de la wiki y resúmeme la arquitectura."*
+  </Card>
+  <Card title="Cross-reference" icon="link">
+    *"¿Hay alguna página en la wiki sobre cómo manejamos las notificaciones push?"*
+  </Card>
+  <Card title="Verificar antes de actuar" icon="shield-check">
+    *"Antes de tocar este endpoint, comprueba en la wiki si hay una guía de cómo deprecarlos."*
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="No me aparece la tool en Claude / Cursor">
+    Reinicia el cliente. Algunos clientes solo cargan los MCPs al arranque. En Claude Code, ejecuta `claude mcp list` para confirmar que el servidor está registrado.
+  </Accordion>
+  <Accordion title="Error de autenticación">
+    La wiki es pública: la URL correcta es `https://wiki.vivla.com/mcp` (no `/authed/mcp`). Si te pide credenciales, revisa que no estés usando el path autenticado por error.
+  </Accordion>
+  <Accordion title="El asistente no usa el MCP aunque está instalado">
+    Sé explícito en el prompt: *"Usa el MCP de la wiki de Vivla para buscar X"*. Algunos modelos solo invocan tools cuando ven una señal clara de que las necesitan.
+  </Accordion>
+</AccordionGroup>
+
+## Más información
+
+- [Documentación oficial de Mintlify MCP](https://mintlify.com/docs/ai/model-context-protocol)
+- [Especificación del Model Context Protocol](https://modelcontextprotocol.io)

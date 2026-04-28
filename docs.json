@@ -39,7 +39,8 @@
               "index",
               "architecture",
               "environments",
-              "repositories"
+              "repositories",
+              "mcp-setup"
             ]
           }
         ]
