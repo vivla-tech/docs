@@ -21,9 +21,19 @@ Usamos [Block Kit](https://api.slack.com/block-kit) dentro de `attachments` para
   El campo `text` dentro del attachment es **obligatorio** para que el preview de la notificación (push móvil, desktop) muestre contenido útil en vez de "sent an attachment".
 </Note>
 
-## Plantilla base
+## GitHub Actions: Dos enfoques
 
-### Para GitHub Actions (webhook)
+En GitHub Actions hay dos formas de enviar notificaciones a Slack. Cada una tiene restricciones diferentes.
+
+### Opción A: Incoming Webhook (actual)
+
+Usa un Incoming Webhook URL. Es la opción más simple de configurar.
+
+**Secret necesario:** `SLACK_WEBHOOK_URL`
+
+<Warning>
+  Los Incoming Webhooks de Slack **NO soportan `header` blocks dentro de `attachments`**. Usar `type: "header"` dentro de un attachment causa el error `invalid_attachments`. En su lugar, usar un `section` con `mrkdwn` en bold para el título.
+</Warning>
 
 ```yaml
 - name: Send Slack notification
@@ -31,6 +41,11 @@ Usamos [Block Kit](https://api.slack.com/block-kit) dentro de `attachments` para
   env:
     SLACK_WEBHOOK_URL: $\{{ secrets.SLACK_WEBHOOK_URL }}
   run: |
+    if [ -z "$SLACK_WEBHOOK_URL" ]; then
+      echo "Slack webhook not configured, skipping notification"
+      exit 0
+    fi
+
     # -- Determinar resultado --
     if [ "$JOB_FAILED" = "false" ]; then
       COLOR="#36a64f"
@@ -44,45 +59,112 @@ Usamos [Block Kit](https://api.slack.com/block-kit) dentro de `attachments` para
 
     COMMIT_SHORT=$(echo "$\{{ github.sha }}" | cut -c1-7)
     PROJECT_NAME="Mi Proyecto"  # Cambiar por el nombre del proyecto
+    HEADER="$STATUS_EMOJI $PROJECT_NAME deploy $RESULT"
+
+    PAYLOAD=$(jq -n \
+      --arg color "$COLOR" \
+      --arg header "$HEADER" \
+      --arg fallback "$HEADER ($\{{ github.ref_name }} @ $COMMIT_SHORT)" \
+      --arg repo "$\{{ github.repository }}" \
+      --arg branch "$\{{ github.ref_name }}" \
+      --arg commit "$COMMIT_SHORT" \
+      --arg author "$\{{ github.actor }}" \
+      --arg url "$\{{ github.server_url }}/$\{{ github.repository }}/actions/runs/$\{{ github.run_id }}" \
+      '{attachments:[{color:$color,text:$fallback,blocks:[
+        {type:"section",text:{type:"mrkdwn",text:("*" + $header + "*")}},
+        {type:"section",fields:[
+          {type:"mrkdwn",text:("*Repo:*\n"+$repo)},
+          {type:"mrkdwn",text:("*Branch:*\n`"+$branch+"`")},
+          {type:"mrkdwn",text:("*Commit:*\n`"+$commit+"`")},
+          {type:"mrkdwn",text:("*Author:*\n"+$author)}
+        ]},
+        {type:"context",elements:[
+          {type:"mrkdwn",text:("<"+$url+"|View workflow run>")}
+        ]}
+      ]}]}')
 
     curl -sf -X POST "$SLACK_WEBHOOK_URL" \
       -H "Content-Type: application/json" \
-      -d "$(cat <<EOF
-    {
-      "attachments": [{
-        "color": "$COLOR",
-        "text": "$STATUS_EMOJI $PROJECT_NAME deploy $RESULT ($\{{ github.ref_name }} @ $COMMIT_SHORT)",
-        "blocks": [
-          {
-            "type": "section",
-            "text": {
-              "type": "mrkdwn",
-              "text": "*$STATUS_EMOJI $PROJECT_NAME deploy $RESULT*"
-            }
-          },
-          {
-            "type": "section",
-            "fields": [
-              { "type": "mrkdwn", "text": "*Repo:*\n$\{{ github.repository }}" },
-              { "type": "mrkdwn", "text": "*Branch:*\n\`$\{{ github.ref_name }}\`" },
-              { "type": "mrkdwn", "text": "*Commit:*\n\`$COMMIT_SHORT\`" },
-              { "type": "mrkdwn", "text": "*Author:*\n$\{{ github.actor }}" }
-            ]
-          },
-          {
-            "type": "context",
-            "elements": [
-              { "type": "mrkdwn", "text": "<$\{{ github.server_url }}/$\{{ github.repository }}/actions/runs/$\{{ github.run_id }}|View workflow run>" }
-            ]
-          }
-        ]
-      }]
-    }
-    EOF
-    )"
+      -d "$PAYLOAD"
 ```
 
-### Para Windmill (TypeScript con Slack Web API)
+### Opción B: Slack Web API (recomendada)
+
+Usa la Slack Web API (`chat.postMessage`) directamente con un Bot Token. Soporta **todo Block Kit** incluyendo `header` blocks dentro de attachments, igual que Windmill.
+
+**Secret necesario:** `SLACK_BOT_TOKEN` (formato `xoxb-...`)
+
+```yaml
+- name: Send Slack notification
+  if: always()
+  env:
+    SLACK_BOT_TOKEN: $\{{ secrets.SLACK_BOT_TOKEN }}
+  run: |
+    if [ -z "$SLACK_BOT_TOKEN" ]; then
+      echo "Slack bot token not configured, skipping notification"
+      exit 0
+    fi
+
+    # -- Determinar resultado --
+    if [ "$JOB_FAILED" = "false" ]; then
+      COLOR="#36a64f"
+      STATUS_EMOJI="✅"
+      RESULT="succeeded"
+    else
+      COLOR="#e01e5a"
+      STATUS_EMOJI="❌"
+      RESULT="failed"
+    fi
+
+    COMMIT_SHORT=$(echo "$\{{ github.sha }}" | cut -c1-7)
+    PROJECT_NAME="Mi Proyecto"  # Cambiar por el nombre del proyecto
+    HEADER="$STATUS_EMOJI $PROJECT_NAME deploy $RESULT"
+    CHANNEL="C091W026C23"  # #deploys
+
+    PAYLOAD=$(jq -n \
+      --arg channel "$CHANNEL" \
+      --arg color "$COLOR" \
+      --arg header "$HEADER" \
+      --arg fallback "$HEADER ($\{{ github.ref_name }} @ $COMMIT_SHORT)" \
+      --arg repo "$\{{ github.repository }}" \
+      --arg branch "$\{{ github.ref_name }}" \
+      --arg commit "$COMMIT_SHORT" \
+      --arg author "$\{{ github.actor }}" \
+      --arg url "$\{{ github.server_url }}/$\{{ github.repository }}/actions/runs/$\{{ github.run_id }}" \
+      '{channel:$channel,text:$fallback,attachments:[{color:$color,text:$fallback,blocks:[
+        {type:"header",text:{type:"plain_text",text:$header,emoji:true}},
+        {type:"section",fields:[
+          {type:"mrkdwn",text:("*Repo:*\n"+$repo)},
+          {type:"mrkdwn",text:("*Branch:*\n`"+$branch+"`")},
+          {type:"mrkdwn",text:("*Commit:*\n`"+$commit+"`")},
+          {type:"mrkdwn",text:("*Author:*\n"+$author)}
+        ]},
+        {type:"context",elements:[
+          {type:"mrkdwn",text:("<"+$url+"|View workflow run>")}
+        ]}
+      ]}]}')
+
+    curl -sf -X POST "https://slack.com/api/chat.postMessage" \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+      -d "$PAYLOAD"
+```
+
+### Comparación
+
+| | Webhook (Opción A) | Web API (Opción B) |
+|---|---|---|
+| **Setup** | Crear webhook URL en Slack app | Bot token de la Slack app |
+| **Secret** | `SLACK_WEBHOOK_URL` | `SLACK_BOT_TOKEN` |
+| **Header blocks** | ❌ No soportado en attachments | ✅ Soportado |
+| **Canal** | Fijo al crear el webhook | Configurable por request |
+| **Consistencia con Windmill** | Diferente formato | ✅ Mismo formato |
+
+<Tip>
+  Si ya tienes una Slack app con bot token (como la que usa Windmill), la **Opción B** es preferible porque usa el mismo formato en todos los sistemas y soporta Block Kit completo.
+</Tip>
+
+## Windmill (TypeScript con Slack Web API)
 
 ```typescript
 import { WebClient } from "@slack/web-api";
@@ -184,7 +266,7 @@ Cada proyecto incluye los campos más relevantes en la sección `fields`. Máxim
 
 1. **Siempre usar `attachments`** con `color` y `blocks` — nunca solo `text` o solo `blocks` a nivel root.
 2. **Siempre incluir `text`** dentro del attachment como fallback para el preview.
-3. **Título**: emoji de estado + nombre del proyecto + resultado (`succeeded`/`failed`). Usar `section` con `mrkdwn` en bold (no `header`, que no es soportado dentro de `attachments`).
+3. **Título**: emoji de estado + nombre del proyecto + resultado (`succeeded`/`failed`). Con Webhook usar `section` + `mrkdwn` bold. Con Web API se puede usar `header` block.
 4. **Section fields**: datos estructurados en pares clave-valor.
 5. **Context**: timestamp y/o link al workflow/proceso.
 6. **Colores**: `#36a64f` (verde) para éxito, `#e01e5a` (rojo) para fallo.
