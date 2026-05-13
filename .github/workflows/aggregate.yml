@@ -190,7 +190,7 @@ jobs:
 
           git checkout -B docs
 
-          git add -A
+          git add -A --force
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
