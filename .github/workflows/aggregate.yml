@@ -14,10 +14,10 @@ jobs:
     env:
       # To add a new subrepo: append a line with format repo:subdir:dest
       # e.g. vivla-tech/vivla-api:docs/wiki:backend
-      # e.g. vivla-tech/vivla-panel:docs/wiki:panel
       SUBREPOS: |
         vivla-tech/vivla-tools:docs/wiki:tools
         vivla-tech/vivla-mobile-app:docs/wiki:mobile
+        vivla-tech/vivla-panel:docs/wiki:panel
     steps:
       - name: Checkout docs repo
         uses: actions/checkout@v4

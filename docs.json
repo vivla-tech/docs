@@ -84,7 +84,14 @@
           {
             "group": "Overview",
             "pages": [
-              "panel/index"
+              "panel/index",
+              "panel/quick-start"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "panel/guides/account-setup"
             ]
           }
         ]
