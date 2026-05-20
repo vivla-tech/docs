@@ -1,0 +1,93 @@
+---
+title: "Operativa VIVLA"
+description: "Glosario de conceptos clave, estados de casa y reglas de reserva"
+---
+
+# Operativa VIVLA
+
+## Glosario de conceptos clave
+
+### Calendario
+
+Conjunto de slots distribuidos a lo largo de los años. Un mismo calendario puede estar asociado a varias viviendas (por ejemplo, todas las casas de Baqueira comparten el mismo calendario). Los propietarios reservan slots del calendario con antelación, sujetos a un máximo de reservas por tipo de temporada.
+
+Cada calendario tiene un tipo (Ski, Playa o Urbano) que determina las temporadas disponibles y sus reglas de reserva (ver [Temporada](#temporada)).
+
+## Estados de una casa
+
+Una casa puede estar en uno de tres estados, que determinan qué operaciones están disponibles para ella.
+
+Hay dos operativas de última hora con comportamientos distintos según el estado de la casa:
+
+- **Reserva de disfrute de última hora**: el propietario reserva un slot de última hora de su propia casa para uso personal.
+- **Intercambio de última hora**: un propietario usa sus llaves para reservar un slot de última hora disponible en otra casa de la red.
+
+| Estado         | Reservas normales | Disfrute última hora | Intercambio última hora |
+| -------------- | ----------------- | -------------------- | ----------------------- |
+| **Inactiva**   | ❌                | ❌                   | ❌                      |
+| **Pre-activa** | ✅                | ✅                   | ❌                      |
+| **Activa**     | ✅                | ✅                   | ✅                      |
+
+- **Inactiva**: la casa no está operativa. Los propietarios no pueden hacer ningún tipo de reserva. Es el estado inicial de una casa recién incorporada.
+- **Pre-activa**: estado de transición. El propietario puede hacer reservas normales y de disfrute de última hora sobre su propia casa, pero la casa no aparece en el catálogo de intercambios de última hora.
+- **Activa**: la casa está completamente operativa y aparece en el catálogo de intercambios de última hora.
+
+Solo los administradores de VIVLA pueden cambiar el estado de una casa.
+
+### Fracción
+
+Participación de un propietario en una vivienda VIVLA. Cada vivienda se divide en 8 fracciones. Un propietario puede tener entre 1 y 4 fracciones de una misma vivienda, y puede poseer fracciones en varias viviendas sin límite.
+
+### Llaves
+
+Sistema de puntos para intercambios entre propietarios. Cuando un propietario publica un slot para intercambio, el propietario que lo reserva paga llaves, que recibe el propietario que publicó el slot.
+
+### Reserva
+
+Acción de un propietario al seleccionar un slot del calendario para su uso. Tipos de reserva:
+
+- **Disfrute**: uso personal del propietario (y sus invitados)
+- **Intercambio**: publicación del slot para que otro propietario lo use a cambio de llaves
+- **Alquiler**: puesta a disposición del slot para alquiler dentro de la red VIVLA
+
+### Reserva de última hora
+
+Modalidad de reserva que permite al propietario reservar slots próximos en el tiempo que nadie ha reservado aún, incluso si ya ha agotado su cuota de reservas para esa temporada. Existen dos tipos: **disfrute de última hora** (sobre la propia casa) e **intercambio de última hora** (sobre cualquier casa activa de la red, usando llaves).
+
+Ver [Operativa de reservas de última hora](./reservas-ultima-hora.md).
+
+### Slot
+
+Periodo de tiempo reservable dentro de un calendario. Cada slot tiene una fecha de inicio, una fecha de fin, una duración definida y una temporada asignada.
+
+### Temporada
+
+Clasificación de un slot según la demanda del periodo que cubre. Se asigna a cada slot individualmente. Las temporadas disponibles dependen del tipo de calendario de la vivienda.
+
+Reglas por tipo de calendario:
+
+**Ski:**
+
+| Temporada           | Máx. reservas | Noches/slot |
+| ------------------- | ------------- | ----------- |
+| Alta demanda de ski | 1             | 5           |
+| Alta de verano      | 1             | 7           |
+| Alta de ski         | 2             | 6           |
+| Resto del año       | 3             | 7           |
+
+**Playa:**
+
+| Temporada    | Máx. reservas | Noches/slot                                |
+| ------------ | ------------- | ------------------------------------------ |
+| Alta demanda | 1             | 7 (resta a las reservas de temporada alta) |
+| Alta         | 2             | 7                                          |
+| Media        | 2             | 7                                          |
+| Baja         | 2             | 7                                          |
+
+**Urbano:**
+
+| Temporada | Máx. reservas | Noches/slot |
+| --------- | ------------- | ----------- |
+| Alta      | 2             | 7           |
+| Media     | 2             | 7           |
+| Baja      | 2             | 7           |
