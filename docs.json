@@ -97,6 +97,23 @@
         ]
       },
       {
+        "tab": "Operativa",
+        "groups": [
+          {
+            "group": "Conceptos clave",
+            "pages": [
+              "operativa/index"
+            ]
+          },
+          {
+            "group": "Reservas",
+            "pages": [
+              "operativa/reservas-ultima-hora"
+            ]
+          }
+        ]
+      },
+      {
         "tab": "Infra",
         "groups": [
           {
