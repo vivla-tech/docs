@@ -71,9 +71,9 @@ Conviven dos sistemas de intercambio. Cuál se usa lo decide la flag `NEW_EXCHAN
   </Tab>
 </Tabs>
 
-### Excepción de lanzamiento (regla temporal hardcodeada)
+### Excepción de lanzamiento (regla temporal, YA CADUCADA)
 
-Hay una regla de lanzamiento **con fecha fija en el código**: hasta el **15/03/2026**, en temporada media o alta y con **≥ 6 meses de antelación**, el cobro también es instantáneo (`src/bookings/calendars/v1/calendars.service.ts:288`, duplicada en `src/bookings/v1/bookings.repository.ts:221`).
+Hubo una regla de lanzamiento **con fecha fija en el código**: hasta el **15/03/2026**, en temporada media o alta y con **≥ 6 meses de antelación**, el cobro también era instantáneo (`src/bookings/calendars/v1/calendars.service.ts:288`, duplicada en `src/bookings/v1/bookings.repository.ts:221`). **Esa fecha ya pasó**: la condición sigue en el código pero está inerte (`now < 15/03/2026` ya nunca se cumple). Candidata a limpieza en vivla-api; si reaparece un comportamiento de cobro instantáneo con 6-8 meses, no es un bug de esta doc — sería que alguien reactivó la fecha.
 
 <Warning>
   **Estado del rollout de `NEW_EXCHANGE_SYSTEM`: PENDIENTE confirmar.** Que el motor nuevo esté activo (globalmente o por lista de usuarios) es configuración de entorno, no código. La fecha `15/03/2026` sí está hardcodeada como regla temporal.
