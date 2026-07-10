@@ -1,0 +1,59 @@
+---
+title: "Crons y configuración"
+description: "Tareas programadas, tabla configurations y variables de entorno relevantes"
+---
+
+# Crons y configuración
+
+## Tareas programadas
+
+Los crons viven en `src/common/scheduled-jobs/scheduled-jobs.service.ts`. Todos usan la zona horaria **`Europe/Madrid`**.
+
+| Horario | Tarea | Referencia |
+|---------|-------|------------|
+| **00:00 diario** | Limpia caché y refresca caché de casas y reservas. | `scheduled-jobs.service.ts:32` |
+| **12:00 diario** | Refresca caché de casas y reservas. | `scheduled-jobs.service.ts:102` |
+| **23:30 diario** | Comprueba la **caducidad de llaves** (`KeyExpiresCommand`). | `scheduled-jobs.service.ts:72` |
+| **Cada hora** | Transfiere reservas y casas (se omite con `APP_MODE=debug`). | `scheduled-jobs.service.ts:138` |
+| **Cada 15 min** | Transfiere usuarios (se omite con `APP_MODE=debug`). | `scheduled-jobs.service.ts:177` |
+| **31-dic 23:30** | **Bono anual de fidelización** (`YearlyBonusCommand`), solo si `NEW_EXCHANGE_SYSTEM=true`. | `scheduled-jobs.service.ts:211` |
+
+### Caducidad de llaves (23:30)
+
+`KeyExpiresCommand` recorre todos los monederos: avisa cuando faltan los días configurados, aplica la prórroga automática de 12 meses en la primera caducidad y elimina las llaves en la segunda. El detalle está en [Llaves e intercambio](/backend/keys-exchange).
+
+### Bono anual (31-dic)
+
+`YearlyBonusCommand` otorga +2 llaves a quienes tuvieron ≥ 2 intercambios válidos en el año. Está **condicionado a la flag** `NEW_EXCHANGE_SYSTEM=true` (`scheduled-jobs.service.ts:219`).
+
+## Tabla `configurations`
+
+Parámetros de negocio en la tabla `configurations` (Postgres), con estructura `key` / `value` / `description` (`src/common/database/v2/entities/configuration.entity.ts`). Claves que el código lee:
+
+| Clave | Uso | Referencia |
+|-------|-----|------------|
+| `keys_expiration_warning_days` | Días de aviso previo a la caducidad de llaves (CSV). | `src/bookings/v2/commands/key-expires.command.ts:43` |
+| `default_check_in_<HomeType>` | Hora de check-in por tipo de casa. | `src/bookings/v1/bookings.repository.ts:1163` |
+| `default_check_out_<HomeType>` | Hora de check-out por tipo de casa. | `src/bookings/v1/bookings.repository.ts:1174` |
+
+<Warning>
+  Los **valores** de estas claves son dato en base de datos: **PENDIENTE confirmar** cuáles rigen en producción. Además, el check-in/out convive con un hardcode `16:00 / 10:00` — ver la [inconsistencia documentada](/backend/calendario-temporadas).
+</Warning>
+
+## Variables de entorno relevantes
+
+Solo se listan los **nombres**; sus valores son secretos de despliegue y no se documentan aquí.
+
+| Variable | Para qué sirve |
+|----------|----------------|
+| `NEW_EXCHANGE_SYSTEM` | Activa globalmente el nuevo motor de intercambio de llaves. |
+| `NEW_EXCHANGE_SYSTEM_ENABLED_USERS` | Lista de usuarios habilitados para el nuevo motor (CSV de IDs). |
+| `DEFAULT_KEYS` | Coste en llaves por defecto `[alta, media, baja]` cuando no hay valor por casa. |
+| `RENTALS_URL` | Base de la URL de alquiler de Hostaway (se concatena con `hostawayId`). |
+| `APP_MODE` | Con `debug` se omiten los crons de transferencia. |
+| `PORT` | Puerto del servicio (por defecto 3000). |
+| `VIVLA_USER` | Usuario técnico "Vivla" usado en intercambios de última hora. |
+
+<Warning>
+  **Valores de `DEFAULT_KEYS` y del resto de variables: PENDIENTE confirmar.** Son configuración de entorno; sus valores no están en el código.
+</Warning>
