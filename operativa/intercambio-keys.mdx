@@ -1,0 +1,88 @@
+---
+title: "Llaves e intercambio"
+description: "Qué son las llaves, cómo se ganan, gastan y caducan, e intercambio instantáneo vs pendiente"
+---
+
+# Llaves e intercambio
+
+> Documento de estado actual. Describe cómo funciona hoy el sistema, no cómo debería ser.
+
+Las **llaves** son la moneda con la que los copropietarios intercambian semanas entre casas de la red. Esta página cuenta la operativa; el detalle técnico está en [Llaves e intercambio (Vivla API)](/backend/keys-exchange).
+
+---
+
+## 1. Qué son las llaves
+
+Cuando un copropietario publica una de sus semanas para intercambio, otro copropietario puede reservarla **pagando llaves**. Esas llaves las recibe quien publicó la semana. Es un mercado interno: unos ceden semanas y ganan llaves, otros gastan llaves para disfrutar semanas de otras casas.
+
+El coste en llaves de una semana depende de la **casa y la temporada**. VIVLA fija ese coste por casa; si no hay valor específico, se aplica un valor por defecto. Las reservas de **última hora** tienen un coste fijo de **1 llave**.
+
+---
+
+## 2. Cómo se ganan
+
+Un copropietario suma llaves de varias formas:
+
+- **Ofreciendo semanas para intercambio** que otro copropietario reserva.
+- **Bono de fidelización:** **+2 llaves** si tuvo 2 o más intercambios válidos en el año (se otorga a final de año).
+- **Bono de referido:** **+2 llaves** cuando invita a un amigo (lo aplica el equipo).
+- **Regalo de bienvenida:** al recibir llaves por su primer intercambio, el sistema **duplica** esa primera ganancia.
+
+<Warning>
+  **Importe fijo de un bono de bienvenida al alta: PENDIENTE confirmar por CX/negocio.** El sistema duplica las llaves del primer intercambio, pero no hay un importe fijo de bienvenida al registrarse en el código.
+</Warning>
+
+---
+
+## 3. Cómo se gastan
+
+Al reservar el intercambio de una semana publicada, se descuentan las llaves del monedero. El sistema gasta primero las llaves **más próximas a caducar**. Para poder reservar, el copropietario necesita saldo suficiente; si no, la app no le deja completar el intercambio.
+
+---
+
+## 4. Instantáneo vs pendiente
+
+No todos los intercambios cobran las llaves en el mismo momento:
+
+- **Cobro instantáneo:** si la reserva es con bastante antelación (**9 meses o más**) y no es temporada baja, el copropietario que ofrece la semana recibe sus llaves de inmediato.
+- **Cobro pendiente:** en el resto de casos, las llaves quedan pendientes hasta que se confirma el intercambio.
+
+<Note>
+  Hay una **regla temporal de lanzamiento** con fecha fija en el sistema: hasta el **15/03/2026**, en temporada media o alta y con 6 meses o más de antelación, el cobro también es instantáneo.
+</Note>
+
+<Warning>
+  **Estado del despliegue del nuevo sistema de intercambio: PENDIENTE confirmar.** Conviven un motor antiguo (emparejamiento por fechas exactas) y uno nuevo (mercado de llaves). Cuál está activo, y para qué usuarios, es configuración que no se puede afirmar desde el código.
+</Warning>
+
+<Warning>
+  **Ventana de intercambio de 30 días y política de "no match": PENDIENTE confirmar por CX/negocio.** No hay en el código una ventana de intercambio de 30 días ni una regla de compensación por falta de coincidencia.
+</Warning>
+
+---
+
+## 5. Cómo caducan
+
+Las llaves **caducan a los 24 meses** de haberse recibido. El sistema avisa con antelación antes de la caducidad.
+
+Hay una red de seguridad: la **primera vez** que a un copropietario le van a caducar llaves, se le concede una **prórroga automática de 12 meses** (una sola vez). Si vuelven a caducar después de esa prórroga, se pierden.
+
+<Warning>
+  **Días concretos de aviso previo a la caducidad: PENDIENTE confirmar.** Los plazos de aviso son un parámetro configurable, no un valor fijo del código.
+</Warning>
+
+---
+
+## 6. ThirdHome
+
+ThirdHome es una red externa de intercambio de casas. VIVLA **no tiene integración automática** con ThirdHome: no hay conexión por API. El equipo gestiona a mano el estado de cada reserva publicada en ThirdHome (publicada → intercambiada), y el cruce real ocurre fuera del sistema. Ver [ThirdHome (Vivla API)](/backend/keys-exchange#thirdhome).
+
+---
+
+## Quién hace qué
+
+| Actor | Rol |
+|-------|-----|
+| **App móvil** | El copropietario ve su monedero, sus movimientos, publica semanas y reserva intercambios. |
+| **Vivla API** | Calcula costes, cobra o deja pendiente, aplica caducidad y bonos. |
+| **Panel CX** | El equipo ajusta llaves, aplica bonos de referido, gestiona ThirdHome y consulta métricas. |
