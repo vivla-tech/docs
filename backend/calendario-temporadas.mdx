@@ -1,0 +1,67 @@
+---
+title: "Calendario y temporadas"
+description: "Enum de temporadas, fechas por casa en Firestore, coste en llaves y check-in/out"
+---
+
+# Calendario y temporadas
+
+El calendario mezcla dos fuentes: un **enum de temporadas fijo en el código** y las **fechas concretas de cada casa, que son dato en Firestore**. Separarlas es clave para no confundir lo inmutable con lo configurable.
+
+## El enum de temporadas (código)
+
+Las temporadas posibles están hardcodeadas en `src/common/dtos/season.dto.ts:52`:
+
+| Slug | Enum | Uso |
+|------|------|-----|
+| `low` | `SeasonSlug.LOW` | Temporada baja |
+| `mid` | `SeasonSlug.MEDIUM` | Temporada media |
+| `high` | `SeasonSlug.HIGH` | Temporada alta |
+| `peak` | `SeasonSlug.HIGH2` | Temporada pico (alta demanda) |
+| `last_hour` | `SeasonSlug.LASTHOUR` | Estancia de última hora |
+
+Solo las temporadas **baja y media** permiten encadenar dos estancias consecutivas: `allowConsecutive` se calcula como `low || mid` (`season.dto.ts:14`). Ver [Reglas de reserva](/backend/reglas-de-reserva).
+
+## Las fechas de cada casa (dato Firestore)
+
+Qué fechas caen en qué temporada **no está en el código**: es dato en Firestore, por casa.
+
+- Cada casa tiene un `calendar_ref`. El calendario se lee de `config/{año}/{calendar_ref}`, que tiene una subcolección por temporada; cada documento es un slot con `from`/`to` en formato `DD/MM/YYYY` (`src/bookings/calendars/v1/calendars.repository.ts:69`).
+- **Plantillas compartidas:** varias casas pueden apuntar al mismo `calendar_ref` y compartir así el mismo calendario. El código resuelve qué casas comparten calendario por ese campo (`calendars.repository.ts:454`).
+- Se gestiona desde los **endpoints admin de calendario** (`slots/create`, `slots/update`, `slots/delete`, `slots/duplicate-year`). Ver [Endpoints de reservas](/backend/bookings-endpoints).
+
+<Warning>
+  **Fechas concretas de temporada por casa: son dato, no código.** Qué semanas son alta o pico en cada casa se define en Firestore y cambia por año y por casa. No lo afirmes desde esta wiki: consúltalo en el calendario de la casa.
+</Warning>
+
+## Coste en llaves por casa y temporada
+
+El coste en llaves de reservar un intercambio depende de la casa y la temporada (`src/bookings/calendars/v1/calendars.repository.ts:1079`; también `src/bookings/v1/bookings.repository.ts:1999`):
+
+1. **Última hora → 1 llave fija** (`bookings.repository.ts:2001`).
+2. Si existe un registro en la tabla `home_exchange_keys` para esa casa + temporada, se usa su valor (`calendars.repository.ts:1091`). Esta tabla se gestiona con el endpoint admin `POST /v2/admin/bookings/keys/home/:homeId/set`.
+3. Si no existe, se usa el **fallback** de la variable de entorno `DEFAULT_KEYS`, un CSV con el orden `[alta, media, baja]` (`calendars.repository.ts:1109`). Pico usa el mismo índice que alta.
+
+<Warning>
+  **Valores de `DEFAULT_KEYS`: PENDIENTE confirmar.** Es una variable de entorno; su valor en producción no está en el código.
+</Warning>
+
+## Check-in y check-out: fuente doble (inconsistencia conocida)
+
+Hay **dos fuentes distintas** para las horas de entrada y salida, y no coinciden:
+
+<Tabs>
+  <Tab title="Hardcode 16:00 / 10:00">
+    Al construir el calendario futuro de una casa, las horas de entrada y salida entre slots encadenados usan valores **fijos en código**: check-in 16:00 y check-out 10:00 (`src/bookings/calendars/v1/calendars.repository.ts:56`).
+  </Tab>
+  <Tab title="Tabla Configuration por tipo de casa">
+    Al construir las estancias de una reserva concreta, las horas se leen de la tabla `configurations`, con claves `default_check_in_<HomeType>` y `default_check_out_<HomeType>` (`src/bookings/v1/bookings.repository.ts:1163`; también `calendars.repository.ts:895`).
+  </Tab>
+</Tabs>
+
+<Warning>
+  **Inconsistencia conocida.** El check-in/out sale de dos sitios distintos (constante `16/10` vs tabla `configurations` por tipo de casa) que pueden discrepar. Las **horas reales** de check-in/out son política operativa: **PENDIENTE confirmar por CX/negocio** cuáles rigen.
+</Warning>
+
+## Tipos y estados de casa
+
+Los tipos de casa (`HomeType`) son `ski`, `beach`, `city`; los estados (`HomeStatus`) son `inactive`, `pre-active`, `active` (`src/common/database/v2/entities/homes/home.entity.ts:27`). El estado condiciona qué reservas se permiten (ver [Operativa](/operativa/index)).

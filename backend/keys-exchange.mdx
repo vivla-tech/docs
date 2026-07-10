@@ -1,0 +1,96 @@
+---
+title: "Llaves e intercambio"
+description: "Wallet de llaves, caducidad, movimientos, los dos motores de intercambio y ThirdHome"
+---
+
+# Llaves e intercambio
+
+Las llaves son la moneda del intercambio entre copropietarios. Todo lo relativo a llaves vive en **v2 (Postgres)**; el intercambio en sí lo dispara v1 (Firestore) y consulta el wallet de v2.
+
+## El wallet de llaves
+
+El saldo se guarda en la tabla `exchange_keys_wallet`, con registros que tienen fecha de caducidad. Los movimientos se registran en `exchange_keys`.
+
+- **Caducidad: 24 meses.** Cada asignación de llaves caduca a 24 meses de su fecha de creación (`src/bookings/v2/bookings.repository.ts:387`; también `src/bookings/v1/bookings.repository.ts:1712`).
+- **Consumo FIFO por caducidad.** Al gastar llaves se descuentan primero las que caducan antes (`expiresAt` ascendente) (`bookings.repository.ts:407`).
+- Las asignaciones con la misma fecha de caducidad se acumulan en el mismo registro.
+
+## Movimientos: los 12 conceptos
+
+Cada movimiento tiene un `concept` (`src/common/database/v2/entities/bookings/exchange-key.entity.ts:10`):
+
+| Concepto | Significado |
+|----------|-------------|
+| `INITIAL_ALLOCATION` | Traspaso inicial desde el sistema antiguo. |
+| `WELCOME_GIFT` | Regalo de bienvenida (bono al primer intercambio). |
+| `FIDELIZATION_BONUS` | Bonificación anual por fidelidad. |
+| `STAY_BOOKED` | Gasto por reservar un intercambio. |
+| `LAST_HOUR_BOOKED` | Gasto por reservar un intercambio de última hora. |
+| `STAY_CANCELLED` | Recuperación de llaves al cancelar un intercambio. |
+| `STAY_EXCHANGED` | Recepción de llaves al ofrecer intercambio y ser reservado. |
+| `STAY_EXCHANGED_IMMEDIATE` | Recepción de llaves cobradas de inmediato. |
+| `EXPIRATION` | Expiración de llaves no usadas. |
+| `REFERRAL_BONUS` | Bonificación por invitar a un amigo. |
+| `PENALIZATION` | Penalización asignada manualmente. |
+| `OTHER` | Ajuste manual o movimiento sin clasificar. |
+
+## Bonos
+
+- **Bono de fidelización (`FIDELIZATION_BONUS`): +2 llaves** si el usuario tuvo **2 o más intercambios válidos** en el año (de tipo intercambio, reservados, no propios). Lo otorga el cron de fin de año (`src/bookings/v2/commands/yearly-bonus.command.ts:63`).
+- **Bono de referido (`REFERRAL_BONUS`): +2 llaves**, mediante el endpoint admin `POST /v2/admin/bookings/keys/:userId/add-referral-bonus` (`src/bookings/v2/bookings-admin.controller.ts:40`).
+- **Regalo de bienvenida (`WELCOME_GIFT`):** al recibir llaves por su **primer** intercambio (flag `first_exchange`), el código otorga un bono igual al importe recibido — es decir, **duplica** la ganancia de ese primer intercambio (`src/bookings/v1/bookings.repository.ts:1763`).
+
+<Warning>
+  **Importe fijo del bono de bienvenida: PENDIENTE confirmar por CX/negocio.** El concepto `WELCOME_GIFT` existe y el código lo usa para duplicar las llaves del primer intercambio. Si existe además un importe fijo de bienvenida al alta (no ligado a un intercambio), no está en el código.
+</Warning>
+
+## Caducidad: el cron y la prórroga
+
+El cron de caducidad corre a diario y comprueba todos los monederos (`src/bookings/v2/commands/key-expires.command.ts`):
+
+1. **Avisos previos.** Si a un registro le quedan tantos días como alguno de los configurados en `keys_expiration_warning_days` (CSV en la tabla `configurations`), se genera una notificación (`key-expires.command.ts:43`).
+2. **Primera caducidad → prórroga automática de 12 meses.** Si un registro caduca hoy y el usuario **no** ha sido prorrogado antes (`user.prorrogatedKeys`), se le amplía la caducidad 12 meses, una sola vez (`key-expires.command.ts:88`).
+3. **Segunda caducidad → se pierden.** Si el usuario ya fue prorrogado, las llaves caducadas se eliminan y se registra un movimiento `EXPIRATION` (`key-expires.command.ts:113`).
+
+<Warning>
+  **Valor de `keys_expiration_warning_days`: PENDIENTE confirmar.** Es dato de la tabla `configurations`; los días concretos de aviso no están en el código.
+</Warning>
+
+Ver [Crons y configuración](/backend/crons-y-configuracion) para el horario del cron.
+
+## Los dos motores de intercambio
+
+Conviven dos sistemas de intercambio. Cuál se usa lo decide la flag `NEW_EXCHANGE_SYSTEM` (más una lista de usuarios habilitados, `NEW_EXCHANGE_SYSTEM_ENABLED_USERS`) (`src/bookings/v1/bookings.repository.ts:196`).
+
+<Tabs>
+  <Tab title="Motor viejo — match por fechas">
+    Al publicar una reserva para intercambio (`to_swap`), el sistema busca automáticamente otras reservas de intercambio con **fechas de entrada y salida exactamente iguales** en otras casas, y notifica a sus dueños cuando hay coincidencia (`src/bookings/v1/bookings.service.ts:486` y `:803`). Es un emparejamiento de reservas, sin cobro instantáneo de llaves.
+  </Tab>
+  <Tab title="Motor nuevo — marketplace de llaves">
+    El intercambio deja de depender de un match: se paga con llaves del wallet. El **cobro es instantáneo** si la reserva es con **≥ 9 meses de antelación** y la temporada **no es baja** (`src/bookings/calendars/v1/calendars.service.ts:281`). En caso contrario, la reserva queda con `keys_paid = false` (cobro pendiente) (`src/bookings/v1/bookings.repository.ts:215`).
+  </Tab>
+</Tabs>
+
+### Excepción de lanzamiento (regla temporal, YA CADUCADA)
+
+Hubo una regla de lanzamiento **con fecha fija en el código**: hasta el **15/03/2026**, en temporada media o alta y con **≥ 6 meses de antelación**, el cobro también era instantáneo (`src/bookings/calendars/v1/calendars.service.ts:288`, duplicada en `src/bookings/v1/bookings.repository.ts:221`). **Esa fecha ya pasó**: la condición sigue en el código pero está inerte (`now < 15/03/2026` ya nunca se cumple). Candidata a limpieza en vivla-api; si reaparece un comportamiento de cobro instantáneo con 6-8 meses, no es un bug de esta doc — sería que alguien reactivó la fecha.
+
+<Warning>
+  **Estado del rollout de `NEW_EXCHANGE_SYSTEM`: PENDIENTE confirmar.** Que el motor nuevo esté activo (globalmente o por lista de usuarios) es configuración de entorno, no código. La fecha `15/03/2026` sí está hardcodeada como regla temporal.
+</Warning>
+
+## ThirdHome
+
+ThirdHome es la red externa de intercambio de casas. En `vivla-api` **no hay integración por API**: no se hace ninguna llamada saliente a ThirdHome. Todo el flujo son transiciones de estado **manuales** que gestiona un admin desde el panel (`src/bookings/v1/bookings.service.ts:1952`; endpoints en `bookings-admin.controller.ts:183`).
+
+La máquina de estados sobre una reserva de disfrute (`OWN`) activa y aprobada:
+
+| Acción admin | Estado resultante | Requisito |
+|--------------|-------------------|-----------|
+| Publicar en ThirdHome | `TH_PENDING` (`thirdhome_published`) | La reserva es `OWN`, activa y `APPROVED`. |
+| Retirar publicación | Vuelve a `APPROVED` | La reserva está en `TH_PENDING`. |
+| Marcar intercambiada | `TH_EXCHANGED` (`thirdhome_exchanged`) | En `TH_PENDING` + datos del asistente (`displayName` + `email`). |
+
+<Note>
+  Como no hay integración, el cruce real con ThirdHome ocurre fuera del sistema; la API solo refleja el estado que el equipo va marcando a mano.
+</Note>

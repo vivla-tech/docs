@@ -1,0 +1,101 @@
+---
+title: "Endpoints de reservas"
+description: "Referencia de endpoints de reservas, llaves y calendario (v1 y v2, público y admin)"
+---
+
+# Endpoints de reservas
+
+Referencia de la superficie de reservas de `vivla-api`. Las rutas incluyen su versión (`/v1/...`, `/v2/...`); no hay prefijo global. Las rutas de calendario comparten prefijo con reservas (`bookings` y `admin/bookings`).
+
+<Note>
+  La columna **Acceso** distingue endpoints de la **app del copropietario** (usuario autenticado) de los de **panel** (protegidos por `PermissionGuard` + `@RequirePermission(...)`). El permiso exacto se indica entre paréntesis.
+</Note>
+
+## Público v1 — app del copropietario
+
+`src/bookings/v1/bookings.controller.ts` · path `bookings`, versión 1.
+
+| Método | Ruta | Qué hace |
+|--------|------|----------|
+| GET | `/v1/bookings/mine` | Reservas del usuario autenticado (filtro `status` por query). |
+| GET | `/v1/bookings/to-rent` | Reservas publicadas para alquilar dentro de la red. |
+| GET | `/v1/bookings/to-exchange` | Reservas publicadas para intercambio. |
+| GET | `/v1/bookings/:id` | Detalle de una reserva. |
+| PUT | `/v1/bookings/update-info/:id` | Actualiza información de la reserva (huéspedes, notas, extras). |
+| PUT | `/v1/bookings/update/:id` | Cambia el tipo de reserva (disfrute / intercambio / alquiler). |
+| DELETE | `/v1/bookings/cancel/:id` | Cancela la reserva (o anula la invitación si eres invitado). |
+| GET | `/v1/bookings/available-stays/:id` | Estancias disponibles del usuario en esa casa, por temporada. |
+| POST | `/v1/bookings/book/:id` | Crea una reserva de disfrute. |
+| POST | `/v1/bookings/rent/:id` | Solicita el alquiler de una reserva publicada. |
+| POST | `/v1/bookings/exchange/:id` | Solicita el intercambio de una reserva publicada (gasta llaves). |
+| POST | `/v1/bookings/exchange-last-hour` | Intercambio de última hora sobre un slot disponible (`home`, `stay`, `info`). |
+| POST | `/v1/bookings/:id/stay-review` | Registra el NPS de la estancia. |
+| POST | `/v1/bookings/:id/arrival-review` | Registra el NPS de calidad a la llegada. |
+
+## Público v2 — experiencias y wallet de llaves
+
+`src/bookings/v2/bookings.controller.ts` · path `bookings`, versión 2.
+
+| Método | Ruta | Qué hace |
+|--------|------|----------|
+| GET | `/v2/bookings/experiences/:location` | Experiencias por ubicación (localizadas por idioma). |
+| GET | `/v2/bookings/:booking/experiences` | Experiencias asociadas a una reserva. |
+| POST | `/v2/bookings/register-experience` | Registra (selecciona) una experiencia. |
+| DELETE | `/v2/bookings/remove-experience` | Deselecciona una experiencia. |
+| GET | `/v2/bookings/keys/my-wallet` | Monedero de llaves propio (saldo). |
+| GET | `/v2/bookings/keys/my-movements` | Movimientos de llaves propios (paginado por `page`). |
+| GET | `/v2/bookings/available-stays/:id` | Estancias disponibles (versión v2). |
+
+## Admin v1 — panel CX
+
+`src/bookings/v1/bookings-admin.controller.ts` · path `admin/bookings`, versión 1. Todos bajo `PermissionGuard`.
+
+| Método | Ruta | Acceso | Qué hace |
+|--------|------|--------|----------|
+| GET | `/v1/admin/bookings/pending-exchanges` | `read:exchanges` | Reservas pendientes de intercambio. |
+| DELETE | `/v1/admin/bookings/delete-test-bookings` | `admin` | Borra reservas de prueba. |
+| POST | `/v1/admin/bookings/transfer/:homeId` | `admin` | Ejecuta la transferencia de reservas de una casa. |
+| GET | `/v1/admin/bookings` | `read:bookings` | Listado con filtros (`status`, `type`, `home`, `from`, `to`, `user`, `gm`, `location`, paginado). |
+| GET | `/v1/admin/bookings/:id` | `read:bookings` | Detalle de una reserva. |
+| PUT | `/v1/admin/bookings/:id` | `edit:bookings` | Modifica una reserva. |
+| POST | `/v1/admin/bookings/:id/publish-third-home` | `edit:bookings` | Publica la reserva en ThirdHome. |
+| PUT | `/v1/admin/bookings/:id/unpublish-third-home` | `edit:bookings` | Retira la publicación de ThirdHome. |
+| PUT | `/v1/admin/bookings/:id/exchange-third-home` | `edit:bookings` | Marca la reserva como intercambiada en ThirdHome (requiere asistente). |
+| PUT | `/v1/admin/bookings/:id/change-type` | `edit:bookings` | Cambia el tipo de reserva. |
+| DELETE | `/v1/admin/bookings/:id/liberate` | `edit:bookings` | Retira asistentes y libera la reserva. |
+| POST | `/v1/admin/bookings/:id/rent` | `edit:bookings` | Alquila la reserva con precio manual (`price`, `assistant`). |
+| PUT | `/v1/admin/bookings/:id/rent/approve` | `edit:bookings` | Aprueba o rechaza el alquiler (`approve` por query). |
+| POST | `/v1/admin/bookings/:id/exchange` | `edit:bookings` | Intercambia la reserva a nombre de un usuario. |
+| DELETE | `/v1/admin/bookings/:id/cancel` | `edit:bookings` | Cancela la reserva. |
+| POST | `/v1/admin/bookings/register` | `edit:bookings` | Registra una reserva manualmente. |
+
+## Admin v2 — llaves
+
+`src/bookings/v2/bookings-admin.controller.ts` · path `admin/bookings`, versión 2. Todos bajo `PermissionGuard`.
+
+| Método | Ruta | Acceso | Qué hace |
+|--------|------|--------|----------|
+| POST | `/v2/admin/bookings/keys/:userId/add-referral-bonus` | `edit:exchanges` | Añade el bono de referido (+2 llaves). |
+| POST | `/v2/admin/bookings/keys/:userId/register-movement` | `edit:exchanges` | Registra un movimiento manual de llaves. |
+| PUT | `/v2/admin/bookings/keys/transfer` | `edit:exchanges` | Traspasa llaves entre usuarios (`from`, `to`, `amount`). |
+| GET | `/v2/admin/bookings/keys/movements` | `read:exchanges` | Listado de movimientos (filtros y paginación). |
+| GET | `/v2/admin/bookings/keys/wallets` | `read:exchanges` | Listado de monederos. |
+| GET | `/v2/admin/bookings/keys/user-wallet/:userId` | `read:exchanges` | Monedero de un usuario. |
+| GET | `/v2/admin/bookings/keys/charts` | `read:exchanges` | Datos para gráficas (`period`). |
+| GET | `/v2/admin/bookings/keys/metrics` | `read:exchanges` | Métricas de llaves (`from`, `to`). |
+| GET | `/v2/admin/bookings/keys/homes` | `read:exchanges` | Coste en llaves de las casas (filtros). |
+| GET | `/v2/admin/bookings/keys/home/:homeId` | `read:exchanges` | Fechas con coste en llaves de una casa. |
+| POST | `/v2/admin/bookings/keys/home/:homeId/set` | `edit:exchanges` | Fija el coste en llaves de una casa+temporada (`season`, `keys`). |
+
+## Calendario
+
+Público en `src/bookings/calendars/v1/calendars.controller.ts`; admin en `calendars-admin.controller.ts`. Comparten prefijo con reservas.
+
+| Método | Ruta | Acceso | Qué hace |
+|--------|------|--------|----------|
+| GET | `/v1/bookings/home-calendar/:id` | App | Calendario de una casa (slots con disponibilidad, temporada y coste). |
+| PUT | `/v1/admin/bookings/slots/update` | `edit:calendars` | Modifica un slot. |
+| DELETE | `/v1/admin/bookings/slots/delete` | `edit:calendars` | Elimina un slot. |
+| POST | `/v1/admin/bookings/slots/create` | `edit:calendars` | Crea un slot. |
+| POST | `/v1/admin/bookings/slots/duplicate-year` | `edit:calendars` | Duplica los slots de un año a otro (`year`, `calendarRef`). |
+| GET | `/v1/admin/bookings/calendars` | `read:bookings` | Calendarios de reservas con filtros (`homes`, `from`, `to`, `location`, paginado). |

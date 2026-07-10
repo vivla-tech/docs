@@ -1,0 +1,82 @@
+---
+title: "Reglas de reserva"
+description: "Las validaciones que impone vivla-api al reservar, con su referencia en código"
+---
+
+# Reglas de reserva
+
+Estas son las reglas que **el código** aplica al crear o gestionar una reserva. Cada una apunta a su `archivo:línea` en `vivla-api` (rutas relativas a `src/`). Si un valor no aparece aquí con su referencia, es política de negocio, no código.
+
+<Note>
+  La lógica de cupos y validación está duplicada entre v1 (Firestore) y v2. Las referencias principales son de v1; la v2 (`src/bookings/v2/bookings.service.ts:198`) replica el mismo comportamiento.
+</Note>
+
+## Antelación y horizonte
+
+| Regla | Detalle | Referencia |
+|-------|---------|------------|
+| **Antelación mínima 72 h** | Un slot cuya fecha de inicio esté a menos de 72 horas se marca como no disponible. | `src/bookings/calendars/v1/calendars.service.ts:217` |
+| **Horizonte máximo 2 años** | No se admiten reservas cuya fecha de fin supere los 2 años desde hoy (error `END_DATE_TOO_FAR`). | `src/bookings/v1/bookings.service.ts:725` |
+
+## Estancias por reserva
+
+Una reserva puede combinar una o dos estancias (slots) del calendario, con condiciones estrictas (`src/bookings/v1/bookings.service.ts:643`).
+
+- **Máximo 2 estancias** por reserva. Más de dos devuelve `LIMIT_OVER` (`bookings.service.ts:643`).
+- Ambas estancias deben ser de la **misma temporada** (`bookings.service.ts:702`).
+- Solo se pueden encadenar dos estancias si su temporada **permite consecutivas**. `allowConsecutive` es `true` únicamente para temporada baja (`low`) y media (`mid`) (`src/common/dtos/season.dto.ts:14`).
+- Las fechas deben ser **consecutivas**: la primera termina el día anterior o el mismo día en que empieza la segunda (diferencia ≤ 1 día) (`bookings.service.ts:712`).
+- Cada estancia debe tener `id` y estar **disponible** (`bookings.service.ts:648`).
+
+## Cupos anuales por temporada
+
+Cada usuario tiene un número máximo de reservas por temporada, que depende del **tipo de casa**. Los valores base (`src/bookings/v1/bookings.service.ts:263`):
+
+| Tipo de casa | Baja (`low`) | Media (`mid`) | Alta (`high`) | Pico (`peak`) |
+|--------------|:---:|:---:|:---:|:---:|
+| **Playa (`beach`)** | 2 | 2 | 2 | 1 |
+| **Ski (`ski`)** | 3 | 2 | 1 | 1 |
+| **Urbano (`city`)** | 2 | 2 | 2 | 0 |
+
+Sobre esos valores base se aplican estos ajustes:
+
+- **Fracciones:** los cupos se multiplican por el número de fracciones del `deal` del usuario en esa casa (`bookings.service.ts:308`).
+- **Casa inactiva:** si la casa está `INACTIVE`, todos los cupos pasan a 0 (`bookings.service.ts:279`).
+- **Deal bloqueado:** si el `deal` está `locked`, todos los cupos pasan a 0 (`bookings.service.ts:298`).
+- **Pico descuenta de alta (solo playa):** en casas de playa, cada reserva en temporada pico también resta del cupo de temporada alta; y si no queda cupo de alta, el de pico se pone a 0 (`bookings.service.ts:356` y `:365`).
+- **Urbano sin pico:** en casas urbanas el cupo de pico es siempre 0 (`bookings.service.ts:370`).
+
+Si al reservar no queda cupo suficiente en esa temporada, el código devuelve `LIMIT_OVER` (`bookings.service.ts:742`).
+
+<Note>
+  Internamente la temporada "pico" es el slug `peak` (enum `SeasonSlug.HIGH2`). Ver [Calendario y temporadas](/backend/calendario-temporadas).
+</Note>
+
+## Reservas de última hora
+
+Las estancias de última hora dejan reservar slots próximos que nadie ha cogido, incluso con el cupo agotado.
+
+- Se marcan como última hora las **4 primeras estancias disponibles** del calendario futuro de la casa (`src/bookings/calendars/v1/calendars.service.ts:195` y `:306`).
+- Si el usuario ya hizo una reserva de última hora en esa casa en los **últimos 3 meses**, el límite baja a **3** (`calendars.service.ts:311`).
+- El coste de un intercambio de última hora es **fijo: 1 llave** (`calendars.service.ts:340`; también `src/bookings/v1/bookings.repository.ts:2001`).
+- Un usuario solo puede tener **1 reserva de última hora activa** por casa a la vez (`bookings.service.ts:762`).
+- El intercambio de última hora exige que el slot permita última hora y esté disponible, y que el usuario tenga llaves suficientes (`bookings.service.ts:950`).
+
+## Cancelación
+
+- Cancelar exige el permiso `permissions.cancel` sobre la reserva (`src/bookings/v1/bookings.service.ts:406`).
+- Si quien cancela es solo un **invitado** (`GUEST`), se anula su invitación, no la reserva (`bookings.service.ts:410`).
+- El ajuste de llaves al cancelar depende del motor de intercambio activo (`src/bookings/v1/bookings.repository.ts:1005`).
+
+<Warning>
+  **Ventana de cancelación (p. ej. "hasta 30 días antes"): PENDIENTE confirmar por CX/negocio.** El código **no** impone ninguna ventana temporal de cancelación: solo comprueba el permiso `permissions.cancel`. Cualquier plazo de cancelación es política que no está en el código.
+</Warning>
+
+## Ocupación
+
+- Al crear la reserva, los valores por defecto son `adults = 2`, `kids = 0`, `pets = 0` (`src/bookings/v1/bookings.repository.ts:110`).
+- La validación solo exige que `adults`, `kids` y `pets` sean ≥ 0 (`Min(0)`), sin tope superior (`bookings.service.ts:1524`).
+
+<Warning>
+  **Límite de ocupación por capacidad de la casa: PENDIENTE confirmar por CX/negocio.** El código no valida la ocupación contra la capacidad máxima de la propiedad.
+</Warning>

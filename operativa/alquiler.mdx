@@ -1,0 +1,60 @@
+---
+title: "Alquiler de semanas"
+description: "Qué permite el sistema al alquilar una semana y qué es proceso manual del equipo"
+---
+
+# Alquiler de semanas
+
+> Documento de estado actual. Describe cómo funciona hoy el sistema, no cómo debería ser.
+
+Un copropietario puede poner una de sus semanas en alquiler dentro de la red. Buena parte del alquiler es **proceso manual del equipo**: el sistema acompaña, pero no automatiza el precio ni la comisión. El detalle técnico está en [Alquiler (Vivla API)](/backend/alquiler).
+
+---
+
+## 1. Qué hace el copropietario
+
+El copropietario publica una de sus semanas como disponible para alquiler desde la app. A partir de ahí, la semana queda **libre** a la espera de que el equipo gestione el alquiler.
+
+---
+
+## 2. Qué hace el equipo (panel CX)
+
+El alquiler efectivo lo cierra el equipo desde el panel:
+
+1. **Alquilar la semana** — el agente introduce el **precio a mano** (debe ser mayor que 0) y los datos de quien se aloja (nombre y email, o un usuario existente).
+2. **Aprobar o rechazar** — si el alquiler queda pendiente, el equipo lo aprueba o lo rechaza.
+3. **Liberar** — retira a los asistentes cuando corresponde (por ejemplo, si se cae el alquiler).
+
+El sistema comprueba en cada paso que la reserva esté en el estado correcto (libre, pendiente, aprobada), pero **no calcula importes**.
+
+---
+
+## 3. El precio es manual
+
+<Warning>
+  **Comisión de alquiler (p. ej. 15% / 20-25%): PENDIENTE confirmar por CX/negocio.** El sistema **no** aplica ninguna comisión ni fórmula de precio: el importe lo introduce el equipo a mano. Cualquier cálculo de comisión ocurre fuera del sistema.
+</Warning>
+
+<Warning>
+  **Elegibilidad para alquilar (p. ej. "tras 2 rondas"): PENDIENTE confirmar por CX/negocio.** El sistema solo comprueba que la semana esté publicada y libre, no la antigüedad del copropietario ni el número de rondas.
+</Warning>
+
+<Warning>
+  **Programa de Ingresos Garantizados: PENDIENTE confirmar por CX/negocio.** No existe en el código ningún concepto de ingresos garantizados asociado al alquiler.
+</Warning>
+
+---
+
+## 4. Hostaway
+
+Las casas alquilables pueden tener una ficha en **Hostaway** (el motor de alquiler externo). La relación es **solo un enlace**: si la casa tiene identificador de Hostaway, el sistema compone la URL hacia su ficha. No hay sincronización automática de reservas ni de precios entre VIVLA y Hostaway.
+
+---
+
+## Quién hace qué
+
+| Actor | Rol |
+|-------|-----|
+| **App móvil** | El copropietario publica su semana para alquiler. |
+| **Vivla API** | Guarda estados y valida transiciones; enlaza a Hostaway. No calcula precio ni comisión. |
+| **Panel CX** | El equipo fija el precio a mano, aprueba/rechaza y libera. |

@@ -75,6 +75,27 @@
             "pages": [
               "backend/index"
             ]
+          },
+          {
+            "group": "Reservas",
+            "pages": [
+              "backend/bookings-endpoints",
+              "backend/reglas-de-reserva",
+              "backend/calendario-temporadas"
+            ]
+          },
+          {
+            "group": "Llaves y alquiler",
+            "pages": [
+              "backend/keys-exchange",
+              "backend/alquiler"
+            ]
+          },
+          {
+            "group": "Operación",
+            "pages": [
+              "backend/crons-y-configuracion"
+            ]
           }
         ]
       },
@@ -108,7 +129,10 @@
           {
             "group": "Reservas",
             "pages": [
-              "operativa/reservas-ultima-hora"
+              "operativa/reservas",
+              "operativa/reservas-ultima-hora",
+              "operativa/intercambio-keys",
+              "operativa/alquiler"
             ]
           }
         ]

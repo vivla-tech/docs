@@ -1,0 +1,37 @@
+---
+title: "Alquiler"
+description: "Flujo de alquiler de semanas: estados, precio manual y enlace a Hostaway"
+---
+
+# Alquiler
+
+El alquiler pone una reserva a disposición para que se alquile dentro de la red. El **precio lo fija a mano un admin**; no hay ninguna fórmula de comisión en el código.
+
+## Flujo del copropietario
+
+El copropietario publica su reserva como disponible para alquiler cambiando su tipo, y solicita el alquiler de reservas publicadas con `POST /v1/bookings/rent/:id` (`src/bookings/v1/bookings.service.ts:877`). Para que una reserva se pueda solicitar debe estar **libre y activa** (`approval = FREE`, `status = ACTIVE`) (`bookings.service.ts:899`).
+
+## Flujo del admin (panel CX)
+
+El alquiler efectivo lo gestiona un admin (`src/bookings/v1/bookings.service.ts:2162`):
+
+1. **Alquilar** — `POST /v1/admin/bookings/:id/rent`. Exige `price` **> 0** (manual) y datos del asistente (nombre + email, o un `id` de usuario). La reserva debe ser de tipo alquiler y estar libre (`RENTAL` + `FREE`) (`bookings.service.ts:2171` y `:2202`). Por defecto queda `APPROVED`, salvo que se pase `status = pending` (`bookings.service.ts:2249`).
+2. **Aprobar o rechazar** — `PUT /v1/admin/bookings/:id/rent/approve`. Exige que la reserva esté **activa, de tipo alquiler y en estado pendiente** (`RENTAL` + `PENDING`) (`bookings.service.ts:2285`).
+3. **Liberar** — `DELETE /v1/admin/bookings/:id/liberate`. Retira asistentes. Solo procede si la reserva está activa y es una de estas combinaciones (`bookings.service.ts:2120`):
+   - disfrute intercambiada en ThirdHome (`OWN` + `TH_EXCHANGED`),
+   - alquiler aprobado (`RENTAL` + `APPROVED`),
+   - intercambio aprobado (`EXCHANGE` + `APPROVED`).
+
+## Precio
+
+<Warning>
+  **Comisión de alquiler (p. ej. 15% / 20-25%): PENDIENTE confirmar por CX/negocio.** El código **no** contiene ninguna fórmula ni porcentaje de comisión. El `price` del alquiler es un número que introduce el admin a mano. Cualquier cálculo de comisión ocurre fuera del sistema.
+</Warning>
+
+<Warning>
+  **Elegibilidad "tras 2 rondas" u otros requisitos para alquilar: PENDIENTE confirmar por CX/negocio.** El código solo comprueba el estado de la reserva (`RENTAL` + `FREE`), no antigüedad ni número de rondas.
+</Warning>
+
+## Hostaway
+
+La integración con Hostaway es **solo un enlace**: si la casa tiene `hostawayId` y está definida la variable `RENTALS_URL`, se compone la URL externa `RENTALS_URL + hostawayId` (`src/bookings/v1/bookings.repository.ts:1296`). No hay sincronización de datos ni llamadas a la API de Hostaway desde `vivla-api`.

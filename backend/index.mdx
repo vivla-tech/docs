@@ -1,34 +1,84 @@
 ---
 title: "Vivla API"
-description: "API principal de VIVLA — NestJS + PostgreSQL"
+description: "La API REST que sostiene reservas, calendario, llaves y alquiler de VIVLA"
 ---
 
 # Vivla API
 
-API REST principal que sirve a la app móvil y al panel de CX. Arquitectura modular por entidades con múltiples versiones (V1, V2, V3).
+`vivla-api` es la API REST principal de VIVLA. Está construida con **NestJS 11** (Node.js 22+) y sirve a la app móvil de copropietarios, al panel de CX y a `calendar-manager`. Aquí vive la lógica de negocio del producto: reservas, calendario, temporadas, llaves de intercambio y alquiler de semanas.
+
+Esta documentación describe el **estado actual del código**. Cada regla apunta a su `archivo:línea` en el repositorio para que puedas verificarla.
+
+<Note>
+  Este tab se escribe de forma nativa en el repo `docs`, no en `vivla-api`. El repositorio de la API no aloja su propia carpeta de documentación, así que la wiki la mantiene aparte.
+</Note>
+
+## Versionado por URI
+
+La API versiona por URI. Cada ruta empieza por su versión: `/v1/...` o `/v2/...`. No hay prefijo global de API. El versionado se activa en `src/main.ts:39` con `VersioningType.URI`.
 
 <Warning>
-  La documentación detallada de Vivla API aún no está disponible. Cada equipo es responsable de documentar su repositorio. Hay un template disponible en `subrepo-examples/backend-docs.json` para empezar.
+  **No hay OpenAPI ni Swagger.** El proyecto no expone ningún esquema autogenerado (no usa `@nestjs/swagger`). La única "spec" por endpoint son comentarios `@reference` que enlazan a páginas de Notion en las cabeceras de los controllers. No son navegables desde aquí y requieren acceso al workspace de Notion de VIVLA.
 </Warning>
 
-## Repositorio
+## La dualidad v1 / v2
 
-- **Repo:** [vivla-tech/vivla-api](https://github.com/vivla-tech/vivla-api)
-- **Stack:** NestJS 11, Node.js 22+, PostgreSQL (TypeORM), Firebase/Firestore, Google Cloud Storage
-- **Hosting:** Railway
+vivla-api convive con dos bases de datos a la vez. Entender cuál manda en cada dato es lo más importante de este backend.
 
-## Clientes
+<Tabs>
+  <Tab title="v1 — Firestore">
+    **Fuente de verdad de reservas y calendario.** Las reservas, los slots del calendario, las temporadas por casa y los estados de las estancias viven en Firestore (Firebase). Los endpoints `/v1/...` leen y escriben aquí.
 
-| Cliente | Uso |
-|---------|-----|
-| **Mobile App** | Auth, booking, propiedades, perfil, stays, invitaciones, notificaciones |
-| **Panel CX** | Gestión de reservas y atención al cliente |
-| **Calendar Manager** | Gestión de calendarios de propiedades |
+    El calendario de cada casa se guarda en `config/{año}/{calendar_ref}` con subcolecciones por temporada (`src/bookings/calendars/v1/calendars.repository.ts:69`).
+  </Tab>
+  <Tab title="v2 — PostgreSQL (TypeORM)">
+    **Wallet de llaves y experiencias.** El monedero de llaves de intercambio, los movimientos, los costes en llaves por casa y las experiencias viven en Postgres vía TypeORM. Los endpoints `/v2/...` leen y escriben aquí.
 
-## Características
+    Entidades clave: `exchange_keys` (movimientos), `exchange_keys_wallet` (saldo con caducidad), `home_exchange_keys` (coste por casa+temporada), `configurations` (parámetros).
+  </Tab>
+</Tabs>
 
-- Arquitectura modular por entidades con versionado de API (V1, V2, V3)
-- Sistema de validación custom
-- Jobs programados y comandos CLI
-- Caching, Sentry (error tracking), i18n
-- Migraciones de base de datos
+<Warning>
+  **v2 todavía depende de v1.** Las tablas Postgres referencian las casas y usuarios de Firestore por sus IDs antiguos (`oldHid`, `oldUid`). Muchas operaciones de v2 (por ejemplo el coste en llaves de una casa) resuelven primero la casa en Firestore para encontrar su equivalente en Postgres. No es una migración cerrada: es una capa nueva montada sobre la vieja.
+</Warning>
+
+## Módulos
+
+La API se organiza en módulos NestJS (`src/app.module.ts`).
+
+| Módulo | Qué contiene |
+|--------|--------------|
+| **Bookings** | Reservas: crear, cancelar, alquilar, intercambiar. v1 (Firestore) y v2 (experiencias + llaves). |
+| **Calendars** | Calendario de cada casa, slots, temporadas, disponibilidad. Vive dentro de `bookings/calendars`. |
+| **Homes** | Casas y propiedades. Controllers v1/v2 + variantes `admin` y `tools`. |
+| **Users** | Usuarios y perfiles. Controllers v1/v2 + variantes `admin` y `tools`. |
+| **Auth** | Autenticación y guard de permisos (`PermissionGuard` + `@RequirePermission`). |
+| **Notifications** | Envío de notificaciones (push / buzón Firestore). |
+| **Invitations** | Invitaciones de asistentes a reservas. |
+| **Configuration** | Tabla `configurations` (parámetros clave/valor). |
+| **ScheduledJobs** | Crons: caducidad de llaves, bono anual, refresco de caché, transfers. |
+| **Firestore / Database** | Conexión a Firestore (v1) y a Postgres/TypeORM (v2). |
+| **Common** | Filtros de error, i18n, utilidades, entidades compartidas. |
+
+## Por dónde seguir
+
+<CardGroup cols={2}>
+  <Card title="Endpoints de reservas" icon="list" href="/backend/bookings-endpoints">
+    Referencia de endpoints público/admin de v1 y v2, más los de calendario.
+  </Card>
+  <Card title="Reglas de reserva" icon="scale-balanced" href="/backend/reglas-de-reserva">
+    Cada validación que impone el código, con su `archivo:línea`.
+  </Card>
+  <Card title="Calendario y temporadas" icon="calendar" href="/backend/calendario-temporadas">
+    Enum de temporadas, fechas por casa, coste en llaves y check-in/out.
+  </Card>
+  <Card title="Llaves e intercambio" icon="key" href="/backend/keys-exchange">
+    Wallet, caducidad, los dos motores de intercambio y ThirdHome.
+  </Card>
+  <Card title="Alquiler" icon="house" href="/backend/alquiler">
+    Flujo de alquiler, estados, precio manual y Hostaway.
+  </Card>
+  <Card title="Crons y configuración" icon="clock" href="/backend/crons-y-configuracion">
+    Tareas programadas, tabla `configurations` y variables de entorno.
+  </Card>
+</CardGroup>

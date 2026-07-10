@@ -1,0 +1,88 @@
+---
+title: "El ciclo de reserva"
+description: "Cómo reserva un copropietario de punta a punta: app, reglas de la API y rol del equipo"
+---
+
+# El ciclo de reserva
+
+> Documento de estado actual. Describe cómo funciona hoy el sistema, no cómo debería ser.
+
+Esta página cuenta el recorrido completo de una reserva de un copropietario: qué ve en la app, qué reglas impone la API por debajo y dónde entra el equipo. Para el detalle técnico exacto, cada bloque enlaza al tab [Vivla API](/backend/index).
+
+---
+
+## 1. El calendario de la casa
+
+El copropietario ve el calendario de su casa en la app. Cada semana reservable es un **slot** con una **temporada** asignada (baja, media, alta o pico). Las temporadas y sus fechas las define VIVLA por casa; el calendario puede ser compartido entre varias casas de un mismo destino.
+
+Un slot solo aparece como disponible si nadie lo ha reservado y **falta más de 72 horas** para su inicio. Ver [Calendario y temporadas](/backend/calendario-temporadas).
+
+En la app, este flujo vive en el módulo de [reservas](/mobile/modules/booking) y el de [estancias](/mobile/modules/stays).
+
+---
+
+## 2. Cuánto puede reservar
+
+Cada copropietario tiene un **cupo anual por temporada**, que depende del tipo de casa y del número de fracciones que posee. A grandes rasgos, cuantas más fracciones, más reservas; y las temporadas de más demanda tienen menos cupo.
+
+| Tipo de casa | Baja | Media | Alta | Pico |
+|--------------|:---:|:---:|:---:|:---:|
+| **Playa** | 2 | 2 | 2 | 1 |
+| **Ski** | 3 | 2 | 1 | 1 |
+| **Urbano** | 2 | 2 | 2 | 0 |
+
+Estos valores se multiplican por las fracciones del copropietario. En casas de playa, reservar en temporada pico también consume cupo de temporada alta. El detalle y las excepciones (casa inactiva, deal bloqueado) están en [Reglas de reserva](/backend/reglas-de-reserva).
+
+---
+
+## 3. Hacer la reserva
+
+El copropietario elige uno o dos slots y confirma. La API valida, entre otras cosas:
+
+- máximo **2 estancias** por reserva, de la **misma temporada** y con fechas **consecutivas**;
+- solo se pueden encadenar dos estancias en temporada **baja o media**;
+- la reserva no puede terminar a más de **2 años** vista;
+- debe quedar **cupo** en esa temporada.
+
+Si algo falla, la app recibe un error concreto (por ejemplo, cupo agotado). Todas estas reglas están en [Reglas de reserva](/backend/reglas-de-reserva).
+
+Una reserva de disfrute queda **aprobada** directamente. Los datos de ocupación (adultos, niños, mascotas) y extras se guardan con la reserva; por defecto se asume 2 adultos.
+
+---
+
+## 4. Última hora
+
+Si el cupo está agotado, el copropietario todavía puede coger slots muy próximos como **reserva de última hora**. El sistema ofrece las primeras estancias libres del calendario futuro de la casa (normalmente 4; 3 si ya usó una última hora reciente). Hay dos modalidades —disfrute sobre la propia casa e intercambio sobre otra casa— explicadas en [Reservas de última hora](/operativa/reservas-ultima-hora).
+
+---
+
+## 5. Qué puede hacer con una reserva
+
+Una vez hecha, la reserva puede seguir varios caminos:
+
+- **Disfrutarla** — uso propio del copropietario y sus invitados.
+- **Publicarla para intercambio** — que otro copropietario la use a cambio de llaves. Ver [Llaves e intercambio](/operativa/intercambio-keys).
+- **Ponerla en alquiler** — dentro de la red VIVLA. Ver [Alquiler de semanas](/operativa/alquiler).
+- **Cancelarla** — libera el slot.
+
+Los invitados de una reserva pueden anular su propia invitación sin cancelar la reserva entera.
+
+<Warning>
+  **Ventana de cancelación (p. ej. "hasta 30 días antes"): PENDIENTE confirmar por CX/negocio.** El sistema no impone hoy ningún plazo temporal para cancelar; solo comprueba que el usuario tenga permiso. Cualquier política de plazos se gestiona fuera del código.
+</Warning>
+
+---
+
+## 6. Después de la estancia
+
+Al terminar, el copropietario puede registrar dos valoraciones desde la app: el **NPS de la estancia** y el **NPS de calidad a la llegada**. Estas respuestas alimentan los flujos de encuestas y seguimiento de CX (ver el tab [Vivla Tools](/tools/index)).
+
+---
+
+## Quién hace qué
+
+| Actor | Rol en el ciclo |
+|-------|-----------------|
+| **App móvil** | El copropietario ve el calendario, reserva, gestiona invitados y valora la estancia. |
+| **Vivla API** | Impone las reglas: cupos, antelación, temporadas, disponibilidad, estados. |
+| **Panel CX** | El equipo puede registrar, modificar, liberar o cancelar reservas, y gestionar alquileres e intercambios. |
