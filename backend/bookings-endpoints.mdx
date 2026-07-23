@@ -69,6 +69,10 @@ Referencia de la superficie de reservas de `vivla-api`. Las rutas incluyen su ve
 | DELETE | `/v1/admin/bookings/:id/cancel` | `edit:bookings` | Cancela la reserva. |
 | POST | `/v1/admin/bookings/register` | `edit:bookings` | Registra una reserva manualmente. |
 
+<Note>
+  **Editar fechas de un alquiler o intercambio.** Al modificar el check-in/check-out de una reserva de tipo alquiler (`RENT`) o intercambio (`EXCHANGE`), la estancia no vive solo en la reserva editada sino también en su **reserva contraparte** (referencia `rent_book`), que es de donde el cron de importación (`bookings:import`) vuelve a leer las fechas. Por eso el código escribe las nuevas fechas en **ambos** documentos de Firestore; si solo se actualizara la reserva origen, la siguiente importación las revertiría (`src/bookings/v2/bookings.common.repository.ts:1996`, método `editStay`).
+</Note>
+
 ## Admin v2 — llaves
 
 `src/bookings/v2/bookings-admin.controller.ts` · path `admin/bookings`, versión 2. Todos bajo `PermissionGuard`.
