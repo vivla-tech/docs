@@ -1,0 +1,167 @@
+---
+title: 'Gestion de Estado'
+description: 'Zustand, TanStack Query y React Context en la app'
+---
+
+# Gestion de Estado
+
+La app utiliza un **patron hibrido** para la gestion de estado:
+
+- **Zustand** para estado local/cliente (UI, sesion, preferencias)
+- **TanStack React Query** para estado del servidor (datos remotos, cache, sincronizacion)
+- **React Context** para funcionalidades transversales de UI
+
+## Zustand Stores
+
+<Tabs>
+  <Tab title="Stores Globales">
+    Ubicados en `src/shared/stores/`:
+
+    | Store | Archivo | Proposito | Persistencia |
+    |---|---|---|---|
+    | `useAppStore` | `appStore.ts` | Estado de inicializacion (`isInitializing`, `isReady`, `resetAllStores`) | No |
+    | `useOnboardingStore` | `onboardingStore.ts` | Estado de onboarding (`hasSeenOnboarding`, `isLoaded`) con `initialize`, `markComplete`, `markUnseen`, `clear` | AsyncStorage (manual) |
+    | `useKeyboardStore` | `keyboardStore.ts` | Altura del teclado (`height`, `isVisible`) con valor por defecto de 336px | AsyncStorage (middleware `persist`) |
+    | `usePendingDeepLinkStore` | `pendingDeepLinkStore.ts` | Cola de deep links pendientes (`pendingRoute`, `setPendingRoute`, `consumePendingRoute`) | No |
+
+  </Tab>
+  <Tab title="Stores de Modulos">
+    Cada modulo puede tener su propio store:
+
+    | Store | Ubicacion | Proposito | Middlewares |
+    |---|---|---|---|
+    | `useAuthStore` | `src/modules/auth/store/` | Usuario, tokens (access/refresh/expiry), flags de autenticacion (`isAuthenticated`, `isVisitor`), operaciones de login/logout/register | `persist` (almacenamiento hibrido) |
+    | `useChatStore` | `src/modules/chat/store/` | Stream Chat client, estado de conexion, canal activo, contador de no leidos, token de Stream | `devtools` + `persist` (AsyncStorage) |
+    | `usePropertyStore` | `src/modules/property/store/` | Propiedad seleccionada, lista de propiedades owned, propiedades generales | Ninguno |
+
+  </Tab>
+</Tabs>
+
+### Detalle: authStore (Almacenamiento Hibrido)
+
+El `authStore` implementa un sistema de almacenamiento hibrido para separar datos sensibles de datos regulares:
+
+<CodeGroup>
+```typescript Datos Sensibles (SecureStore)
+// Almacenados con expo-secure-store (cifrado en dispositivo)
+{
+  accessToken: string;
+  refreshToken: string;
+  tokenExpiry: number;
+  user: { id, email, displayName, phone };
+}
+```
+
+```typescript Datos No Sensibles (AsyncStorage)
+// Almacenados con AsyncStorage
+{
+  isAuthenticated: boolean;
+  isVisitor: boolean;
+  // ...otros flags de estado
+}
+```
+
+</CodeGroup>
+
+<Note>
+  El `authStore` usa `partialize` para seleccionar que datos se persisten y un `createHybridStorage`
+  personalizado que enruta automaticamente los datos sensibles a `SecureStore` y el resto a
+  `AsyncStorage`.
+</Note>
+
+### Detalle: chatStore (Middlewares)
+
+```typescript
+create<ChatStore>()(
+  devtools(                    // Herramientas de desarrollo
+    persist(                   // Persistencia en AsyncStorage
+      (set, get) => ({ ... }),
+      {
+        name: 'chat-storage',
+        partialize: (state) => ({
+          streamToken,
+          streamUserId,
+          tokenExpiry,
+          currentUser,
+          chatAccessStatus,
+        }),
+      }
+    ),
+    { name: 'ChatStore' }
+  )
+);
+```
+
+## TanStack React Query
+
+La configuracion del `QueryClient` se define en `src/shared/constants/queryClient.ts`:
+
+| Parametro              | Valor                    | Descripcion                                           |
+| ---------------------- | ------------------------ | ----------------------------------------------------- |
+| `staleTime`            | 5 minutos (300,000ms)    | Tiempo antes de que los datos se consideren obsoletos |
+| `gcTime`               | 30 minutos (1,800,000ms) | Tiempo que los datos inactivos permanecen en cache    |
+| `retry`                | 1                        | Numero de reintentos ante fallos                      |
+| `refetchOnWindowFocus` | `false`                  | No refrescar al volver a la app                       |
+
+<Warning>
+  El `queryClient` se exporta desde `app/_layout.tsx` y se inicializa una sola vez. El servicio
+  `queryInvalidationService` se conecta al cliente para permitir invalidaciones de cache desde
+  cualquier parte de la app.
+</Warning>
+
+## React Contexts
+
+<CardGroup cols={2}>
+  <Card title="BottomSheetContext" icon="rectangle-vertical-history">
+    **Ubicacion:** `src/shared/contexts/BottomSheetContext.tsx`
+
+    Gestiona bottom sheets globales usando `@gorhom/bottom-sheet`. Provee:
+    - `showBottomSheet(config)` - Mostrar un bottom sheet
+    - `hideBottomSheet()` - Ocultar el bottom sheet activo
+    - `hideAllBottomSheets()` - Ocultar todos los bottom sheets
+
+    Envuelve toda la aplicacion desde el Root Layout.
+
+  </Card>
+  <Card title="ScrollContext" icon="arrow-down">
+    **Ubicacion:** `src/shared/contexts/ScrollContext.tsx`
+
+    Tracking de scroll offset y viewport height. Permite a componentes hijos reaccionar a la posicion de scroll del contenedor padre.
+
+  </Card>
+</CardGroup>
+
+## Diagrama de Flujo de Estado
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    UI Components                         │
+├──────────────┬──────────────────┬───────────────────────┤
+│   Zustand    │  React Query     │   React Context       │
+│   Stores     │  (Server State)  │   (UI State)          │
+├──────────────┼──────────────────┼───────────────────────┤
+│ appStore     │  queries {       │  BottomSheetContext    │
+│ authStore    │    staleTime: 5m │  ScrollContext         │
+│ chatStore    │    gcTime: 30m   │                       │
+│ propertyStore│    retry: 1      │                       │
+│ onboarding   │  }               │                       │
+│ keyboard     │                  │                       │
+│ deepLinks    │                  │                       │
+├──────────────┼──────────────────┼───────────────────────┤
+│ AsyncStorage │  In-Memory Cache │  React Tree           │
+│ SecureStore  │                  │                       │
+└──────────────┴──────────────────┴───────────────────────┘
+```
+
+## Middlewares de Zustand Utilizados
+
+| Middleware          | Stores que lo usan                  | Funcion                                                |
+| ------------------- | ----------------------------------- | ------------------------------------------------------ |
+| `persist`           | authStore, chatStore, keyboardStore | Persiste estado seleccionado entre sesiones            |
+| `devtools`          | chatStore                           | Integracion con React Native Debugger / Redux DevTools |
+| `createJSONStorage` | authStore, chatStore, keyboardStore | Adaptador de almacenamiento para `persist`             |
+
+<Note>
+  El `onboardingStore` implementa persistencia manual con AsyncStorage directamente (sin el
+  middleware `persist`), lo que le da mayor control sobre el formato de almacenamiento.
+</Note>

@@ -1,0 +1,199 @@
+---
+title: 'Autenticacion'
+description: 'Flujo de autenticacion JWT y gestion de tokens'
+---
+
+# Autenticacion
+
+La app implementa un sistema de **autenticacion custom basado en JWT**, sin depender de servicios externos como Clerk, Auth0 o Supabase. Toda la logica se concentra en el modulo `src/modules/auth/` y el cliente API en `src/shared/services/api/`.
+
+## Flujo de Autenticacion
+
+<Tabs>
+  <Tab title="Login">
+    1. El usuario ingresa email y contrasena 2. Se llama a `authApi.login(email, password)` 3. La
+    API devuelve: `token`, `refreshToken`, `tokenExpiresIn`, datos de usuario 4. Se calcula
+    `tokenExpiry = Date.now() + tokenExpiresIn * 1000` 5. Se almacenan tokens en **SecureStore** y
+    datos de usuario en **SecureStore** 6. Se limpia el cache de tokens del API client
+    (`clearTokenCache`) 7. Se actualiza el `authStore` con `isAuthenticated: true` 8. Se identifica
+    al usuario en PostHog analytics 9. Se inicializa la conexion a Stream Chat (no bloqueante) 10.
+    Se invalidan todas las queries de React Query
+  </Tab>
+  <Tab title="Registro">
+    1. Si el usuario esta en modo visitor, se hace logout del modo guest primero 2. Se llama a
+    `authApi.register(email, password)` 3. El flujo continua identico al login (pasos 3-10)
+  </Tab>
+  <Tab title="Modo Visitor/Guest">
+    1. Se limpia cualquier dato de auth previo en SecureStore 2. Se crea un usuario local con `id:
+    'guest'` 3. Se establece `isAuthenticated: false`, `isVisitor: true` 4. Se activa
+    `setGuestMode(true)` en el API client (omite tokens en requests) 5. Las funcionalidades estan
+    limitadas (tabs bloqueados, sin chat, etc.)
+  </Tab>
+</Tabs>
+
+## Gestion de Tokens
+
+### Token Refresh Automatico
+
+Cuando el access token expira, el sistema gestiona la renovacion automaticamente:
+
+```
+Request fallido (UNAUTHENTICATED)
+        │
+        ▼
+┌─ Es el primer reintento? ─┐
+│                            │
+│ SI                    NO ──┼──► Encolar request en requestQueue
+│                            │    (espera a que termine el refresh)
+▼                            │
+isRefreshing = true          │
+        │                    │
+        ▼                    │
+refreshToken()               │
+        │                    │
+   ┌────┴────┐               │
+   │         │               │
+Exito     Fallo              │
+   │         │               │
+   ▼         ▼               │
+Reintentar  Limpiar auth     │
+request +   + logout         │
+procesar    forzado          │
+cola                         │
+```
+
+<Note>
+  Las requests que llegan durante el proceso de refresh se encolan en `requestQueue`. Una vez
+  completado el refresh exitosamente, todas las requests encoladas se reintentan con el nuevo token.
+</Note>
+
+### Token Caching
+
+El API client implementa un cache de token en memoria para evitar lecturas frecuentes a SecureStore:
+
+| Parametro                            | Valor                                      |
+| ------------------------------------ | ------------------------------------------ |
+| Duracion del cache                   | 5 segundos                                 |
+| Reintentos de lectura de SecureStore | 3 intentos                                 |
+| Delay entre reintentos               | 500ms (incremental: 500ms, 1000ms, 1500ms) |
+
+## API Client
+
+El cliente HTTP (`src/shared/services/api/client.ts`) esta construido sobre **Axios** con la siguiente configuracion:
+
+| Configuracion             | Valor                   |
+| ------------------------- | ----------------------- |
+| Timeout                   | 30 segundos             |
+| Content-Type              | `application/json`      |
+| Reintentos de SecureStore | 3 intentos, 500ms delay |
+| Token cache               | 5 segundos              |
+
+### Interceptors
+
+<CardGroup cols={2}>
+  <Card title="Request Interceptor" icon="arrow-right">
+    - Agrega parametro `lang` a la URL segun idioma actual
+    - Cambia `baseURL` a chat backend si `useChatBackend: true`
+    - Obtiene token de auth y agrega header `Authorization: Bearer <token>`
+    - Respeta `requiresAuth: false` en headers para requests publicos
+  </Card>
+  <Card title="Response Interceptor" icon="arrow-left">
+    - Verifica el campo `code` en la respuesta de la API
+    - Si `code !== SUCCESS`, lanza `ApiError`
+    - Si `code === UNAUTHENTICATED`, inicia flujo de token refresh
+    - Para errores de red (sin response), clasifica el tipo de fallo
+  </Card>
+</CardGroup>
+
+## Manejo de Errores
+
+El error handler (`src/shared/services/api/errorHandler.ts`) clasifica los errores de red en categorias:
+
+| Tipo de Fallo         | Deteccion                                                    | Ejemplo                          |
+| --------------------- | ------------------------------------------------------------ | -------------------------------- |
+| `timeout`             | `ECONNABORTED` o mensaje contiene "timeout"                  | Request excede 30s               |
+| `dns_or_connectivity` | Mensaje contiene "network error", "failed to connect", "dns" | Sin conexion a internet          |
+| `tls_or_certificate`  | Mensaje contiene "ssl", "tls", "certificate", "handshake"    | Certificado invalido             |
+| `cancelled`           | `ERR_CANCELED` o mensaje contiene "canceled"                 | Request cancelado por el usuario |
+| `unknown`             | Ninguno de los anteriores                                    | Error no clasificado             |
+
+Todos los errores se reportan a **Sentry** con contexto adicional (endpoint, metodo, plataforma, diagnosticos de red).
+
+### Codigos de API
+
+El sistema maneja los siguientes codigos de respuesta:
+
+| Codigo             | Mensaje por defecto      |
+| ------------------ | ------------------------ |
+| `SUCCESS`          | Processed successfully   |
+| `VALIDATION_ERROR` | Invalid request data     |
+| `UNAUTHENTICATED`  | Authentication required  |
+| `FORBIDDEN`        | Insufficient permissions |
+| `NOT_FOUND`        | Resource not found       |
+| `SERVER_ERROR`     | Internal server error    |
+
+## Almacenamiento Seguro
+
+<Tabs>
+  <Tab title="SecureStore (expo-secure-store)">
+    Datos cifrados en el dispositivo:
+    - Access token
+    - Refresh token
+    - Token expiry
+    - Datos de usuario (id, email, displayName, phone)
+
+    Se accede a traves del wrapper `secureStorage` en `src/shared/services/storage/secureStorage.ts`.
+
+  </Tab>
+  <Tab title="AsyncStorage">
+    Datos no sensibles:
+    - Flags de estado de autenticacion
+    - Estado de onboarding
+    - Altura del teclado
+    - Datos de cache del chat (token de Stream, userId)
+  </Tab>
+</Tabs>
+
+<Warning>
+  Nunca almacenar tokens reales, URLs de API, ni credenciales en el codigo fuente ni en archivos de
+  configuracion que se commiteen al repositorio. Los valores sensibles se gestionan mediante
+  variables de entorno.
+</Warning>
+
+## Pantallas de Auth
+
+Las pantallas de autenticacion se encuentran en el grupo `(auth)`:
+
+| Ruta               | Descripcion                                 |
+| ------------------ | ------------------------------------------- |
+| `/login`           | Inicio de sesion con email y contrasena     |
+| `/reset-password`  | Solicitud de restablecimiento de contrasena |
+| `/resend-password` | Reenvio de contrasena                       |
+
+## Inicializacion de Auth
+
+Al iniciar la app, `authStore.initializeAuth()` ejecuta el siguiente flujo:
+
+1. Espera a que el store se hidrate desde almacenamiento persistido
+2. Verifica si hay tokens en el estado hidratado
+3. Si hay tokens pero estan expirados, intenta refresh automatico
+4. Si no hay tokens en estado, busca directamente en SecureStore (fallback)
+5. Si encuentra tokens validos, marca `isAuthenticated: true` e identifica al usuario en analytics
+6. Si no encuentra tokens, establece estado no autenticado
+
+<Note>
+  La inicializacion tiene un timeout de 15 segundos. Si se excede, se fuerza el estado a no
+  autenticado para evitar que la app quede bloqueada.
+</Note>
+
+## Logout
+
+El proceso de logout realiza las siguientes operaciones:
+
+1. Llama a `authApi.logout()` para invalidar tokens en el servidor
+2. Limpia la cola de requests pendientes (`clearRequestQueue`)
+3. Reset de analytics (`analytics.reset()`)
+4. Limpia el estado del store
+5. Cancela y limpia todas las queries de React Query
+6. Desconecta y resetea el chat de Stream
+7. Limpia todos los datos de auth en SecureStore

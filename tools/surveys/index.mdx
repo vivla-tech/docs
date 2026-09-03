@@ -1,0 +1,698 @@
+---
+title: "Encuestas"
+description: "Sistema de encuestas dinámicas con builder visual, versionado, rewards y action plans"
+---
+
+# Encuestas (Surveys)
+
+El módulo de Encuestas es un sistema centralizado para gestionar encuestas dinámicas en Vivla. Permite crear encuestas con un builder visual, versionarlas, recopilar respuestas desde la app mobile, y analizar resultados — todo sin necesidad de cambios en código.
+
+## Arquitectura
+
+El backend es un módulo NestJS independiente (`SurveysModule`) registrado en `AppModule`. El frontend vive bajo la navegación del chat como parte del hub de customer happiness.
+
+```
+┌──────────────┐     ┌──────────────────┐     ┌──────────────┐
+│  Panel Web   │────▶│  SurveysModule   │────▶│  Supabase    │
+│  (Admin)     │     │  (NestJS)        │     │  (PostgreSQL)│
+└──────────────┘     └──────────────────┘     └──────────────┘
+                            │
+┌──────────────┐            │            ┌──────────────┐
+│ vivla-mobile │────────────┘            │  Firestore   │
+│ (responses)  │     surveys/mobile/*    │  (legacy)    │
+└──────────────┘                         └──────────────┘
+                            │
+┌──────────────┐            │
+│  Windmill    │────────────┘
+│  (cron 1h)   │  POST /chat/sync/firebase-legacy-responses
+└──────────────┘
+```
+
+## Tipos de encuesta
+
+| Slug | Nombre | Scope | Estado |
+|------|--------|-------|--------|
+| `home-review` | Casa (NPS Casa) | property | Activo en nuevo sistema + legacy. v1 "NPS Casa - Q1 2026" publicada. |
+| `stay-review` | Estancia y Experiencia | booking | Legacy (vivla-backend) — migración posterior |
+| `arrival-review` | Llegada | booking | Legacy (vivla-backend) — migración posterior |
+| `onboarding-review` | Onboarding | user | Legacy (Firebase) |
+| `financial-review` | Financiero | user | Legacy importado. 42 respuestas CSV en migration 059, escala 1-10. |
+| `book-review` | Experiencia de Reserva | user | Legacy (Firebase). Tipo sembrado en migration 146. Respuestas traídas con el backfill one-shot `backfill:nps-booking-legacy` (155 docs de proceso de reserva), no con el cron horario. |
+
+## Motor de encuestas
+
+### Tipos de pregunta
+
+| Tipo | Descripción | Display styles |
+|------|-------------|----------------|
+| `star_rating` | Rating numérico (estrellas) | — |
+| `single_choice` | Selección única | `list`, `chips` |
+| `multi_choice` | Selección múltiple | `list`, `chips` |
+| `open_text` | Texto libre | — |
+| `swipe_boolean` | Swipe yes/no (tinder-style) | — |
+
+### Lógica condicional
+
+Cada pregunta puede tener `conditionals: ConditionalRule[]` — un array de reglas condicionales. Cada regla tiene:
+
+- **operator**: `lt`, `lte`, `gt`, `gte`, `eq`, `neq`, `in`
+- **value**: valor contra el que se compara la respuesta
+- **display**: `inline` (default) o `next_screen` — cómo la app renderiza las preguntas hijas
+- **then**: `Question[]` — array de preguntas hijas mostradas cuando la condición se cumple
+
+Máximo 1 nivel de anidación (las preguntas hijas no pueden tener sus propios conditionals).
+
+### i18n
+
+Cada texto es un `I18nString = Record<string, string>` (ej: `{"es": "Texto", "en": "Text"}`). La API acepta `?lang=es` y devuelve strings resueltos. La app mobile recibe texto listo para mostrar.
+
+### Versionado
+
+- `survey_types`: agrupa versiones (ej: slug `home-review`)
+- `surveys`: cada row es una versión con definición completa en JSONB
+- Flujo: `draft` → `active` → `archived`
+- Partial unique index: máximo 1 versión activa por tipo
+- Cambio de versión invalida respuestas parciales
+
+## Backend
+
+### Estructura de módulo
+
+```
+apps/backend/src/surveys/
+  surveys.module.ts
+  surveys.controller.ts             # CRUD survey types + surveys (admin)
+  surveys.service.ts                # CRUD + publishing + i18n resolution
+  mobile/
+    mobile.controller.ts            # GET definition, POST responses, complete, resume
+    dto/mobile-submit-response.dto.ts
+  responses/
+    responses.service.ts            # Upsert parcial, complete con inmutabilidad
+  results/
+    results.controller.ts           # Resultados agregados + CSV export (enriched)
+    results.service.ts              # Aggregation por tipo de pregunta + CSV con nombres resueltos
+    legacy-results.controller.ts    # Resultados legacy desde Firestore
+    legacy-results.service.ts       # Lee de Firestore (nps-home-responses, etc.)
+    legacy-responses-query.controller.ts  # Per-user/per-property tables from survey_legacy_responses
+    legacy-responses-query.service.ts     # Typed queries: stay, arrival, onboarding, financial, home-review + PG score extraction
+  scores/
+    score-summary.service.ts        # Pre-computed scores: recompute, query, user matrix (multi-source)
+    score-summary.controller.ts     # GET /survey-scores, /user-matrix, /summary, /analytics
+    home-review-results.service.ts  # Custom home-review results with consensus
+  insights/
+    survey-insights.controller.ts   # POST /surveys/:surveyId/insights (IA, admin)
+    survey-insights.service.ts      # Genera + cachea insights vía AiService, rate limit diario
+    prompts/section-prompts.ts      # System prompt CX + prompt por sección
+    insights.schema.ts              # Schema estructurado { main, questions }
+  rewards/
+    rewards.controller.ts           # Rewards mobile endpoints
+    rewards.service.ts              # Auto-award on complete, niveles, ciclo reset
+  action-plans/
+    action-plans.controller.ts      # CRUD + generate
+    action-plans.service.ts         # Generate desde consenso, approve/send
+    consensus.service.ts            # Configurable thresholds from result_config
+  public/
+    public-results.controller.ts    # Public endpoints for home-excellence app
+  dto/                              # DTOs de validación
+  entities/                         # Entities (survey-type, survey, response)
+  types/
+    survey.types.ts                 # Contratos TypeScript completos
+
+# Sync module (chat/sync/) — extended for surveys
+  sync.controller.ts                # POST /chat/sync/firebase-legacy-responses (+ users, properties, deals, bookings)
+  sync.service.ts                   # triggerSyncFirebaseLegacyResponses() — spawns CLI as child process
+
+# CLI scripts
+  cli/
+    sync-firebase-legacy-responses.ts  # Individual response migration (--dry-run, --report-only)
+    sync-firebase-scores.ts            # Aggregated scores migration
+    backfill-nps-booking-legacy.ts     # One-shot: nps-booking rounds NO cubiertos por el sync regular
+    lib/
+      map-nps-booking-legacy-doc.ts    # Mapeo puro (testeado) doc nps-booking → fila legacy
+
+# Migrations (schema + seeds)
+  database/migrations/
+    050_create_surveys_tables.sql       # Core schema + seed 3 survey types
+    054_seed_home_review.sql            # Home Review v1 (active) + v2 (draft) with cleanup
+    058_create_survey_legacy_responses.sql  # Legacy responses table + onboarding-review type
+    059_seed_financial_review.sql       # Financial-review type + 42 CSV legacy responses
+    146_seed_book_review.sql            # Book-review type (Experiencia de Reserva)
+```
+
+### Backfill one-shot de `nps-booking` (book-review + stay-review)
+
+El cron horario (`sync-firebase-legacy-responses.ts` → `syncNpsBooking`) solo mapea
+los rounds `onboarding`, `stay` y `home`; el resto se descarta en silencio. El
+comando **standalone** `pnpm backfill:nps-booking-legacy` trae los rounds restantes
+una sola vez (no toca el sync regular ni el cron):
+
+- `exchange` / `rent` → **stay-review** (filas sueltas, round reescrito a `stay`, el
+  round original preservado en `response_data`).
+- `open1` / `open2` / `round1` / `round2` / `1` / `2` / `open` / `booking` →
+  **book-review** (NPS del proceso de reserva).
+- `--` y rounds desconocidos → se saltan (loggeados).
+
+Idempotente por `(source_collection, source_doc_id)` con `source_doc_id` = id crudo
+de Firestore (sin prefijo `paired::`). Flags: `--dry-run`, `--report-only`,
+`--mode=book-review|stay-review|all`, `--rounds=csv`. La lógica de mapeo vive en una
+función pura testeable (`cli/lib/map-nps-booking-legacy-doc.ts`).
+
+### Identificadores de propiedad en las rutas mobile (`homeId`)
+
+Las rutas mobile identifican la propiedad por su `hid` (`properties.hid`, el `homes.old_id` de vivla-api / Firebase): query param `property=` en `GET /surveys/:slug`, y `scope.id` en los `POST` de responses/complete/resume. Desde VIV — migración `241` — aceptan además un identificador **alternativo** `homeId`, el serial `homes.id` del panel (vivla-api) guardado en la nueva columna `properties.panel_home_id`:
+
+- `GET /surveys/:slug` acepta el query param `homeId=`.
+- Los `POST` de responses/complete/resume aceptan `scope.homeId` (entero) en el body.
+
+`homeId` resuelve la propiedad vía `properties.panel_home_id` (en vez de `hid`) a través de `SurveysService.resolvePanelHomeId`. Es **mutuamente excluyente** con `property`/`scopeId`/`scope.id`: mandar los dos a la vez devuelve `400` (`Provide either homeId or property/scopeId, not both`). Enviar un serial dentro de `property=` sigue fallando (no hay sniffing: se busca como `hid` y no matchea).
+
+La columna se crea vacía en la migración `241` y la rellena un CLI aparte (`pnpm backfill:panel-home-id`, leyendo `homes.id`/`old_id` del panel), no la migración. La respuesta de estado (`survey-status`) añade un campo `homeId` por scope junto a `scope_id` — aditivo, para que la app pueda migrar de `hid` cuando quiera; `scope_id` sigue siendo el UUID de Tools y `results_url` sigue keyed por `hid`.
+
+### Permisos
+
+Los endpoints admin usan `RequireTool('tool-chat', 'editor')`. Los endpoints mobile usan `MobileAuthGuard` (POST) o son públicos (GET).
+
+### Respondientes externos (sin cuenta Vivla)
+
+Una semana de alquiler/intercambio la puede ocupar un huésped **sin cuenta Vivla**. Para que pueda responder una encuesta de reserva, el módulo `surveys/external/` expone dos endpoints públicos protegidos por `ExternalSurveyTokenGuard` (VIV-2476 D3):
+
+| Endpoint | Descripción |
+|----------|-------------|
+| `POST /surveys/external/:slug/responses` | Crea o actualiza una respuesta parcial de un huésped externo |
+| `POST /surveys/external/:slug/responses/complete` | Completa la respuesta |
+
+A diferencia de `MobileAuthGuard` (que confía en el `userId` que manda el cliente), el guard **valida el token contra `survey_tokens`**: debe existir, no estar expirado, **no tener `user_id`** (un token de usuario autenticado no puede reutilizarse por esta vía) y su `survey_type_slug`/`scope_id` deben coincidir con la ruta y el body. El `scopeId` que usa el handler sale siempre del token verificado, nunca del body.
+
+La migración `237` hace nullable `survey_tokens.user_id` (con `guest_name` prellenado desde la reserva) y `survey_responses.respondent_id`, añadiendo `respondent_name`/`respondent_email` de texto libre. Reglas de producto: **una sola respuesta externa por encuesta + reserva** (índice parcial `WHERE respondent_id IS NULL`) y las respuestas externas **cuentan en NPS/analítica sin marca especial** (se distinguen por `respondent_id IS NULL`). Generar un token sin `user_id` solo se permite cuando `scopeType = booking`.
+
+## Frontend
+
+### Rutas
+
+```
+apps/frontend/app/routes/app.chat/
+  surveys.tsx                       # Layout: SurveysSubNav + <Outlet />
+  surveys.index.tsx                 # Actividad (response log, quick actions)
+  surveys.admin.tsx                 # Layout: <Outlet />
+  surveys.admin.index.tsx           # Lista tipos por scope
+  surveys.admin.$surveyTypeId.edit.$surveyId.tsx  # Builder
+  surveys.results.tsx               # Resultados + legacy viewer
+  surveys.action-plans.tsx          # Action plans list + detail
+  surveys.rewards.tsx               # Rewards (bar chart + nivel 5 config)
+```
+
+### Componentes
+
+```
+apps/frontend/app/components/chat/surveys/
+  SurveysActivityPage.tsx           # Response log, inline link builder, filtros, CSV export enriquecido
+  SurveysSubNav.tsx                 # Sub-nav de 5 items
+  SurveysAdminPage.tsx              # Tipos por scope en 2 columnas
+  SurveysRewardsPage.tsx            # Gráfico de barras por nivel
+  DeepLinkGeneratorModal.tsx        # Generador inline de deep links
+  NpsScoreBadge.tsx                 # Badge de puntuación NPS (escala cromática 11 colores)
+  builder/
+    SurveyBuilder.tsx               # Builder completo con i18n tabs
+    StepEditor.tsx                  # Editor de steps
+    QuestionEditor.tsx              # 5 tipos, display_style, allow_audio
+    ConditionalEditor.tsx           # Conditionals múltiples con hijas
+    SurveyPreview.tsx               # Preview en vivo
+  results/
+    ResultsListPage.tsx             # URL-navigable tabs + sub-tabs, version selector,
+                                    # typed tables (user/property columns with avatars),
+                                    # expandable property rows, CSV export (green button),
+                                    # LegacyDashboardContent, LegacyResponsesSubTab,
+                                    # UserStatusTab (multi-source, date-filtered)
+    SurveyResultsPage.tsx           # Averages, distributions, CSV export (backend enriched)
+    WeeklyReportView.tsx            # Reporte semanal NPS (tab Reportes) — week-navigated
+    WeeklyListView.tsx              # Lista semanal: fila por respuesta + export XLSX
+    WeekNavigator.tsx               # Stepper ‹/› de semana (lun→dom)
+    lib/surveys/week.ts             # getWeekBounds / formatWeekRange / shiftWeek (UTC, espejo del backend)
+  action-plans/
+    ActionPlansPage.tsx             # Lista + detalle + approve/send
+```
+
+### API Client
+
+```
+apps/frontend/app/lib/surveys/surveys-api.ts   # Métodos API
+apps/frontend/app/types/surveys.ts              # Tipos TypeScript frontend
+```
+
+## Gamificación (Rewards)
+
+- 1 reward point por encuesta completada (auto-award al completar)
+- 5 niveles de rewards; al nivel 5: experiencia Vivla sorpresa
+- Ciclo se reinicia tras completar nivel 5
+- Toggle de recomendación + identificación de súper promotores (3+ recomendaciones)
+
+## Survey Scores (Métricas pre-computadas)
+
+El sistema mantiene una tabla `survey_score_summaries` con métricas headline pre-computadas por propiedad y usuario. Esto evita recalcular en cada request y permite mostrar scores en cards, tablas y dashboards.
+
+### Métricas por tipo de encuesta
+
+| Survey Type | Métrica | Fórmula | Escala |
+|-------------|---------|---------|--------|
+| `home-review` | `avg_space_rating` | Promedio ratings de 6 espacios | 1-5 |
+| `stay-review` | `avg_nps_score` | Promedio NPS (stay + experience) | 0-10 |
+| `arrival-review` | `approval_rate` | Aprobados / total × 100 | 0-100% (display: /10) |
+| `onboarding-review` | `avg_score` | Promedio directo NPS | 0-10 |
+| `financial-review` | `avg_score` | Promedio directo NPS | 0-10 |
+
+### Fuentes de datos
+
+- **PostgreSQL** (`source: 'postgresql'`): se recomputa automáticamente al completar una encuesta
+- **Firebase** (`source: 'firebase'`): se sincroniza via CLI/Windmill (`pnpm sync:firebase-scores`)
+- **Legacy individual** (`survey_legacy_responses`): respuestas individuales per-user migradas via `pnpm sync:firebase-legacy-responses`. Sync automático cada hora via Windmill (`POST /chat/sync/firebase-legacy-responses`)
+
+### Endpoints
+
+| Endpoint | Auth | Descripción |
+|----------|------|-------------|
+| `GET /survey-scores` | Admin | Scores filtrados por propertyId, userId, surveyTypeSlug |
+| `GET /survey-scores/user-matrix` | Admin | Tabla de usuarios × tipos de encuesta (multi-source, date-filterable, property drill-down con owner/guest) |
+| `GET /survey-scores/analytics` | Admin | Trend data por mes y por propiedad para dashboards |
+| `GET /survey-scores/summary` | Admin | Resumen agregado por tipo de encuesta (con breakdown por propiedad) |
+| `GET /surveys/public/scores` | Public | Headline scores para una propiedad (por HID) |
+| `GET /surveys/public/home-review-results` | Public | Resultados custom del home-review: participación, top rated, oportunidades, action plan |
+
+### Thresholds configurables
+
+Cada `survey_type` tiene un campo `result_config` (JSONB) con umbrales configurables:
+
+```json
+{
+  "negative_threshold": 4,
+  "participation_threshold": 0.75,
+  "consensus_threshold": 0.75,
+  "min_owners_for_plan": 4
+}
+```
+
+### Fracciones de propiedad
+
+La tabla `user_properties` almacena `fractions` (número de fracciones del deal) e `is_vivla_property` (boolean) para cada relación usuario-propiedad. Estos datos se populan automáticamente durante la sincronización de deals desde Firebase.
+
+### Filtrado de owners internos
+
+En los dashboards de resultados (by-property y detalle de propiedad), los owners con emails `@vivla.com` se excluyen del cálculo de participación y scores — se consideran cuentas internas de prueba. Las fracciones restantes se asignan a un placeholder "Vivla Property".
+
+Excepción: `carlos@vivla.com` está en el allowlist (`VIVLA_EMAIL_ALLOWLIST` en `get-property-owners.ts`) y se trata como owner real.
+
+## Survey Insights (IA)
+
+El dashboard de resultados del **Home Review** puede generar insights redactados por IA para cada sección, apoyados en `AiService` (ver [Integración AI](../integrations/ai)). Los insights se generan bajo demanda y se cachean en la tabla `survey_insights`.
+
+### Endpoint
+
+| Endpoint | Auth | Descripción |
+|----------|------|-------------|
+| `POST /surveys/:surveyId/insights` | Admin (`tool-chat` viewer) | Genera (o sirve de caché) el insight de una sección. Devuelve `503` si `AiService` no está configurado. |
+
+Body (`GetInsightDto`):
+
+- **section**: `summary` \| `percepcion` \| `espacios` \| `sensacion` \| `esenciales` (secciones del dashboard Home Review)
+- **scopeType**: `global` (default) \| `property` \| `user`
+- **scopeId**: id de propiedad o usuario cuando el scope no es global
+- **filters**: `{ dateFrom?, dateTo? }` — recorta las respuestas consideradas
+
+La respuesta tiene la forma `{ section, main, questions, generatedAt, model }`, donde `main` es el resumen accionable de la sección y `questions` es un insight por `questionId`.
+
+### Caché y rate limit
+
+- **Caché por conteo de respuestas**: cada fila se cachea por `(survey_id, scope_type, scope_id, section)` junto al `total_responses` con el que se generó. Mientras el número de respuestas completadas no cambie, se sirve la caché; cuando llegan nuevas respuestas se regenera.
+- **Rate limit**: máximo **3 generaciones por día** por combinación (survey, scope, section). Si se agota, se sirve la última versión cacheada (aunque esté algo desfasada); solo se salta el límite si aún no existe ninguna caché.
+- **Dedup thundering-herd**: las peticiones concurrentes con la misma clave comparten la generación en vuelo.
+- **Regeneración**: al guardarse una nueva respuesta, el `summary` se regenera en fire-and-forget (`regenerateMainInsights`).
+
+<Note>
+  El scope global usa el centinela `__global__` como `scope_id` (PostgreSQL `NULL` rompe el índice `UNIQUE`). Cada fila guarda `model`, `input_tokens` y `output_tokens` para trazabilidad de coste.
+</Note>
+
+## Borradores de ticket (IA)
+
+En `/app/surveys/response/:id` (superficie interna de CX), la IA descompone el comentario libre de una respuesta en N problemáticas y muestra cards de borrador de ticket — cada una enlaza a un ticket abierto ya existente de esa casa o abre el `TicketCreationModal` pre-rellenado. **Alcance v1: `stay-review` y `arrival-review`** (home-review es la superficie de Action Plans v2, fuera de esta feature).
+
+<Note>
+  Reglas de producto innegociables: la IA **nunca** auto-crea tickets (siempre gate humano en el modal) y **nunca** propone costes, importes, presupuestos, plazos ni compromisos de reparación — la lección de la reversión de "Action Plans v2" (migration `078_clear_action_plans.sql`). Nada de esto se muestra al propietario; es 100% interno de CX.
+</Note>
+
+### Disparo
+
+- **Automático**: cuando la respuesta tiene comentario y `lowestNormalized < 8` (el mismo corte de `computeSurveyScoring` que dispara la alerta CX de Slack, F023) — el frontend genera solo al abrir la página (`autoAnalyze: true` en la respuesta del GET).
+- **Manual**: botón "Analizar comentario" para el resto de respuestas.
+- En ambos casos, la caché evita re-generar si el comentario no cambió.
+
+### Arquitectura de caché
+
+Dos capas con vidas distintas:
+
+- **Se cachea** la descomposición del comentario (cara y estable — la respuesta es inmutable). Clave: `response_id` (UNIQUE) + `comment_hash` (sha256 del comentario extraído) + `prompt_version` (constante en código). **Sin TTL, sin contador de respuestas** — a diferencia de Survey Insights, que invalida por `total_responses`.
+- **NO se cachea** el estado del match: en la generación se guarda el snapshot de tickets abiertos que se le enseñó al LLM y el índice que casó; en **cada lectura** se re-verifica contra la DB que ese ticket sigue abierto (`chat_tickets.status` en `OPEN_STATUSES`) y no está `invalid`. Si se cerró, la card vuelve a "nuevo".
+- Botón "Reanalizar" (`force: true`) salta la caché y cuenta contra el rate limit (3 generaciones/día por respuesta — igual que Survey Insights). Si está limitado y hay fila cacheada (aunque el comentario haya cambiado desde entonces), se sirve con `stale: true`.
+
+### Match sin alucinaciones
+
+Al LLM se le pasa la lista de tickets abiertos de la casa **numerada** (máx. 25, más recientes primero) y devuelve `matchedTicketIndex: number | null` — **nunca UUIDs**. El backend traduce índice → id contra el snapshot que él mismo construyó; un índice fuera de rango se descarta, nunca se clampea.
+
+### Descartar borradores
+
+Acción secundaria discreta por card ("Descartar") para el borrador que CX mira y decide no convertir en ticket. `discarded: boolean` vive dentro de `drafts_data.issues[i]` en el mismo JSONB que `createdTicketId` — no hay columna ni migración nueva. Se persiste con `POST .../:index/discard { discarded }`, el endpoint hermano de `.../link`; **reversible** llamándolo de nuevo con `discarded: false` ("Deshacer").
+
+En el frontend, un borrador descartado sale de la lista principal y se cuenta en un pie plegable ("N descartados") con "Deshacer" por fila; si se descartan todos, la lista principal muestra un mensaje en vez de quedar vacía. El botón "Descartar" se oculta una vez la card ya tiene un ticket real (`createdTicket` o un vínculo pendiente de reintento) — descartar algo que ya es un ticket no tiene sentido.
+
+<Warning>
+  "Reanalizar" regenera `drafts_data` **desde cero** (no hace merge) — se pierden tanto los descartes como los `createdTicketId` de la tanda anterior (el ticket en sí no se toca, solo el vínculo con esta card). El frontend lo confirma con un diálogo antes de disparar `force: true`, en vez de resucitar en silencio un borrador ya descartado como si fuera nuevo.
+</Warning>
+
+### Traza ticket ← encuesta
+
+Además del vínculo borrador→ticket en `drafts_data` (el que hace que la card no vuelva a ofrecer "Crear ticket"), el ticket creado guarda su propia procedencia en `chat_tickets.metadata`:
+
+```json
+{
+  "source": "survey_response",
+  "surveyResponseId": "...",
+  "surveyTypeSlug": "stay-review",
+  "draftIndex": 0
+}
+```
+
+Viaja `card → CopilotTicketDraft.metadata (opcional, aditivo) → TicketCreationModal → POST /chat/tickets`. Los otros tres consumidores del modal (`NewTicketButton`, `ChannelTickets`, `Conversation`/Fabián) nunca rellenan este campo, así que su `metadata` sigue como antes. Objetivo: poder consultar desde el lado del ticket qué tickets nacieron de una encuesta, de qué casa y de qué respuesta — y que un agente (Alma/Concierge) pueda en el futuro responder "de tu comentario salieron estos tickets".
+
+### Reparto LLM / determinista
+
+| Campo | Origen |
+|---|---|
+| `title`, `description`, `quote`, `ticketKind` (`incident` \| `improvement_proposal`) | LLM |
+| `category` | LLM propone → validado contra `CATEGORY_OPTIONS`; fuera de catálogo ⇒ `null` |
+| `priority` | determinista: `mapUrgencyToPriority(urgency)` |
+| `resolutionTeam` | determinista: `mapCategoryToResolutionTeam(category)` |
+| `propertyId`, `destination`, `bookingId`, `clientUserId` | deterministas, derivados de la respuesta/casa |
+| costes, importes, plazos | **nunca** — prohibido en el prompt |
+
+### Endpoints
+
+| Endpoint | Auth | Descripción |
+|---|---|---|
+| `GET /survey-responses/:responseId/ticket-drafts` | `tool-chat` viewer | Solo lee caché — nunca gasta tokens |
+| `POST /survey-responses/:responseId/ticket-drafts` | `tool-chat` viewer | Genera (o reutiliza caché). `{ force? }`. `503` si la IA no está configurada, `429` si se agotó el rate limit |
+| `POST /survey-responses/:responseId/ticket-drafts/:index/link` | `tool-chat` viewer | Persiste el vínculo borrador→ticket una vez CX crea el ticket desde la card |
+| `POST /survey-responses/:responseId/ticket-drafts/:index/discard` | `tool-chat` viewer | Marca (o desmarca) el borrador como descartado — `{ discarded }`, reversible |
+
+### Frontend
+
+`SurveyTicketDraftsSection` se monta en `SurveyResponseDetailPage` (ambos layouts, `new` y `legacy`) y no renderiza nada cuando no hay comentario o la IA no está configurada (mismo criterio que `AiInsightCard`). El `TicketCreationModal` solo se monta (y pide sus propios `dropdowns`/`property-destinations`) cuando una card realmente abre "Crear ticket" — nunca en la carga de la página —, con `initialDraft` (campos de `CopilotTicketDraft`, incluyendo `ticketKind`) y sin `channelId`/`channelDbId` así el modal no pide su propio borrador a Fabián. Las cards traducen `category`/`resolutionTeam` a etiqueta legible con el mismo catálogo del modal (`useTicketDropdownsQuery`, cacheado por TanStack Query — no dispara una llamada extra).
+
+Si guardar el vínculo borrador→ticket falla tras crear el ticket (`POST .../:index/link`), la sección reintenta un par de veces con backoff corto; si aun así falla, la card muestra el id del ticket ya creado y un botón de reintento manual — nunca "Ticket creado exitosamente" en silencio con el vínculo perdido (ese hueco habría permitido duplicar el ticket en la siguiente visita).
+
+```
+apps/backend/src/surveys/ticket-drafts/
+  survey-ticket-drafts.controller.ts
+  survey-ticket-drafts.service.ts     # generación, caché, rate-limit, re-verificación en vivo
+  ticket-drafts.schema.ts             # schema Zod de salida del LLM
+  prompts/ticket-drafts-prompt.ts     # system prompt + PROMPT_VERSION
+
+apps/frontend/app/components/surveys/ticket-drafts/
+  SurveyTicketDraftsSection.tsx
+  SurveyTicketDraftCard.tsx
+```
+
+### Enlace desde la alerta CX de Slack
+
+La plantilla `...0119` (alerta CX de `survey.completed`, ver [AI · MCP](../integrations/ai)) incluye un enlace `Ver respuesta y crear tickets` a `/app/surveys/response/{{responseId}}` — así CX llega desde Slack directo a las cards ya generadas (migration `178`).
+
+## Mensaje sugerido al propietario (IA)
+
+En la misma página (`/app/surveys/response/:id`), a la derecha de los borradores de ticket, `SurveySuggestedMessageSection` redacta un mensaje de acuse breve para el propietario a partir de su comentario — layout de 2 columnas: encuesta a la izquierda, mensaje sugerido + borradores de ticket en un rail de la derecha (colapsa a 1 columna en móvil, mismo orden).
+
+<Note>
+  Primera superficie del stack CX donde un servicio **postea a un canal de cliente** por iniciativa propia (Fabián solo redacta para que un humano revise-y-envíe; Lola responde dentro de una conversación ya existente). El envío sigue siempre gateado por un humano — ver la doctrina completa en [Chat · Copiloto](../chat/copilot).
+</Note>
+
+### Arquitectura — cerebro vs. fontanería
+
+Decisión explícita para no bloquear el día que un agente autónomo (Alma/Concierge) quiera hacer esto de punta a punta:
+
+- **Cerebro** (razonamiento LLM — redactar el texto): vive en Tools, prompt propio y aislado (`prompts/suggested-message-prompt.ts`), reemplazable sin tocar el resto.
+- **Fontanería** (resolver destinatario, cascada de canal, chat-enabled, postear a Stream con identidad de marca, trazar): vive en Tools porque son queries a su propia DB + Stream, y se expone **también como MCP tools** (`resolve_survey_response_channel`, `send_owner_message` — ver [AI · MCP](../integrations/ai)) para que un agente futuro la reutilice sin reimplementarla. Ambos caminos (REST y MCP) llaman al mismo `SurveySuggestedMessageService` — nunca hay dos implementaciones.
+
+El servicio expone el pipeline *analizar → decidir → redactar → elegir canal → enviar* como métodos públicos independientes (`getMessage`/`generateMessage`/`send`/`resolveRecipientAndChannel`) — nada dentro del servicio llama a `send` por su cuenta.
+
+### Dependencia de orden con los borradores de ticket
+
+El mensaje describe el estado **vivo** de los borradores de ticket de esa respuesta (ya hay gestión en marcha / pendiente de revisión / nada accionable) — nunca los cuenta el LLM: `summarizeTicketState` calcula en código un resumen determinista (`total/actioned/pending/discarded`) y se lo pasa ya hecho al prompt. Ese resumen se persiste como `basedOnTicketState` junto al mensaje; en cada lectura se recalcula el estado vivo y, si difiere, la UI muestra un aviso ("el estado de los tickets cambió — regenera") sin regenerar solo. Orden natural: revisar/crear tickets → **Regenerar** → enviar.
+
+**Precondición**: generar el mensaje exige que ya exista fila en `survey_ticket_drafts` para esa respuesta (que el comentario se haya analizado al menos una vez en Borradores de ticket, aunque sea con 0 problemáticas) — la UI muestra una nota en vez del botón "Generar mensaje" mientras eso no haya pasado.
+
+### Cascada de canal
+
+1. **Canal de la reserva** del destinatario (`respondentId`/`clientUserId`), si tiene chat habilitado (`users.chat_enabled` + `chat_user_id`) y el canal no está `archived`.
+2. Si está archivado o no existe: **canal de propiedad** del owner para esa casa (`ChannelsService.getOwnerPropertyChannel`, mismo patrón que `getNewsChannelForUser`).
+3. Ninguno de los dos: `hasChannel: false` — se genera el mensaje igual, se oculta "Enviar" y se permite **Copiar** (para mandarlo por otra vía).
+
+El canal se **re-verifica en el momento de enviar** (no se confía en el resuelto en un GET anterior — puede haberse archivado entre medias).
+
+### Remitente, idioma y tono
+
+- **Remitente**: siempre la identidad de marca **«Vivla»** (`VIVLA_ADMIN_STREAM_USER_ID`, la misma que ya usan los mensajes de sistema) — nunca un agente concreto, independientemente de quién dispare el envío (humano hoy, agente mañana).
+- **Idioma**: automático. No hay un campo fiable en DB (`users.language` legacy está muerto) — el LLM **detecta el idioma del comentario** del propietario y redacta el mensaje entero en ese idioma; devuelve `detectedLanguage`.
+- **Matiz de apertura**: el comentario se dejó **en la encuesta, no en el chat** — el mensaje abre/retoma la conversación por chat a raíz de la encuesta ("recibimos tu respuesta a la encuesta de tu estancia..."), nunca "gracias por tu mensaje" ni asume una conversación previa.
+- **Tono — mismas reglas duras que Borradores de ticket**: acuse + acción, **nunca** importes, costes, plazos ni compromisos de reparación concretos (la lección de la reversión de "Action Plans v2", migration `078`). Máximo 4-5 frases; nunca menciona tecnicismos internos (ticket, borrador, IA).
+
+### Envío — siempre gate humano
+
+`POST .../suggested-message/send` requiere `tool-chat` **editor** (leer/generar solo pide `viewer`) y es **idempotente por `sentAt`** — un segundo intento sobre la misma respuesta devuelve `409` sin reenviar. El frontend confirma con un `AlertDialog` que nombra destinatario + canal antes de llamar al endpoint; regenerar el mensaje limpia el `sentAt` de la fila (texto nuevo → vuelve a ser enviable). v1 es de solo lectura + copiar — sin edición inline del texto (posible follow-up).
+
+### Persistencia — migración 179
+
+Columna `survey_ticket_drafts.suggested_message` (JSONB, migration `179_survey_suggested_message.sql`) — misma fila que los borradores de ticket (una por `response_id`, migration `177`) pero en su **propia columna**, no anidada en `drafts_data`: `generateAndCache`/`updateIssueAt` (Borradores de ticket) solo tocan `drafts_data`, así que reanalizar/link/discard nunca borran la auditoría de envío (`sentAt`/`sentBy`/`channelUsed`) de este mensaje. Rate limit propio (3 generaciones/día, contador en la misma columna) — no comparte contador con Borradores de ticket.
+
+### Endpoints
+
+| Endpoint | Auth | Descripción |
+|---|---|---|
+| `GET /survey-responses/:responseId/suggested-message` | `tool-chat` viewer | Solo lee caché — nunca gasta tokens |
+| `POST /survey-responses/:responseId/suggested-message` | `tool-chat` viewer | Genera (o reutiliza caché), leyendo el estado vivo de los borradores. `{ force? }`. `400` si los borradores de ticket no se han analizado nunca, `503` si la IA no está configurada, `429` si se agotó el rate limit |
+| `POST /survey-responses/:responseId/suggested-message/send` | `tool-chat` editor | `{ channelDbId }` — postea como marca Vivla + traza, `409` si ya se envió |
+
+### Frontend
+
+`SurveySuggestedMessageSection` no renderiza nada sin comentario o con la IA no configurada (mismo criterio que Borradores de ticket). Estados: sin borradores analizados (nota, sin botón), no generado (botón "Generar mensaje"), generando (skeleton), listo (texto + badge de idioma + **Regenerar** + **Copiar**, siempre visibles), con canal (botón "Enviar a {nombre} por {canal}" tras confirmar) o sin canal (nota + solo Copiar), enviado (timestamp + enlace "ver conversación", botón deshabilitado).
+
+```
+apps/backend/src/surveys/suggested-message/
+  survey-suggested-message.controller.ts
+  survey-suggested-message.service.ts     # pipeline completo + cascada de canal + envío
+  suggested-message.schema.ts             # schema Zod de salida del LLM
+  prompts/suggested-message-prompt.ts     # system prompt + PROMPT_VERSION
+
+apps/backend/src/ai/tools/
+  survey-suggested-message.tools.ts       # resolve_survey_response_channel + send_owner_message (MCP)
+
+apps/frontend/app/components/surveys/suggested-message/
+  SurveySuggestedMessageSection.tsx
+```
+
+## Reportes (tab "Reportes" / `user-status`)
+
+La pestaña **Reportes** de la vista de resultados (`/app/chat/surveys/results?tab=user-status`) agrupa tres sub-pestañas:
+
+| Sub-tab | id | Contenido |
+|---------|-----|-----------|
+| Reporte semanal | `weekly-report` | Tabla NPS por métrica × periodo (Anual + trimestres + semana) — `WeeklyReportView`. Lógica completa (métricas, fórmulas, ventanas, fuentes y el filtro disfrutadas+casa activa) en [Reporte semanal NPS](./weekly-nps-report). |
+| Lista semanal | `weekly-list` | Una fila por respuesta de la semana, con expansión por tipo — `WeeklyListView` |
+| Estado de usuarios | `user-status` | Matriz usuarios × tipos de encuesta — `UserStatusTab` |
+
+### Navegación por semana
+
+En las dos pestañas de reporte semanal (`weekly-report` y `weekly-list`) el **filtro de fechas global queda oculto** y se sustituye por un stepper de semana (`WeekNavigator`, flechas ‹/›). La semana viaja en el search param `weekOf` (ISO `yyyy-MM-dd` dentro de la semana, default hoy). El stepper avanza ±7 días y deshabilita › si la semana siguiente sería futura.
+
+Los bounds lunes→domingo se calculan en UTC en `lib/surveys/week.ts` (`getWeekBounds`), espejando el backend `weekly-nps-compute.ts buildWindows`: la semana reportada es la **semana completa anterior** a la que contiene `weekOf` (igual que el reporte semanal de email). El backend de weekly-nps ya acepta `?week=<ISO>`; el frontend ahora lo envía.
+
+`Lista semanal` reutiliza `SurveysActivityPage` en modo `embedded` con el rango de la semana como `globalDateRange`, así la tabla fila-por-respuesta y la expansión por tipo no se reimplementan. Encima añade el botón de export XLSX (hoja "Respuestas": Fecha, Tipo, Usuario, Email, Casa, Destino, Nota Casa /10, Nota Equipo /10, Aprobación /10, Nota, Comentario). La fuente es `GET /survey-responses` (response-log); su `MAX_LIMIT` se subió a 500 para que una semana entre en una página (el export pagina defensivamente igualmente).
+
+## Notas /10
+
+Todos los scores **textuales** del backoffice se muestran y etiquetan sobre 10 (sufijo " / 10") para consistencia, vía `formatScore10` / `normalizeTo10` (`lib/surveys/score.ts`). El hero "Valoración Media" de home-review (que internamente vive en escala 1–5) se normaliza a /10 y sus umbrales de color se rebasaron de 4/3 (escala /5) a 8/6 (escala /10). Los scores financial-review ya viven en 0–10 (no se re-normalizan, solo se etiquetan). Conteos y porcentajes no se etiquetan.
+
+## Fix — nombres "—" en home-review › by-property
+
+Al expandir una casa en `tab=home-review&subtab=by-property`, los propietarios salían como "—" cuando una propiedad cruzaba ~350 propietarios distintos en total. Causa: el PG path de `getHomeReviewByProperty` resolvía los nombres con un único `.in('id', allOwnerIds)`; con ~400+ ids la URL de PostgREST (~15KB) la rechaza el gateway de Supabase con `TypeError: fetch failed`, y el código ignoraba el error → `userMap` vacío → `userName: null`. Fix: helper `selectInChunks` (`results/select-in-chunks.ts`) que trocea los `.in()` en chunks de 100, loguea (sin tragar) un chunk fallido y degrada parcialmente. Aplicado a los `.in()` no acotados del módulo (PG path, legacy path, `buildEntityMaps`).
+
+## Diseño visual — Escala NPS cromática
+
+Todos los scores numéricos en el backoffice de encuestas usan el componente compartido `NpsScoreBadge` — un badge cuadrado con la escala cromática NPS de 11 colores.
+
+### Escala NPS (0-1000)
+
+| NPS | Color | Estrellas |
+|-----|-------|-----------|
+| 0 | `#B72224` | 0.0 |
+| 100 | `#D52029` | 0.5 |
+| 200 | `#E95223` | 1.0 |
+| 300 | `#EA6F22` | 1.5 |
+| 400 | `#F6A726` | 2.0 |
+| 500 | `#FDC729` | 2.5 |
+| 600 | `#EBDB0A` | 3.0 |
+| 700 | `#E5E044` | 3.5 |
+| 800 | `#E5E044` | 4.0 |
+| 900 | `#AEC93C` | 4.5 |
+| 1000 | `#66B44E` | 5.0 |
+
+### Conversión
+
+- **NPS a estrellas**: `stars = npsScore / 200`
+- **Estrellas a NPS**: `npsScore = stars * 200`
+- Los colores se interpolan entre paradas para gradientes suaves
+- Texto auto-contraste (blanco sobre fondos oscuros, oscuro sobre fondos claros/amarillos)
+
+### Componente
+
+```
+NpsScoreBadge.tsx
+  Props: value (0-5), size ('sm' | 'md')
+  sm: 32×32px (tablas, inline)
+  md: 40×40px (cards dashboard, héroes)
+```
+
+## Action Plans (Consenso)
+
+Los planes de acción se generan automáticamente basados en consenso entre propietarios. Los umbrales son configurables via `result_config` en el survey type:
+
+| Condición | Umbral (default) |
+|-----------|--------|
+| Participación suficiente | ≥75% de propietarios (excluyendo Vivla Property) |
+| Consenso en categoría negativa | ≥75% de los que respondieron coinciden en rating < threshold |
+| Threshold negativo | < 4 estrellas (configurable) |
+| Mínimo propietarios | 4 (con menos no se genera plan) |
+
+**Vivla Property** no vota en propuestas de mejora pero sí paga proporcionalmente según fracciones que posee. El coste se reparte por número de fracciones de cada propietario.
+
+**Flujo**: `pending_review` → `approved` → `sent` → `archived`
+
+## Exportación CSV
+
+Todas las vistas del módulo de encuestas incluyen exportación a CSV enriquecida con datos completos (IDs + nombres legibles), BOM para compatibilidad con Excel, y quoting correcto.
+
+| Vista | Archivo | Columnas clave |
+|-------|---------|---------------|
+| Actividad | `actividad-encuestas-{date}.csv` | ID Respuesta, ID Usuario, Usuario, Email, ID Propiedad, Propiedad, Ubicación, Encuesta, Fecha, Estado, Fuente |
+| Estado de usuarios | `estado_usuarios_{date}.csv` | ID Usuario, Usuario, Email, scores dinámicos por tipo, Media NPS |
+| Resultados por usuario | `{tipo}_{usuarios}_{date}.csv` | ID Usuario, Email, ID Propiedad + columnas específicas del tipo de encuesta |
+| Resultados por propiedad | `{tipo}_{propiedades}_{date}.csv` | ID Propiedad + métricas agregadas |
+| Resultados por propietario | `{tipo}_{propietarios}_{date}.csv` | ID Usuario, Email, ID Propiedad + métricas |
+| Encuesta individual (backend) | `survey-{id}-results.csv` | response_id, respondent_id/name/email, scope_id/name, completed_at, preguntas con texto legible |
+
+La exportación del backend (`ResultsService.exportCsv`) resuelve UUIDs de preguntas a texto legible, nombres de usuarios y propiedades desde sus tablas respectivas, y formatea respuestas (`.value`, `.text`, `.selected`, `.approved`) en lugar de JSON crudo.
+
+## Datos legacy individual (`survey_legacy_responses`)
+
+Los datos individuales por usuario de Firebase se migran a PostgreSQL en la tabla `survey_legacy_responses` para habilitar tablas per-user, per-property y per-owner con filtrado.
+
+### Endpoints
+
+| Endpoint | Auth | Descripción |
+|----------|------|-------------|
+| `GET /survey-legacy-responses/:slug/table` | Admin | Tabla paginada per-user (typed per survey type) |
+| `GET /survey-legacy-responses/:slug/by-owner` | Admin | Home-review agrupado por propietario |
+| `GET /survey-legacy-responses/:slug/by-property` | Admin | Agrupado por propiedad (expandable con detalle por owner) |
+| `GET /survey-legacy-responses/:slug/dashboard-stats` | Admin | Stats para dashboard: total, usuarios, propiedades, medias |
+
+Todos aceptan: `propertyId`, `userId`, `dateFrom`, `dateTo`, `page`, `limit`, `surveyId`.
+
+### Sync CLI
+
+```bash
+# Desde apps/backend/
+pnpm sync:firebase-legacy-responses              # Migra respuestas individuales
+pnpm sync:firebase-legacy-responses --dry-run     # Preview sin escribir
+pnpm sync:firebase-legacy-responses --report-only # Solo genera reporte diagnóstico (JSON + MD)
+pnpm sync:firebase-legacy-responses --collection=nps-booking  # Solo una colección
+```
+
+El flag `--report-only` genera un reporte en `tools/scripts/output/` con:
+- Usuarios no resueltos (enriquecidos con Firebase Auth: email, nombre, teléfono, estado)
+- Propiedades no resueltas (nombre, dirección desde el doc de Firebase)
+- Upserts fallidos con mensajes de error de Supabase
+
+### Windmill (sync automático)
+
+El sync se ejecuta automáticamente cada hora via Windmill:
+
+1. Windmill cron (`0 * * * *`) → llama `POST /chat/sync/firebase-legacy-responses`
+2. Backend crea sync job → ejecuta CLI script como child process
+3. Windmill polls `GET /chat/sync/jobs/:id` hasta completion
+4. Script Windmill: `docs/internal/tools/chat/implementation/epics/3.2-sync-module-improvements/scripts/sync_firebase_legacy_responses.ts`
+
+El sync es **idempotente** (upsert en `source_collection + source_doc_id`) — ejecutar múltiples veces no duplica datos.
+
+## Datos legacy (Firestore — lectura directa)
+
+Los resultados históricos también pueden leerse directamente de Firestore:
+
+1. **Lectura directa** via `LegacyResultsService` (para resultados detallados por propiedad)
+2. **Scores pre-computados** via `sync-firebase-scores.ts` CLI/Windmill (para métricas headline en `survey_score_summaries`)
+
+| Colección Firestore | Contenido | Estructura clave |
+|---------------------|-----------|-----------------|
+| `nps-home-responses` | Respuestas NPS Home | `data.responses[].stepN` (numeric direct or `.options`) |
+| `nps-home-excellence-values` | Respuestas tinder (arrival review) | `results[].{key, value: boolean}` |
+| `nps-booking` | Respuestas stay-review | `{nps: number, round: 'stay'\|'home', hid, uid}` |
+
+### Sync de scores legacy (agregados)
+
+```bash
+# Desde apps/backend/
+pnpm sync:firebase-scores          # Sincroniza scores agregados → survey_score_summaries
+pnpm sync:firebase-scores --dry-run # Preview sin escribir
+```
+
+### Sync API endpoints (para Windmill)
+
+| Endpoint | Descripción |
+|----------|-------------|
+| `POST /chat/sync/firebase-legacy-responses` | Trigger sync de respuestas individuales legacy (crea sync job, ejecuta CLI en background) |
+| `GET /chat/sync/jobs/:id` | Consultar estado del sync job |
+| `GET /chat/sync/jobs` | Listar sync jobs recientes |
+
+<Note>
+  El Home Review v1 ("NPS Casa - Q1 2026") fue insertado como `active` via Migration 054 con 5 steps, 12 preguntas principales y ~24 preguntas hijas condicionales, con i18n completo (ES + EN), `conditional_mode: "any"` en espacios, y `accepting_responses = true`. El Financial Review fue importado via Migration 059 con 42 respuestas legacy CSV en escala 1-10.
+</Note>
+
+## Home Excellence (Portal propietarios)
+
+La app `apps/home-excellence` consume los endpoints públicos del módulo de surveys para mostrar resultados del Home Review 2026 a propietarios.
+
+### Endpoints públicos
+
+| Endpoint | Descripción |
+|----------|-------------|
+| `GET /surveys/public/results?property={HID}&surveyType=home-review` | Resultados agregados del home-review |
+| `GET /surveys/public/legacy-results?property={HID}&surveyType=home-review` | Datos legacy de Firestore |
+| `GET /surveys/public/legacy-results/notes?property={HID}` | Notas legacy agregadas |
+| `GET /surveys/public/action-plans?property={HID}` | Planes de acción por scope |
+| `GET /surveys/public/scores?property={HID}` | Headline scores por propiedad |
+| `GET /surveys/public/home-review-results?property={HID}` | Resultados custom: participación, top rated, oportunidades |
+
+Estos endpoints usan `@Public()` y no requieren autenticación — el HID delimita el scope de datos.
+
+### Flujo de datos
+
+```
+Home Excellence (Next.js 14, port 3003)
+  └─ /api/surveys/* (rewrite)
+       └─ Backend (NestJS, port 3001)
+            ├─ PublicResultsController
+            │   ├─ ResultsService (agregación desde PostgreSQL)
+            │   ├─ LegacyResultsService (lectura Firestore)
+            │   └─ ActionPlansService (planes por scope)
+            └─ ScoreSummaryController
+                └─ HomeReviewResultsService (consenso, participación)
+```
+
+### Documentación relacionada
+
+- [Home Excellence — Descripción](../../internal/apps/home-excellence/project-description.md)
+- [Home Excellence — Arquitectura](../../internal/apps/home-excellence/architecture.md)

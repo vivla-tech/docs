@@ -1,0 +1,287 @@
+---
+title: "Panel de soporte"
+description: "Interfaz del panel de soporte y hub de operaciones para agentes y administradores"
+---
+
+# Panel de soporte
+
+El panel de soporte es la interfaz principal del módulo de Chat en el frontend (`/app/chat/`). Funciona como hub central de operaciones, integrando chat, tickets, encuestas, usuarios, propiedades y analytics.
+
+## Sidebar principal (8 items)
+
+La navegación lateral organiza las herramientas por frecuencia de uso diario:
+
+| # | ID | Label | Icono | Ruta |
+|---|-----|-------|-------|------|
+| 1 | chats | Chats | MessageSquare | `/app/chat` |
+| 2 | tickets | Tickets | Ticket | `/app/chat/tickets` |
+| 3 | users | Usuarios | Users | `/app/chat/users` |
+| 4 | properties | Propiedades | Building2 | `/app/chat/properties` |
+| 5 | surveys | Encuestas | ClipboardList | `/app/chat/surveys` |
+| 6 | analytics | Analítica | BarChart3 | `/app/chat/analytics` |
+| 7 | news | Novedades | Megaphone | `/app/chat/news` |
+| 8 | settings | Configuración | Settings | `/app/chat/settings` |
+
+Usuarios y Propiedades están promovidos desde Settings al sidebar principal para facilitar flujos diarios de soporte (buscar casa → copiar enlace encuesta → enviar por chat).
+
+## Vistas principales
+
+### Lista de canales
+
+Ruta: `/app/chat/`
+
+Panel lateral redimensionable (320px por defecto, rango 240-600px) que muestra la lista de canales con:
+
+- **Scroll virtualizado** con paginación infinita (50 canales por página)
+- **Filtros**: por propiedad, agente, tipo de canal
+- **Búsqueda** de mensajes a través de canales
+- **Conteo de no leídos** en tiempo real por canal
+- **Marcar como no leído**: menú contextual (kebab, visible al pasar el cursor) en cada canal que lo devuelve al estado no leído (badge = 1), persistente tras refrescar y solo para la agente que lo marca. Usa `markUnread` nativo de Stream vía `PATCH /chat/channels/:channelId/mark-unread`. Solo disponible para agentes con identidad de chat propia (no para viewers, que comparten la identidad `vivla-admin`).
+- **Pestañas** para diferentes vistas de canales
+- **Asistente de creación** de canales (wizard multi-paso)
+
+#### Resolución de conversaciones (VIV-2461)
+
+Los canales de tipo **property** y **booking** tienen un estado de *resuelto* (`resolved_at` + `resolved_source`) que gobierna un eje propio del listado, independiente de no-leídos u orden:
+
+- **Por defecto los canales resueltos desaparecen** de la bandeja (no solo bajan al final). Los canales **vacíos** (sin ningún mensaje todavía) también se ocultan y reaparecen en cuanto alguien escribe.
+- El control **Resueltos** de la cabecera (`resolvedOnly`) es el espejo: muestra **solo** los canales resueltos (modo auditoría de CX). No se aplica cuando hay un filtro de tipo de canal explícito ni en las pestañas Archivados / Necesita respuesta / Lola.
+
+El cierre puede ser manual (botón **Resuelto**) o automático. `ChannelResolutionService` decide por canal a partir del último mensaje real y guarda el **origen** en `chat_channels.resolved_source`:
+
+| `resolved_source` | Señal |
+|---|---|
+| `manual` | Botón "Resuelto" de un agente |
+| `owner_closed` | El último mensaje es del propietario y la IA (Haiku) lo clasifica como cierre del tema (`conversation_closed`) |
+| `cx_reaction` | Un agente reacciona al último mensaje del propietario |
+| `cx_last_message` | Nuestro último mensaje no espera nada (`outbound_expectation = none`) |
+
+Un canal con un **ticket abierto nunca se auto-resuelve** (falla en cerrado ante cualquier duda), y los mensajes salientes clasificados como `awaits_owner`/`owes_owner` dejan el canal abierto. Los veredictos de IA se cachean en `chat_message_logs` (`conversation_closed`, `outbound_expectation`) — migración 234.
+
+### Conversación
+
+Ruta: `/app/chat/$channelId`
+
+Vista principal de la conversación con:
+
+- **Lista de mensajes** con scroll virtualizado
+- **Búsqueda en conversación** con navegación entre resultados
+- **Sidebar de respuestas rápidas** (quick replies), gestionadas en `/app/chat/settings/quick-replies` (título, mensaje y **slug** editables — el slug es la clave que usa el disparador `/`, única dentro del grupo)
+- **Modo de selección de mensajes** para crear tickets o agregar a tickets existentes
+- **Sidebar lateral** con metadata del canal (propiedad, booking, información del huésped)
+  - En canales asociados a una propiedad o reserva se muestra esa casa con el desplegable **Información de la casa** (WiFi, acceso, alarma, parking).
+  - En canales sin propiedad propia (novedades, feedback, incidencias), si el usuario principal tiene casas se listan todas bajo **Propiedades de _nombre_**, cada una con su mismo desplegable de información, para conservar contexto en cualquier canal.
+  - En canales de propiedad, la tarjeta **Onboarding** deja a CX generar a mano el enlace de la encuesta `onboarding-review` (scope `property`, sin auto-envío) y copiarlo para entregarlo donde haga falta. Una vez el propietario completa el onboarding de esa casa, el botón se sustituye por un tic verde y ya no se regenera; el estado sale de `GET /surveys/tokens/completion` (`{ completed }`).
+  - En canales de reserva, la sección **Reservas asociadas** lista todas las reservas del canal (la **Principal** marcada con estrella) y permite **añadir** o **quitar** reservas (rol `editor`). Solo se asocian reservas del mismo cliente y misma casa que aún no tengan canal propio; la principal no se puede quitar aquí. Endpoints: `GET`/`POST /chat/channels/:id/bookings` y `DELETE /chat/channels/:id/bookings/:bookingId`. La relación vive en la tabla `channel_bookings` (una reserva pertenece como mucho a un canal); `chat_channels.booking_id` sigue siendo la reserva principal que gobierna el `cid` de Stream, el display por defecto y los filtros de etiquetas.
+- **Seguimiento de estado de lectura**, con acción **Marcar como no leído** en la cabecera (junto a Archivar): deselecciona el canal para que `stream-chat-react` no lo vuelva a marcar leído y el badge reaparezca en la lista. Los **tics de entrega/lectura** se pintan en **todos los mensajes salientes** del equipo (los de la derecha: propios, de un compañero o de la IA), no solo en los propios: informan de si el propietario recibió/leyó el mensaje, así todo CX ve que llegó. Los mensajes del propietario van a la izquierda y nunca llevan tic.
+- **Reacciones**: el selector ofrece el **catálogo completo de emojis** (emoji-mart) desde el menú de opciones del mensaje, no solo los seis clásicos. Cada reacción se envía con el propio glifo del emoji como `type` (codificado por codepoints); las seis reacciones legacy (❤️ love, 👍 like, 😂 laugh, 😮 wow, 😢 sad, 🙏 pray) siguen resolviéndose a su emoji por alias para el histórico de Stream. Las píldoras se construyen por mensaje desde sus `reaction_counts` (`DynamicReactionsList` + `buildReactionOptions`), así se **pinta cualquier reacción que llegue** —alias o emoji nativo, incluidas las enviadas desde vivla-mobile— y un `type` irresoluble cae a un glifo neutro (`🔘`) en vez de desaparecer. El picker excluye los emojis cuyo `type` codificado superaría el límite de 30 caracteres de Stream (familias ZWJ multipersona), que fallarían al enviarse.
+- **Editar mensaje propio**: los agentes con capability `update-own-message` pueden editar sus propios mensajes de texto mediante un editor inline desde el menú de opciones; los mensajes editados muestran el indicador **(editado)**. El mismo menú incluye copiar texto, reaccionar, crear/añadir a ticket y eliminar.
+- **Selector de emojis en el input**: se abre desde el botón de emoji o escribiendo `:` al inicio de una palabra; al elegir un emoji se reemplaza el token `:query` del textarea.
+- **Negrita con `Cmd`/`Ctrl`+`B`**: aplica el marcador `**...**` a la selección del input (composer y edición de mensaje comparten la misma función, `applyMarkdownFormat` en `app/lib/chat/message-formatting.ts`). Es *toggle* (si ya está en negrita, la quita) y en una selección de **varias líneas** aplica el marcador **línea a línea** en vez de envolver el bloque entero (el Markdown no cruza saltos de línea) — las líneas en blanco de por medio se dejan tal cual, nunca quedan `****`. Sin selección, inserta `****` con el cursor en medio.
+- **Selector de respuestas rápidas con `/`** (solo escritorio): al escribir `/` al inicio de una palabra se abre un popover filtrable por slug o título (`app/lib/chat/slash-quick-replies.ts`, espejo del disparador `:` del emoji). Se navega con las flechas, se confirma con `Enter`/`Tab` y se cierra con `Escape`; al confirmar se sustituye el token `/query` por el contenido de la respuesta ya interpolado (`{{propertyName}}`, `{{dateRange}}`, etc. — misma resolución que la sidebar, `useResolvedQuickReplies`). El móvil mantiene la sidebar de respuestas rápidas existente en vez de este popover.
+- **Salto a mensaje** (jump-to-message)
+
+### Tickets
+
+Ruta: `/app/chat/tickets/`
+
+Panel de administración de tickets con:
+
+- Filtros por estado, prioridad, propiedad y agente, que **se intersectan** (AND) entre sí
+- Filtros rápidos **Asignados a mí** / **Creados por mí** (por `users.id` interno)
+- **Búsqueda server-side** (`search`) sobre título, descripción y número de ticket de Zendesk (case-insensitive), con debounce
+- **Estado persistido en la URL**: los filtros, la búsqueda y la página se guardan en los search params, así que sobreviven al entrar en el detalle de un ticket y volver, y la URL es compartible
+- Paginación (100 tickets por página)
+- Badges de prioridad y estado
+- Vista detallada por ticket (`/app/chat/tickets/$ticketId`) con comentarios
+
+## Usuarios
+
+Ruta: `/app/chat/users/`
+
+Vista de usuarios promovida desde Settings al sidebar principal. Incluye lista de usuarios con vista detallada por usuario (`/app/chat/users/$userId`).
+
+## Propiedades
+
+Ruta: `/app/chat/properties/`
+
+Vista de propiedades promovida desde Settings al sidebar principal. Muestra un grid de tarjetas con imagen de portada, nombre, ubicación, selector de agente asignado y botón "Ver NPS" que navega a `/app/chat/surveys/results?property={id}`. Soporta modo batch para asignaciones masivas.
+
+## Encuestas
+
+Ruta: `/app/chat/surveys/`
+
+Hub de encuestas integrado en el panel de soporte. Incluye 5 sub-secciones con navegación propia:
+
+| # | ID | Label | Icono | Ruta | Exact |
+|---|-----|-------|-------|------|-------|
+| 1 | activity | Actividad | Activity | `/app/chat/surveys` | true |
+| 2 | admin | Administrar | PenTool | `/app/chat/surveys/admin` | false |
+| 3 | results | Resultados | BarChart3 | `/app/chat/surveys/results` | false |
+| 4 | action-plans | Planes de Acción | FileCheck | `/app/chat/surveys/action-plans` | false |
+| 5 | rewards | Rewards | Trophy | `/app/chat/surveys/rewards` | false |
+
+<Tabs>
+  <Tab title="Actividad">
+    **`/app/chat/surveys`**
+
+    Tabla de respuestas con filtros (búsqueda, tipo encuesta, destino, rango de fechas con DateRangePicker), quick actions (generador inline de deep links, resumen de rewards) y exportación CSV.
+  </Tab>
+  <Tab title="Administrar">
+    **`/app/chat/surveys/admin`**
+
+    Tipos de encuesta agrupados por scope (Casa / Reserva) en layout de 2 columnas. Cada tipo muestra sus versiones con acciones: publicar, duplicar, editar. El builder (`/app/chat/surveys/admin/$surveyTypeId/edit/$surveyId`) permite crear y editar encuestas con 5 tipos de pregunta, condicionales múltiples, i18n (ES/EN) y preview en vivo.
+  </Tab>
+  <Tab title="Resultados">
+    **`/app/chat/surveys/results`**
+
+    Grid de 2 columnas con una tarjeta por tipo de encuesta. Incluye DateRangePicker (default 30 días), filtro por propiedad, resultados agregados del Home Review (responses, promedio, peor espacio, ratings por espacio, últimas 10 respuestas) y vista legacy de resultados desde Firestore.
+  </Tab>
+  <Tab title="Planes de Acción">
+    **`/app/chat/surveys/action-plans`**
+
+    Lista de planes de acción con vista de detalle: stats grid, action items, y botones de aprobar/enviar. Los planes se generan automáticamente por consenso (75% participación + 75% acuerdo).
+  </Tab>
+  <Tab title="Rewards">
+    **`/app/chat/surveys/rewards`**
+
+    Gráfico de barras de usuarios por nivel de reward (1-5) y configuración del premio de nivel 5.
+  </Tab>
+</Tabs>
+
+## Configuración (Settings)
+
+Todas las rutas bajo `/app/chat/settings/`. Reducido a 4 secciones (Usuarios y Propiedades promovidos al sidebar principal):
+
+<Tabs>
+  <Tab title="Agentes">
+    **`/app/chat/settings/agents`**
+
+    Gestión de agentes de soporte: crear, editar, quitar y asignar a canales.
+
+    - **Crear / convertir**: el modal permite crear un agente nuevo (con invitación por email) o convertir a un usuario existente. El buscador del picker consulta todos los usuarios por nombre o email (con debounce), sin filtrar por tipo, de modo que también aparece el personal de Vivla que solo tiene usuario `client` (creado por el login de la app). Las opciones de tipo `client` se marcan con un badge **Cliente**. Solo se ofrecen los roles **Moderador** y **Administrador**: el rol `viewer` se retiró de esta superficie porque el `CHECK` de la tabla `users` solo admite `admin/moderator/user` y guardarlo fallaba.
+    - **Quitar agente**: baja el rol de la persona a `user`, así deja de ser asignable a canales y tickets y pierde los permisos de agente CX. **Conserva su usuario y su historial de chat** (no se borra el usuario en Stream ni Auth0) y se le puede volver a convertir en agente más adelante. No puedes quitarte a ti mismo, ni quitar al último administrador de chat. El diálogo incluye **"Quitar también de todos los canales"** (activado por defecto): al confirmarlo se le saca como moderador de todos los canales no archivados que atendía (`DELETE /chat/users/agents/:id?removeFromChannels=true`). Los canales donde es el **agente activo o por defecto** se respetan y se listan en el aviso: reasígnalos primero y vuelve a quitarlo. El toast de éxito informa de cuántos canales se limpiaron y cuántos se saltaron.
+  </Tab>
+  <Tab title="Canales">
+    **`/app/chat/settings/channels`**
+
+    Tres pestañas:
+    - **Todos los canales**: búsqueda, filtros (tipo/agente/propiedad/ubicación), operaciones batch (cambiar agente activo/default, agregar moderadores, eliminar)
+    - **Bookings**: gestión de reservas con vista de calendario
+    - **Tipos**: (solo admin) crear y editar tipos de canal
+  </Tab>
+  <Tab title="Turnos">
+    **`/app/chat/settings/shifts`**
+
+    Programación de turnos de agentes de soporte.
+  </Tab>
+  <Tab title="Sincronización">
+    **`/app/chat/settings/sync`** (solo admin)
+
+    Visualización de jobs de sincronización, logs y trigger manual.
+  </Tab>
+</Tabs>
+
+## News (Notificaciones embebidas)
+
+Sección de broadcast y notificaciones integrada en el módulo de chat, bajo `/app/chat/news/`:
+
+| Ruta | Descripción |
+|------|-------------|
+| `/app/chat/news/` | Hub principal de noticias |
+| `/app/chat/news/dashboard` | Dashboard de analytics |
+| `/app/chat/news/templates` | Templates de mensajes |
+| `/app/chat/news/send` | Envío manual de notificaciones |
+| `/app/chat/news/history` | Historial de mensajes enviados |
+| `/app/chat/news/deep-links` | Configuración de deep links |
+| `/app/chat/news/automations` | Reglas de automatización |
+| `/app/chat/news/settings` | Configuración general de news |
+
+## Analytics
+
+Ruta: `/app/chat/analytics`
+
+Métricas de uso del chat: actividad por canal, por usuario y estadísticas generales. La vista se divide en dos pestañas: **Resumen** (insights, adopción, reservas y totales — lo que sigue) y **Automatismos** (ver más abajo).
+
+### Análisis de conversaciones (insights)
+
+Endpoint: `GET /chat/analytics/insights` (rol `viewer` en `tool-chat`), acepta `startDate`/`endDate` ISO (por defecto últimos 30 días).
+
+Bloque de métricas granulares calculadas **en SQL** sobre la capa semántica `analytics.*` (vistas `v_chat_activity`, `v_chat_sessions`, `v_client_health`) vía `ChatInsightsService`. Si `ANALYTICS_DATABASE_URL` no está configurada, degrada a `available:false` (todos los campos a cero) y la UI muestra un aviso en vez de fallar. La sección `InsightsSection` del dashboard pinta:
+
+- **Tarjetas resumen**: propietarios activos (segmentados estrenando ≤90 días / veteranos por `lifecycle_effective`), mensajes del período por rol (CX / IA Lola / propietario-huésped), conversaciones (sesiones abiertas vs. cerradas) y % de mensajes con adjunto.
+- **Tiempos de respuesta de CX** (`ResponseTimesCard`): mediana, p90 y media recortada al p90 de los huecos propietario→CX, más el % respondido en menos de 60 min (solo huecos ≤ 24 h).
+- **Mezcla por rol** (`RoleMixChart`): serie diaria apilada CX / IA / cliente.
+- **Mapa de calor de actividad** (`ActivityHeatmap`): mensajes por día de la semana × hora (Europe/Madrid).
+- **Longitud de conversación** (`ThreadLengthChart`): distribución de sesiones por turnos (buckets 1-2, 3-5, 6-10, 11-20, 20+) con media y mediana.
+- **Salud de sesiones** (`SessionsHealthCard`): abiertas/cerradas y desglose por sentimiento y urgencia.
+
+<Note>
+  Las reacciones y las respuestas citadas aún no se miden: viven solo en Stream y el webhook no las persiste (requiere instrumentación).
+</Note>
+
+### Adopción (lente de casas activas + plan de despliegue CX)
+
+Endpoint: `GET /chat/analytics/adoption` (rol `viewer` en `tool-chat`).
+
+Complementa las métricas globales con una lente centrada en las **casas activas** y su avance frente al plan de lanzamiento de CX:
+
+- **Casas activas con canal** — casas con `status = active` (no borradas) que tienen un canal de tipo `property` no archivado, sobre el total de casas activas.
+- **Owners activados** — owners de al menos una casa activa (deal `active`) que tienen canal `property` para una de sus casas, sobre el total de owners de casas activas.
+- **Owners sin canal** — owners de casas activas todavía sin canal; el desglose muestra las invitaciones de chat pendientes.
+- **Uso real** — media de mensajes por canal `property` de casas activas y mensajes por rol (equipo vs owners) en los últimos 30 días.
+- **Cobertura por destino** — casas con canal por destino, con detalle expandible de owners activados por casa.
+- **Adopción vs plan** — curva "esperado" (plan) frente a "real" (activados hoy), con hitos y el delta (+ por delante / − por detrás).
+
+La curva y los hitos del plan viven en `apps/backend/src/chat/analytics/launch-plan.constant.ts`, que **replica a mano** `alma.vivla.ai/plan.html` (datos a 9 jul 2026). No se scrapea: hay que actualizarlo manualmente cuando cambie el plan. El lado "real" se mide en vivo desde la base de datos en `adoption.service.ts`.
+
+### Reservas próximas (cobertura de estancias, 4 semanas ISO)
+
+Endpoint: `GET /chat/analytics/reservations` (rol `viewer` en `tool-chat`).
+
+Separa dos conceptos que antes se mezclaban y da un desglose **objetivo** por tipo de reserva. Horizonte rodante de **4 semanas ISO** desde el lunes de la semana actual (Europe/Madrid); cada estancia se ubica por su **check-in** (`start_day` dentro de `[lunes, domingo]`), no por solapamiento. La fuente son las reservas de **v2 Postgres** (`bookings`/`stays`/`guests`, mismo pool que device tokens vía `DEVICE_TOKENS_DATABASE_URL`, solo lectura) cruzadas con los canales y usuarios de tools (Supabase).
+
+- **Propietario activado** = tiene su set completo de canales (`property` + `issues` + `news` + `feedback`), no archivados. Es un eje distinto del canal de reserva.
+- **Canal de reserva** = cada estancia necesita su canal de tipo `booking` (`chat_channels.booking_id == bookings.old_bid`, no archivado), aunque el propietario ya esté activado.
+- Cruce v2 ↔ tools por `email` (lowercase) o `tools.users.vivla_user_id == v2 users.id`.
+
+Por semana devuelve un objeto `types` **uniforme por tipo** (`enjoy`, `rent`, `exchange`, `thirdhome`), donde cada `TypeBreakdown` es una partición que suma a su `total`:
+
+- **`conCanal`** — el ocupante es usuario Vivla **y** el canal de reserva ya existe (listo).
+- **`porCrear`** — el ocupante es usuario Vivla pero falta el canal de reserva (accionable).
+- **`externos`** — el ocupante NO es usuario Vivla (no accionable). En `enjoy` siempre es 0.
+- **`propietarioSinActivar`** — solo `enjoy`: el propietario ni siquiera tiene el set completo de canales. En el resto es 0.
+
+Cómo se reparte cada tipo:
+
+- **`enjoy`** — ocupante = el propietario (`bookings.owner`). `conCanal` = owner activado (set completo) y canal de reserva existe; `porCrear` = owner activado sin canal; `propietarioSinActivar` = owner no activado.
+- **`rent` / `exchange` / `thirdhome`** — ocupante real = `guests(role='main').user`. Si matchea un tools user (email o `vivla_user_id`) → activable: `conCanal` si el canal existe, si no `porCrear`. Si no matchea → `externos`.
+
+Además, por semana:
+
+- **`totalPorCrear`** — suma de `types.*.porCrear` (el "N canales por crear" del header).
+- **`propietariosSinActivar`** — = `types.enjoy.propietarioSinActivar` (el "M propietarios por activar").
+- **`gaps`** — lista accionable (quién / casa / tipo / motivo `owner_sin_activar` | `falta_canal_reserva`); se mantiene en el DTO aunque la UI actual no la pinte. Las cuentas test (`@vivla.`) se excluyen de gaps **y de todos los conteos**.
+
+En el frontend, `ReservationsWeekCard` pinta por tipo una barra segmentada (emerald `#10b981` con canal · amber `#f59e0b` por crear · grey `#d4d4d8` externos · rose `#f43f5e` propietario sin activar) con su leyenda; `enjoy`/`rent`/`exchange` siempre, `thirdhome` solo si tiene reservas.
+
+La aritmética vive en `apps/backend/src/chat/analytics/reservations-v2.service.ts`. Si el pool v2 no está configurado, el endpoint degrada a una respuesta vacía coherente (`v2Configured: false`, 4 semanas a cero) en vez de fallar.
+
+### Automatismos (panel de control)
+
+Endpoint: `GET /chat/analytics/automations` (rol `viewer` en `tool-chat`), acepta `startDate`/`endDate` ISO (por defecto últimos 30 días).
+
+La pestaña **Automatismos** pinta una tarjeta por cada `automation_flow` (`AutomationCard`), agrupadas por namespace del disparador: **Tickets** (`ticket.*`), **Encuestas** (`survey.*`), **Reservas / mensajes de chat** (`booking.*`) y **Otros**. Cada tarjeta muestra:
+
+- **Enviados** (`sent`) — dispatches con estado `sent` en el período, con una barra de progreso frente a los eventos del disparador.
+- **debían salir** (`triggerEventCount`) — número de `domain_events` del `trigger_event` en el período. En un flow **con condiciones** se etiqueta "eventos del disparador" porque es una cota superior, no un objetivo exacto.
+- **fallidos** (`failed`) y estado (Inactivo / Sin fallos / N fallidos), con badge **Condicionada** si el flow tiene un nodo `condition`.
+- Enlace **Ver eventos de este disparador** al monitor de eventos (`/app/notifications/monitor?event_type=...`).
+
+<Note>
+  Los envíos por push/email pueden estar **subcontados**: el motor se salta `recordDispatch` cuando no hay destinatario resuelto (`no_recipient`); el canal chat es fiable. El aviso viaja en `caveat` y se muestra en el tooltip de cada tarjeta.
+</Note>
+
+<Note>
+  El acceso a las secciones está controlado por el sistema de permisos. Los agentes con rol `editor` en `tool-chat` pueden gestionar canales, tickets y encuestas. Las operaciones de configuración avanzada (tipos de canal, sync) requieren rol `admin`.
+</Note>

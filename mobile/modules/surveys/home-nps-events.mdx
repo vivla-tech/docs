@@ -1,0 +1,355 @@
+---
+title: 'Home NPS - Eventos PostHog'
+description: 'Referencia completa de eventos de analytics del Home Annual Review y guia de dashboards'
+---
+
+## Resumen
+
+El Home Annual Review (NPS) trackea **7 eventos** con el prefijo `home_nps_*`. Cubren el funnel completo: exposicion (card) → apertura del survey → progreso paso a paso → finalizacion/abandono → visualizacion de resultados.
+
+Todos los eventos se definen como constantes en `analyticsEvents.homeNps.*` en `src/core/analytics/events.ts`.
+
+---
+
+## Propiedades base
+
+Todos los eventos del Home NPS incluyen estas propiedades:
+
+| Propiedad     | Tipo             | Descripcion                                                           |
+| ------------- | ---------------- | --------------------------------------------------------------------- |
+| `survey_type` | `string`         | Siempre `"home-review"` (slug de la encuesta)                         |
+| `survey_id`   | `string \| null` | ID de la encuesta en backend. Null si la definicion no ha cargado aun |
+| `home_id`     | `string \| null` | Mapea a `propertyId` internamente                                     |
+
+Las propiedades `survey_version` (numero de version de la definicion) solo estan disponibles en eventos del flujo del survey (opened, step_completed, abandoned, completed).
+
+---
+
+## Catalogo de eventos
+
+### 1. `home_nps_survey_cta_viewed`
+
+El card de review es visible en la seccion home para una propiedad tappable.
+
+| Propiedad     | Tipo           | Valor                       |
+| ------------- | -------------- | --------------------------- |
+| `survey_type` | string         | `"home-review"`             |
+| `survey_id`   | string \| null | Desde `useHomeReviewStatus` |
+| `home_id`     | string         | `propertyId`                |
+
+- **Archivo:** `HomeReviewCard.tsx`
+- **Trigger:** `useEffect` on mount, una vez por propiedad tappable (omite status `completed`)
+- **Multi-propiedad:** Dispara un evento por cada fila de propiedad tappable.
+
+---
+
+### 2. `home_nps_survey_opened`
+
+Usuario entra al flujo del survey desde cualquier entry point.
+
+| Propiedad        | Tipo           | Valor                        |
+| ---------------- | -------------- | ---------------------------- |
+| `survey_type`    | string         | `"home-review"`              |
+| `survey_id`      | string         | Desde `definition.survey_id` |
+| `survey_version` | number         | Desde `definition.version`   |
+| `home_id`        | string \| null | `propertyId`                 |
+| `entry_point`    | string         | `"home"` \| `"deep_link"`    |
+
+- **Archivo:** `SurveyScreen.tsx`
+- **Trigger:** `useEffect` cuando `viewState` transiciona a `intro` o `questions` por primera vez
+- **Guard:** No se dispara si `engine.alreadyCompleted` (survey reanudado ya completado)
+
+**Entry points:**
+
+<Tabs>
+  <Tab title="Home Card">
+    Usuario toca CTA en el card de la home screen → URL param `entryPoint=home`
+  </Tab>
+  <Tab title="Deep Link">
+    Push notification, email link, etc. → Sin param `entryPoint`, default a `"deep_link"`
+  </Tab>
+</Tabs>
+
+---
+
+### 3. `home_nps_step_completed`
+
+Usuario responde una pregunta y avanza a la siguiente.
+
+| Propiedad              | Tipo    | Valor                                                                                          |
+| ---------------------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `survey_type`          | string  | `"home-review"`                                                                                |
+| `survey_id`            | string  | Desde `definition.survey_id`                                                                   |
+| `survey_version`       | number  | Desde `definition.version`                                                                     |
+| `home_id`              | string  | Siempre disponible durante el flujo del survey                                                 |
+| `step_number`          | number  | Posicion secuencial 1-based tal como la experimenta el usuario                                 |
+| `step_id`              | string  | `question.id` de la definicion backend — joinable con datos del backend                        |
+| `step_type`            | string  | `"star_rating"` \| `"single_choice"` \| `"multi_choice"` \| `"open_text"` \| `"swipe_boolean"` |
+| `has_optional_comment` | boolean | Si el usuario lleno una pregunta condicional inline de tipo `open_text`                        |
+
+- **Archivo:** `useSurveyEngine.ts` (callback) → `SurveyScreen.tsx` (capture)
+- **Trigger:** Dentro de `goToNextQuestion`, via callback `onStepCompleted`
+
+<Note>
+  `step_number` es secuencial sin gaps — refleja la experiencia del usuario, no el orden de la
+  definicion. Preguntas condicionales que no se muestran no generan eventos.
+</Note>
+
+---
+
+### 4. `home_nps_survey_abandoned`
+
+Usuario sale del survey sin completarlo.
+
+| Propiedad         | Tipo           | Valor                                                    |
+| ----------------- | -------------- | -------------------------------------------------------- |
+| `survey_type`     | string         | `"home-review"`                                          |
+| `survey_id`       | string         | Desde `definition.survey_id`                             |
+| `survey_version`  | number         | Desde `definition.version`                               |
+| `home_id`         | string \| null | Null si se abandono antes de seleccionar propiedad       |
+| `steps_completed` | number         | Numero de pasos completados (0 si aun en el primer paso) |
+
+- **Archivo:** `SurveyScreen.tsx`
+- **Trigger:** `handleClose` cuando `viewState !== 'completion'`
+- Se dispara al cerrar explicitamente (boton back/close), NO al ir a background (background dispara `flushToBackend` para guardar progreso)
+
+---
+
+### 5. `home_nps_survey_completed`
+
+Survey enviado exitosamente al backend.
+
+| Propiedad           | Tipo    | Valor                                                   |
+| ------------------- | ------- | ------------------------------------------------------- |
+| `survey_type`       | string  | `"home-review"`                                         |
+| `survey_id`         | string  | Desde `definition.survey_id`                            |
+| `survey_version`    | number  | Desde `definition.version`                              |
+| `home_id`           | string  | Siempre disponible al completar                         |
+| `has_final_comment` | boolean | Si la ultima pregunta (tipo `open_text`) fue respondida |
+| `total_steps`       | number  | `definition.steps.length` — varia por condicionales     |
+
+- **Archivo:** `SurveyScreen.tsx`
+- **Trigger:** `useEffect` cuando `viewState` transiciona a `completion`
+- **Guard:** No se dispara si `engine.alreadyCompleted` (survey reanudado ya completado)
+
+<Note>
+  Las encuestas completadas por agentes de soporte via back office se rastrean server-side. Se
+  pueden distinguir de las completadas en la app usando la propiedad `$lib` de PostHog
+  (`posthog-react-native` para la app vs el SDK del backend para back office).
+</Note>
+
+---
+
+### 6. `home_nps_report_cta_viewed`
+
+El card de resultados es visible para el usuario (~8 dias despues del cierre del periodo de review).
+
+| Propiedad     | Tipo           | Valor                       |
+| ------------- | -------------- | --------------------------- |
+| `survey_type` | string         | `"home-review"`             |
+| `survey_id`   | string \| null | Desde `useHomeReviewStatus` |
+| `home_id`     | string         | `propertyId`                |
+
+- **Archivo:** `HomeReviewResultsCard.tsx` (useEffect on mount)
+
+---
+
+### 7. `home_nps_report_opened`
+
+Usuario toca el CTA para ver el reporte de resultados.
+
+| Propiedad     | Tipo           | Valor                       |
+| ------------- | -------------- | --------------------------- |
+| `survey_type` | string         | `"home-review"`             |
+| `survey_id`   | string \| null | Desde `useHomeReviewStatus` |
+| `home_id`     | string         | `propertyId`                |
+
+- **Archivo:** `HomeReviewResultsCard.tsx` (onPress antes de WebView)
+
+---
+
+## Diagramas de flujo
+
+### Entry points
+
+```
+[Card]      survey_cta_viewed → [toca CTA] → survey_opened(entry_point="home")
+
+[Deep Link] [sin evento de exposicion] → survey_opened(entry_point="deep_link")
+```
+
+### Flujo del survey
+
+```
+survey_opened
+  → step_completed(1) → step_completed(2) → ... → survey_completed
+
+survey_opened
+  → step_completed(1) → step_completed(2) → survey_abandoned(steps_completed=1)
+
+survey_opened
+  → survey_abandoned(steps_completed=0)
+```
+
+### Resultados
+
+```
+report_cta_viewed → [toca CTA] → report_opened
+```
+
+---
+
+## Guia de dashboard en PostHog
+
+### Dashboard: "Home NPS - Survey Analytics"
+
+Todas las insights deben filtrar por `survey_type = "home-review"`.
+
+### Funnels
+
+<Tabs>
+  <Tab title="Completion Funnel">
+    **Survey Completion Funnel**
+
+    Mide la conversion desde apertura hasta finalizacion del survey.
+
+    1. Ir a Insights → New → Funnels
+    2. Agregar pasos:
+       - `home_nps_survey_opened`
+       - `home_nps_step_completed` (filter: `step_number = 1`)
+       - `home_nps_step_completed` (filter: `step_number = 2`)
+       - ...continuar por cada paso conocido
+       - `home_nps_survey_completed`
+    3. Breakdown by: `entry_point`
+    4. Conversion window: 7 dias
+    5. El drop-off entre cada paso muestra donde abandonan los usuarios
+
+  </Tab>
+  <Tab title="Card Conversion">
+    **Home Card Conversion Funnel**
+
+    Mide la efectividad del card en la home screen.
+
+    1. Insights → New → Funnels
+    2. Pasos:
+       - `home_nps_survey_cta_viewed`
+       - `home_nps_survey_opened` (filter: `entry_point = "home"`)
+       - `home_nps_survey_completed`
+
+  </Tab>
+  <Tab title="Report Engagement">
+    **Report Engagement Funnel**
+
+    Mide cuantos usuarios ven el reporte despues de que se publican los resultados.
+
+    1. Insights → New → Funnels
+    2. Pasos:
+       - `home_nps_report_cta_viewed`
+       - `home_nps_report_opened`
+
+  </Tab>
+</Tabs>
+
+### Trends
+
+<Tabs>
+  <Tab title="Completion Rate">
+    **Tasa de completado**
+
+    1. Insights → New → Trends
+    2. Serie A: `home_nps_survey_completed` (unique users)
+    3. Serie B: `home_nps_survey_opened` (unique users)
+    4. Activar **Formula mode**: `A / B`
+    5. Display: Line chart, granularidad diaria o semanal
+
+  </Tab>
+  <Tab title="Abandonment">
+    **Abandono por paso**
+
+    1. Insights → New → Trends
+    2. Evento: `home_nps_survey_abandoned`
+    3. Breakdown by: `steps_completed`
+    4. Display: Bar chart
+    5. Muestra en que punto los usuarios deciden abandonar
+
+  </Tab>
+  <Tab title="Entry Points">
+    **Distribucion de entry points**
+
+    1. Insights → New → Trends
+    2. Evento: `home_nps_survey_opened`
+    3. Breakdown by: `entry_point`
+    4. Display: Pie chart
+    5. Responde: cual es el entry point mas efectivo?
+
+  </Tab>
+</Tabs>
+
+### Number Insights (KPIs)
+
+Crear 3 Number insights para la fila superior del dashboard:
+
+| KPI                                   | Configuracion en PostHog                                                          |
+| ------------------------------------- | --------------------------------------------------------------------------------- |
+| **Tasa de completado**                | Formula: A (`survey_completed`, unique users) / B (`survey_opened`, unique users) |
+| **Tasa de apertura reporte**          | Formula: A (`report_opened`) / B (`report_cta_viewed`)                            |
+| **Promedio pasos antes de abandonar** | `survey_abandoned` → Aggregation: Property average → `steps_completed`            |
+
+### Layout del dashboard
+
+Organizar en filas:
+
+1. **Fila superior:** 3 Number insights (KPIs principales)
+2. **Segunda fila:** Survey Completion Funnel (ancho completo)
+3. **Tercera fila:** Card Conversion (izq) + Report Engagement (der)
+4. **Cuarta fila:** Entry Point Distribution (izq) + Abandonment by Step (der)
+
+---
+
+## Joining con Data Warehouse
+
+Los eventos envian `survey_id` y `step_id` (= `question.id` del backend). Para cruzar con datos backend:
+
+```sql
+SELECT
+  ph.step_id,
+  sq.label,
+  ph.step_type,
+  COUNT(*) as completions,
+  SUM(CASE WHEN ph.has_optional_comment THEN 1 ELSE 0 END) as with_comment
+FROM posthog_events ph
+JOIN survey_questions sq ON sq.id = ph.step_id
+WHERE ph.event = 'home_nps_step_completed'
+  AND ph.survey_id = '<survey_id>'
+GROUP BY ph.step_id, sq.label, ph.step_type
+ORDER BY completions DESC;
+```
+
+---
+
+## Archivos de implementacion
+
+| Archivo                                                 | Eventos                                                     |
+| ------------------------------------------------------- | ----------------------------------------------------------- |
+| `src/core/analytics/events.ts`                          | Constantes `analyticsEvents.homeNps.*`                      |
+| `src/modules/home/components/HomeReviewCard.tsx`        | `survey_cta_viewed`                                         |
+| `src/modules/home/components/HomeReviewResultsCard.tsx` | `report_cta_viewed`, `report_opened`                        |
+| `src/modules/surveys/components/SurveyScreen.tsx`       | `survey_opened`, `abandoned`, `completed`, `step_completed` |
+| `src/modules/surveys/hooks/useSurveyEngine.ts`          | Callback `onStepCompleted`                                  |
+
+---
+
+## Checklist de verificacion
+
+- [ ] Home screen → `survey_cta_viewed` se dispara para cada propiedad tappable
+- [ ] Tocar CTA card → `survey_opened` con `entry_point: "home"`
+- [ ] Deep link → `survey_opened` con `entry_point: "deep_link"`
+- [ ] Responder pregunta → `step_completed` con `step_number`, `step_id`, `step_type` correctos
+- [ ] Pregunta con comentario inline → `has_optional_comment: true`
+- [ ] Cerrar survey a mitad → `survey_abandoned` con `steps_completed` correcto
+- [ ] Completar survey → `survey_completed` con `has_final_comment` y `total_steps`
+- [ ] Reanudar survey completado → sin duplicados de `survey_opened` o `survey_completed`
+- [ ] Card de resultados visible → `report_cta_viewed`
+- [ ] Tocar resultados → `report_opened`
+- [ ] Todos los eventos incluyen `survey_type`, `survey_id` (cuando cargado), `home_id`
+- [ ] Habilitar PostHog debug mode para validar eventos en consola/network

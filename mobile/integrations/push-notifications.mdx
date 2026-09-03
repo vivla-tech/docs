@@ -1,0 +1,144 @@
+---
+title: 'Push Notifications'
+description: 'Configuración de notificaciones push con expo-notifications'
+---
+
+## Visión general
+
+Las notificaciones push se gestionan mediante **expo-notifications (v0.31.4)**, con un servicio singleton que encapsula toda la funcionalidad.
+
+## Servicio de notificaciones
+
+El servicio singleton se encuentra en `src/modules/profile/services/notificationsService.ts` y expone los siguientes métodos:
+
+| Método                    | Descripción                                                  |
+| ------------------------- | ------------------------------------------------------------ |
+| `getPermissionStatus()`   | Consulta el estado actual de permisos de notificación        |
+| `requestPermissions()`    | Solicita permisos de notificación al usuario                 |
+| `getExpoPushToken()`      | Obtiene el push token de Expo para el dispositivo            |
+| `setAppBadgeCount(count)` | Establece el número del badge de la app                      |
+| `clearAppBadge()`         | Limpia el badge de la app (equivale a `setAppBadgeCount(0)`) |
+
+<Tabs>
+  <Tab title="Permisos">
+    ```typescript
+    import { notificationsService } from '@/modules/profile/services/notificationsService';
+
+    // Consultar estado actual
+    const status = await notificationsService.getPermissionStatus();
+
+    // Solicitar permisos
+    const granted = await notificationsService.requestPermissions();
+    ```
+
+  </Tab>
+  <Tab title="Push token">
+    ```typescript
+    import { notificationsService } from '@/modules/profile/services/notificationsService';
+
+    // Obtener el token para registrar en el backend
+    const token = await notificationsService.getExpoPushToken();
+    ```
+
+  </Tab>
+  <Tab title="Badge">
+    ```typescript
+    import { notificationsService } from '@/modules/profile/services/notificationsService';
+
+    // Establecer badge
+    await notificationsService.setAppBadgeCount(5);
+
+    // Limpiar badge
+    await notificationsService.clearAppBadge();
+    ```
+
+  </Tab>
+</Tabs>
+
+## Configuración iOS
+
+<CardGroup cols={2}>
+  <Card title="Habilitado" icon="check">
+    - Alertas - Badges - Sonidos - Display en CarPlay
+  </Card>
+  <Card title="Deshabilitado" icon="xmark">
+    - Critical alerts - Provisional permissions
+  </Card>
+</CardGroup>
+
+### Comportamiento de notificación mostrada
+
+Cuando la app está en primer plano y llega una notificación, se aplica la siguiente configuración:
+
+| Propiedad               | Valor         | Descripción                                       |
+| ----------------------- | ------------- | ------------------------------------------------- |
+| Alertas/banners         | Habilitado    | Se muestran alertas visuales                      |
+| Sonido                  | Deshabilitado | Sin sonido en la notificación individual          |
+| Badge                   | Deshabilitado | No actualiza el badge por notificación individual |
+| Lista de notificaciones | Visible       | Aparece en la lista de notificaciones del sistema |
+
+<Note>
+  La configuración de badge deshabilitado en notificaciones individuales significa que el badge se
+  gestiona manualmente a través del servicio, no automáticamente por cada notificación recibida.
+</Note>
+
+## Deep linking desde notificaciones
+
+Las notificaciones push pueden contener un campo `deep_link` en sus datos. Cuando el usuario toca la notificación, el enlace se procesa a través del `linkingService` para navegar a la pantalla correspondiente.
+
+```typescript
+// Estructura de datos de una notificación con deep link
+{
+  title: "Nueva reserva",
+  body: "Tienes una nueva reserva pendiente",
+  data: {
+    deep_link: "/stays/123/details"
+  }
+}
+```
+
+<Warning>
+  El deep link se rutea a través del `linkingService`, que se encarga de validar la ruta y manejar
+  casos donde el usuario no está autenticado (preservando el deep link para después del login).
+</Warning>
+
+## Plugin en app.config.ts
+
+La configuración del plugin de `expo-notifications` en `app.config.ts`:
+
+| Parámetro                       | Valor         |
+| ------------------------------- | ------------- |
+| Canal por defecto               | `"default"`   |
+| Background remote notifications | Deshabilitado |
+
+<CodeGroup>
+```typescript app.config.ts (ejemplo)
+plugins: [
+  [
+    'expo-notifications',
+    {
+      defaultChannel: 'default',
+      // Background remote notifications deshabilitado
+    },
+  ],
+],
+```
+</CodeGroup>
+
+## Integración con linkingService
+
+El flujo completo de una notificación push con deep link es:
+
+1. El dispositivo recibe la notificación push
+2. El usuario toca la notificación
+3. Se extraen los datos de `deep_link` del payload
+4. El `linkingService` recibe la ruta
+5. Si el usuario está autenticado, se navega directamente
+6. Si no está autenticado, el deep link se preserva y se ejecuta después del login
+
+## Archivos clave
+
+| Archivo                                                | Responsabilidad                             |
+| ------------------------------------------------------ | ------------------------------------------- |
+| `src/modules/profile/services/notificationsService.ts` | Servicio singleton de notificaciones        |
+| `app.config.ts`                                        | Configuración del plugin expo-notifications |

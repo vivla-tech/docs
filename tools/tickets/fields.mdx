@@ -1,0 +1,173 @@
+---
+title: "Campos y automatizaciones del ticket"
+description: "Columnas del ticket, desplegables servidos por Vivla Tools, mapeo con Zendesk y automatizaciones del formulario"
+---
+
+# Campos y automatizaciones del ticket
+
+El módulo de tickets sincroniza con Zendesk pero define sus propios campos y desplegables. Esta página documenta las columnas del ticket, de dónde salen las opciones de cada desplegable, cómo se mapean con Zendesk y las automatizaciones del formulario de alta/edición.
+
+## Campos del ticket
+
+Columnas nativas de la tabla `chat_tickets` (más allá de identificadores y timestamps de sistema):
+
+| Campo | Columna | Tipo | Descripción |
+|-------|---------|------|-------------|
+| Título | `title` | texto | Asunto del ticket |
+| Descripción | `description` | texto | Detalle de la incidencia |
+| Estado | `status` | enum | `created`, `assigned`, `in_progress`, `improvement_proposal` (deprecado), `resolved`, `closed`, `discarded` (terminal, solo Tools) |
+| Prioridad | `priority` | enum | `low`, `normal`, `high`, `urgent` |
+| Tipo | `ticket_kind` | enum | Naturaleza del ticket: `incident` (incidencia, default) \| `improvement_proposal` (propuesta de mejora) |
+| Propiedad | `property_id` | ref | Casa asociada (UUID de `properties`) |
+| Destino | `destination` | enum | Zona geográfica (Baqueira, Menorca, etc.) |
+| Equipo de resolución | `resolution_team` | enum | Equipo responsable |
+| Zona | `zone` | enum | Zona de la propiedad donde ocurre la incidencia |
+| Categoría | `category` | enum | Tipo de incidencia |
+| Pagador | `payer` | enum | Quién asume el coste |
+| Estado de reparación | `repair_status` | enum | Fase de la reparación |
+| Coste estimado | `estimated_cost` | numérico | Importe estimado exacto (se conserva) |
+| Coste estimado (rango) | `estimated_cost_range` | enum | Rango de coste estimado (ver abajo) |
+| Coste real | `actual_cost` | numérico | Importe final (TOTAL) |
+| Coste cubierto por cuota | `cost_covered_by_fee` | numérico | Parte del coste real incluida en la cuota de mantenimiento (`NULL` = desglose desconocido) |
+| Coste extra | `cost_extra` | numérico | Parte del coste real cobrada aparte al propietario (`NULL` = desglose desconocido) |
+| Coste pendiente | `cost_pending` | booleano | Ticket cerrado con el importe aún por conocer (factura a fin de mes). NO es lo mismo que `actual_cost = 0` |
+| Notas internas | `internal_notes` | texto | Comentarios internos sobre la incidencia |
+| Fecha primera respuesta | `first_response_at` | timestamp | Primera respuesta al cliente |
+| Fecha resolución prevista | `expected_resolution_at` | timestamp | Fecha estimada de resolución |
+| Resumen IA | `ai_summary` | texto | Generado por Zendesk (solo lectura) |
+
+<Note>
+  `estimated_cost` (numérico) se conserva por compatibilidad. Se añadió `estimated_cost_range` para capturar el coste como rango: `<50`, `50–100`, `100–500`, `500–1.000`, `1.000–5.000`, `>5.000 €`.
+</Note>
+
+<Note>
+  **Desglose del coste real (cuota vs extra).** `actual_cost` sigue siendo el **total**. Cuando ambas columnas están informadas se cumple `actual_cost = cost_covered_by_fee + cost_extra` (ambas validan `>= 0` en el DTO). En los tickets históricos `actual_cost` puede estar informado con las dos columnas nuevas a `NULL`: eso significa **desglose desconocido** y debe tratarse como tal en todas partes —nunca inventar ceros. Migración aditiva `223_ticket_cost_maintenance_fee.sql` (columnas nullable, sin CHECK ni backfill).
+</Note>
+
+<Note>
+  **Coste pendiente vs sin coste.** `cost_pending = true` significa "resuelto, coste real aún desconocido" (se cierra el ticket sin escribir `actual_cost` y se completa cuando llega la factura). No confundir con `actual_cost = 0`, que es "comprobado, sin coste". El flag se limpia solo en cuanto se escribe un `actual_cost` real —salvo que el propio update lo esté fijando de forma explícita en el mismo payload—. Migración aditiva `227_add_cost_pending_to_tickets.sql` (columna `NOT NULL DEFAULT false` + índice parcial sobre las filas `true`).
+</Note>
+
+<Note>
+  **Tipo (`ticket_kind`) vs Segmento (`ticket_type`).** No confundir: `ticket_kind` es una **columna persistida** con la naturaleza del ticket (incidencia \| propuesta de mejora). `ticket_type` (etiquetado **Segmento** en la lista) es una dimensión **derivada de SLA** (casa/experiencia/administrativo/dormido) que se computa al leer y **no es una columna**.
+</Note>
+
+<Warning>
+  **Transición del estado `improvement_proposal` (two-phase).** "Propuesta de mejora" era un **estado falso** del `status`. Ahora es su propia dimensión `ticket_kind`. La migración se aplica **a mano** en Supabase (dev + prod) en dos fases: `162` (pre-deploy: añade la columna `ticket_kind`, la indexa y backfillea el kind sin tocar el status) → deploy → `163` (post-deploy: normaliza el `status` de las propuestas a su lifecycle real `assigned`/`created`). `improvement_proposal` **sigue permitido en el CHECK de `status`** hasta un follow-up (retirarlo del CHECK y del enum es la fase 3).
+</Warning>
+
+## Desplegables: Vivla Tools es la fuente de verdad
+
+Las opciones de **equipo de resolución, zona, categoría, estado de reparación y pagador** se sirven desde `ticket-options.config.ts` (`TICKET_OPTION_SETS`), **no en vivo de Zendesk**. CX decidió el set final aquí, de forma que es editable sin tocar Zendesk y resiliente si la API de Zendesk falla.
+
+El **destino** sí sigue viniendo en vivo de Zendesk (vía `ZendeskProvider.getTicketFields()`), igual que el resto de enums no cubiertos por la config.
+
+Todo se expone en un único endpoint:
+
+```
+GET /chat/tickets/dropdowns
+```
+
+### Valores finales
+
+**Equipo de resolución** (`resolution_team`)
+
+| value | label |
+|-------|-------|
+| `propiedades_y_mantenimiento` | Properties |
+| `promotora` | Promotora |
+| `equipo_de_limpieza` | Limpieza |
+| `manitas` | Manitas |
+| `seguro` | Seguro |
+
+**Zona** (`zone`): General, Salón, Comedor, Cocina, Dormitorio, Baños, Exterior, Lockers, **Garaje**.
+
+**Categoría** (`category`): Llaves y acceso, Inventario, Electrodomésticos, Amenities o accesorios, Iluminación, Wifi, Limpieza, Fontanería, Electricidad, Daños estructurales, Daños menores, Carpintería, **Diseño y estilismo** (label corregida), **Climatización**, **Mantenimiento preventivo (plagas)**. Se eliminó "Reservas y estancias".
+
+**Estado de reparación** (`repair_status`): En evaluación, En ejecución, Comunicado a propietario. Se eliminó "Programado".
+
+**Pagador** (`payer`): Capex, Vivla, Mejora o daño propietario, Cuota de mantenimiento, Comunidad de vecinos, Promotora, Seguro, Derrama.
+
+## Mapeo con Zendesk
+
+El `value` (slug) almacenado en `chat_tickets` es **el mismo en Vivla Tools y en Zendesk**. Los slugs históricos de Zendesk se preservan tal cual para que las filas antiguas sigan resolviendo. El contrato de mapeo vive en `zendesk-mappings.config.ts`:
+
+| Campo | Columna | Zendesk field id |
+|-------|---------|------------------|
+| Casa | `property_id` | `17925940459804` |
+| Destino | `destination` | `18534461108892` |
+| Equipo de resolución | `resolution_team` | `17926240467100` |
+| Zona | `zone` | `17926529031708` |
+| Categoría | `category` | `17926673594140` |
+| Pagador | `payer` | `17926800591004` |
+| Estado de reparación | `repair_status` | `17926767041308` |
+| Coste estimado | `estimated_cost` | `18458778087068` |
+| Coste real | `actual_cost` | `18458825521180` |
+| Notas internas | `internal_notes` | `17926789994780` |
+| Fecha primera respuesta | `first_response_at` | `19667959142428` |
+| Fecha resolución prevista | `expected_resolution_at` | `19703173032092` |
+| Resumen IA | `ai_summary` | `23679986610076` (solo lectura) |
+
+<Note>
+  **Sin write-back a Zendesk (desde agosto 2026).** Los valores de estos campos
+  —incluidas las opciones propias de Tools (`manitas`, `promotora`, `seguro`,
+  `garaje`, `climatizacion`, `mantenimiento_preventivo_plagas`) y los destinos
+  nuevos (`mallorca`, `asturias`, etc.)— se guardan solo en `chat_tickets` y ya
+  **no se propagan a Zendesk**, así que no hace falta que existan como opciones
+  allí. El mapeo `zendesk-mappings.config.ts` se conserva porque lo siguen usando
+  el CLI de import manual y el catálogo de campos (`GET /chat/zendesk/fields`,
+  ahora servido de config local desde `ticket-options.config.ts`). Antes la
+  creación mandaba todos los campos nativos a Zendesk y la actualización solo
+  re-sincronizaba título/estado/prioridad (`syncTicketToZendesk`); ese camino ya
+  no existe.
+</Note>
+
+## Automatizaciones del formulario
+
+### Casa → Destino
+
+Al elegir (o preseleccionar) la propiedad en el alta de un ticket, el destino se autocompleta derivando `property.location → location.slug → destino` (mapa `LOCATION_SLUG_TO_DESTINATION`). Solo aplica a **creaciones futuras**; no remapea tickets existentes.
+
+```
+GET /chat/tickets/property-destinations
+```
+
+Devuelve un mapa `{ propertyId → destino }` que el formulario usa para el autocompletado.
+
+### Pagador automático según equipo
+
+Al cambiar el equipo de resolución, si no se envía un pagador explícito, el sistema lo presugiere (`suggestPayerForTeam` / `PAYER_BY_TEAM`). El agente siempre puede sobrescribirlo.
+
+| Equipo | Pagador sugerido |
+|--------|------------------|
+| Limpieza · Manitas · Properties | Cuota de mantenimiento |
+| Promotora | Promotora |
+| Seguro | Seguro |
+
+<Note>
+  `derrama` **nunca** se autosugiere: es una elección exclusivamente manual.
+</Note>
+
+### Categoría obligatoria al crear (solo ruta de CX)
+
+El formulario de alta de la herramienta de CX **exige categoría** para poder enviar (marca el campo con asterisco y bloquea el botón). La validación vive **solo en esa ruta**, no en el `CreateTicketDto` compartido: por ahí también crean tickets el agente de IA, las propuestas de mejora del portal y los borradores de encuestas, y hacerlo obligatorio a ese nivel las rompería a todas.
+
+### Estado de reparación derivado del estado
+
+El estado del ticket manda sobre el de la reparación. Al cambiar el `status`, si no se envía un `repair_status` explícito, se deriva (`REPAIR_STATUS_BY_TICKET_STATUS`):
+
+| Estado del ticket | Estado de reparación |
+|-------------------|----------------------|
+| `created` · `assigned` | En evaluación |
+| `in_progress` | En ejecución |
+| `resolved` · `closed` | Comunicado a propietario |
+
+## Campos eliminados
+
+Los siguientes campos se retiraron de la UI; sus columnas se conservan en la base de datos como histórico:
+
+- Aprobación de propietarios (`owner_approval`)
+- Aprobación de finanzas (`finance_approval`)
+- Causa de la incidencia (`incident_cause`)
+- Causa del bloqueo (`blocking_cause`)
+- Nº de horas

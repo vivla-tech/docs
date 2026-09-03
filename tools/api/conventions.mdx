@@ -1,0 +1,160 @@
+---
+title: "Convenciones API"
+description: "Convenciones adoptadas por la API v1: envelopes, request_id, errores estructurados, idempotencia, paginación cursor, rate limits y versioning."
+---
+
+# Convenciones API
+
+La API v1 sigue un modelo consistente en toda la superficie: cada recurso lleva un campo `object`, las listas se entregan con cursor pagination, los errores siempre tienen el mismo shape, y los headers de rate limit están en cada respuesta.
+
+<Note>
+Algunas rutas legacy (chat, surveys, sync) mantienen sus shapes históricos para no romper la app mobile y los webhooks de Windmill. Las nuevas rutas viven bajo `/v1/` y siguen 100% estas convenciones. Las cross-cutting (request_id, headers de rate limit, errores estructurados) aplican a **todas** las rutas.
+</Note>
+
+## Resource envelope
+
+Cada recurso lleva un campo `object` que identifica su tipo:
+
+```json
+{
+  "object": "event",
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "type": "booking.created",
+  "status": "pending",
+  "created_at": "2026-05-05T10:00:00.000Z"
+}
+```
+
+El campo `object` permite a los consumidores discriminar tipos sin parsear el path o leer headers.
+
+## Listas paginadas
+
+Las listas envuelven los items en un objeto con `object: "list"` y campos de paginación cursor:
+
+```json
+{
+  "object": "list",
+  "data": [
+    { "object": "event", "id": "...", "type": "booking.created", ... },
+    { "object": "event", "id": "...", "type": "booking.cancelled", ... }
+  ],
+  "has_more": true,
+  "next_cursor": "eyJpZCI6IjEyMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTA1LTA1In0"
+}
+```
+
+Detalle completo en [Paginación](./pagination).
+
+## Request ID
+
+Toda respuesta incluye el header `X-Request-ID`. Si el cliente envía uno, el servidor lo respeta y lo propaga (a logs, errores, etc.). Si no, el servidor genera uno (`req_<random>`).
+
+```http
+HTTP/1.1 202 Accepted
+X-Request-ID: req_a1b2c3d4e5f6
+Content-Type: application/json
+```
+
+Útil para soporte: incluye el `request_id` cuando reportes un problema.
+
+## Errores estructurados
+
+Todos los errores siguen el envelope:
+
+```json
+{
+  "error": {
+    "type": "invalid_request_error",
+    "code": "validation_error",
+    "message": "Payload does not match schema for booking.created",
+    "param": "aggregate_id",
+    "request_id": "req_a1b2c3d4e5f6",
+    "details": [
+      { "path": "aggregate_id", "message": "Required" }
+    ]
+  }
+}
+```
+
+Para no romper consumers existentes, la respuesta también incluye los campos legacy `statusCode`, `timestamp`, `path`, `method`, `message`. Los nuevos clientes deben leer **sólo** el envelope `error`.
+
+Catálogo completo en [Códigos de error](./errors).
+
+## Idempotency-Key
+
+Mutaciones sensibles aceptan el header `Idempotency-Key` (string arbitrario, máx 255 chars). Repetir el mismo POST con la misma key devuelve la misma respuesta sin re-ejecutar la lógica.
+
+```http
+POST /api/public/events/ingest
+Idempotency-Key: invoice_123_event
+```
+
+Detalle en [Idempotencia](./idempotency).
+
+## Rate limits
+
+Cada respuesta a una ruta con throttling expone:
+
+| Header | Significado |
+|---|---|
+| `X-RateLimit-Limit` | Cantidad máxima de requests por ventana |
+| `X-RateLimit-Remaining` | Requests restantes en la ventana actual |
+| `X-RateLimit-Reset` | Segundos hasta que la ventana se reinicia |
+| `Retry-After` | (sólo en 429) Segundos a esperar antes del próximo intento |
+
+El default global es **100 req/min** por IP. Algunos endpoints específicos tienen overrides (ej. `/public/events/ingest` permite 200/min).
+
+Cuando se excede el límite, la API devuelve `429 Too Many Requests` con el envelope de error:
+
+```json
+{
+  "error": {
+    "type": "rate_limit_error",
+    "code": "rate_limit_exceeded",
+    "message": "ThrottlerException: Too Many Requests",
+    "request_id": "req_..."
+  }
+}
+```
+
+## Versioning
+
+Endpoints **legacy** viven directamente bajo `/api/...` y mantienen su shape histórico.
+
+Endpoints **nuevos o migrados** viven bajo `/api/v1/...` y siguen 100% estas convenciones (envelope `object`, paginación cursor, etc.).
+
+Ejemplos:
+
+```
+/api/chat/bookings              ← legacy, shape histórico
+/api/v1/events                  ← v1, envelope nuevo
+/api/v1/events/:id              ← v1, envelope nuevo
+/api/public/events/ingest       ← público (sin /v1/), shape ya alineado
+```
+
+Para migrar, los nuevos PRs cambian el frontend o el integrador a la ruta `/v1/` correspondiente y deprecan la legacy.
+
+## Headers que el servidor siempre setea
+
+| Header | Cuándo |
+|---|---|
+| `X-Request-ID` | Siempre |
+| `X-RateLimit-Limit/Remaining/Reset` | En rutas con throttling |
+| `Retry-After` | En `429` |
+
+## Headers que el cliente puede enviar
+
+| Header | Efecto |
+|---|---|
+| `X-Request-ID` | Si llega (string ≤200 chars), el server lo respeta. Si no, genera uno. |
+| `Idempotency-Key` | Activa la idempotencia en endpoints que la soportan. |
+| `Authorization: Bearer <token>` | Auth0 JWT. |
+| `x-api-key` | API Key (rutas públicas como `/public/events/ingest`). |
+
+## Próximos pasos
+
+- [Códigos de error](./errors) — catálogo completo de `error.type` / `error.code`
+- [Paginación](./pagination) — usar cursores correctamente
+- [Idempotencia](./idempotency) — patrones de retry seguros
+- [Endpoints](./endpoints) — referencia exhaustiva
+- [Eventos (notifications)](../notifications/events-api) — payload-by-payload del catálogo

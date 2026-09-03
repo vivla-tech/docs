@@ -1,0 +1,157 @@
+---
+title: "Chat"
+description: "Sistema de mensajería y soporte en tiempo real basado en Stream Chat"
+---
+
+# Chat
+
+El módulo de Chat es el sistema central de comunicación de Vivla Tools. Permite gestionar conversaciones con huéspedes, administrar canales de soporte, crear tickets y coordinar agentes de atención.
+
+## Arquitectura
+
+El sistema se basa en **Stream Chat** como proveedor de mensajería en tiempo real. El backend actúa como orquestador: gestiona canales, usuarios, permisos y sincronización, mientras que Stream Chat maneja el transporte de mensajes y la presencia.
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│   Frontend   │────▶│   Backend    │────▶│  Stream Chat │
+│  (React SDK) │◀────│  (NestJS)    │◀────│   (SaaS)     │
+└──────────────┘     └──────────────┘     └──────────────┘
+                            │
+                     ┌──────▼──────┐
+                     │  Supabase   │
+                     │  (metadata) │
+                     └─────────────┘
+```
+
+## Sub-módulos
+
+El módulo de Chat está compuesto por **18 sub-módulos** en el backend:
+
+| Sub-módulo | Descripción |
+|------------|-------------|
+| **Channels** | CRUD de canales, operaciones batch (agente activo, moderadores, archivado, eliminación), filtros avanzados |
+| **Messages** | Registro de mensajes para analytics, consulta de historial por canal |
+| **Bookings** | Creación de canales por reserva, batch create/archive de canales de booking |
+| **Tickets** | Sistema de tickets de soporte (campos, adjuntos, SLAs, actividad, sync con Zendesk). Ver la sección [Tickets](/tickets/index) |
+| **Shifts** | Programación de turnos de agentes de soporte |
+| **Invitations** | Invitaciones a canales con tokens y deep links |
+| **Mobile** | Autenticación y endpoints específicos para vivla-mobile |
+| **Users** | Gestión de usuarios de chat |
+| **Quick Replies** | Respuestas rápidas reutilizables por los agentes, organizadas en grupos (CRUD de grupos y respuestas bajo `/chat/quick-replies`); cada respuesta tiene un `slug` editable desde Configuración > Respuestas rápidas, y en escritorio se insertan escribiendo `/` en el input del chat |
+| **Notifications** | Notificaciones específicas del chat |
+| **Analytics** | Métricas de uso: canales, usuarios, mensajes |
+| **Webhooks** | Recepción de eventos de Stream.io, Zendesk e invitaciones |
+| **Sync** | Sincronización de datos entre Supabase y Stream Chat |
+| **Property Assignments** | Mapeo de propiedades a canales |
+| **Channel Types** | Definición de tipos de canal (configuración de templates) |
+| **Integrations** | Integraciones con servicios externos |
+| **Copilot** | Cimientos del copiloto de IA por agente (`agent_key`): sesiones de conversación (regla 24h), caché de sugerencias y config de agente. Detalle en [AI → §6](/integrations/ai). El motor de generación llega en una fase posterior |
+| **Lola** | Asistente de IA (concierge) que atiende canales de propietarios/huéspedes en Stream: decide cuándo responder, llama al agente remoto de concierge y publica como Lola, alimenta su memoria ("escuchar ≠ responder"), entra/sale de guardia como un turno más y puede derivar a un humano. Ver [Lola](#lola-asistente-de-ia) |
+
+<Note>
+  **Bandeja interna: una sola consulta a Stream para todo el equipo.** El equipo
+  de CX es miembro de todos los canales, así que la lista de la bandeja es
+  idéntica para cada agente. En lugar de barrer Stream una vez por agente (con un
+  filtro `members` que no filtraba nada), `ChannelsService` hace **un único
+  barrido compartido** por tipo de canal, cacheado por tipos, y **deriva el no
+  leído de cada agente** del array `read` que la respuesta de Stream ya trae por
+  miembro (`unreadByUser`); cada petición recibe una copia superficial, así que
+  la marca de leído de un agente nunca cruza al de otro. La pertenencia se
+  reaplica en memoria (fail-open si Stream no devuelve miembros). Los badges de
+  las pestañas se cuentan sobre esa misma lista, sin una segunda consulta.
+
+  La caché **caduca por webhook**, no por reloj: `message.new` y `channel.updated`
+  llaman a `markInboxCachesStale()`, de modo que la bandeja se vuelve más fresca,
+  no menos. Un **suelo de refresco de 10 s** (`INBOX_REFRESH_FLOOR_MS`) acota el
+  gasto: nunca dos barridos separados por menos de eso, pase lo que pase —el
+  `fresh=true` que el frontend pide en cada evento marca la caché sucia pero no
+  fuerza un barrido dentro del suelo. El TTL de 5 min es solo la red de seguridad
+  por si se pierde un webhook.
+</Note>
+
+## Flujo principal
+
+### Creación de canales por booking
+
+1. Se reciben las reservas (bookings) desde el sistema externo
+2. Un agente o proceso automático crea canales asociados a cada booking
+3. Cada canal se vincula a una propiedad y un tipo de canal
+4. Se asignan agentes (activo y por defecto) y moderadores. Un canal de propiedad nunca se crea sin agente: si no se indica uno, el backend resuelve el agente por defecto desde la asignación `chat_agent` de la propiedad y, si no existe, desde el turno (shift) activo que la cubre; si tampoco hay turno, la creación falla con un `400` pidiendo asignar un agente en Configuración
+5. El huésped accede al canal desde la app mobile
+
+<Note>
+  **Una estancia continua = un canal.** Antes de crear un canal, `createBookingChannel` busca un canal vivo del mismo `user_id` + `property_hid` cuya ventana de estancia quede a ≤ 2 días de la reserva nueva (umbral `BOOKING_CONFIG.STAY_CONTIGUITY_DAYS`, ajustable con `BOOKING_CHANNEL_CONTIGUITY_DAYS`; `-1` lo desactiva). Si lo hay —y nadie más durmió en la casa durante el hueco— asocia la reserva a `channel_bookings`, ensancha las fechas del canal y **no** manda mensaje de bienvenida, en vez de abrir un segundo canal. Un propietario con semanas encadenadas recibe así un único canal. El punto es único: cubre el reconcile, el batch y el botón manual del panel.
+</Note>
+
+### Reconcile diario de canales de booking
+
+`POST /chat/bookings/channels/reconcile` (guard `Auth0OrApiKeyGuard`, cuerpo `{ dryRun?, windowDays? }`) repara automáticamente lo que el flujo manual de creación/archivado no cubrió. Es idempotente: cada ejecución repara **todo lo pendiente**, no solo "el lote del día", así que reintentarlo siempre es seguro.
+
+- **Crear**: bookings `book`/`rent`/`exchange`, no cancelados, `check_in_date` entre hoy y hoy+`windowDays` (default 30, 1-365), excluyendo semanas cedidas por el propietario (`EXCLUDE_OWNER_RELEASED_OR`) y las que ya tienen canal. El usuario de la estancia (`bookings_snapshot.user_id` → `users.vivla_user_id`) debe tener `chat_enabled=true` y su email no debe estar en `RECONCILE_SKIPPED_OCCUPANT_EMAILS` (lista separada por comas de cuentas internas de CX usadas como ocupante provisional en reservas sin cliente real asignado aún; default `cx.books@vivla.com`, sin necesidad de configurar nada) — si falta identidad Stream (`chat_user_id`), se sincroniza con el mismo camino que usa el flujo manual (`ChatUsersService.createStreamUser`), una vez por usuario aunque tenga varias reservas elegibles.
+- **Solo sobre reservas que siguen existiendo**: el candidato debe tener `bookings_snapshot.lifecycle = 'present'` y haberse confirmado contra el origen en las últimas 48 h (`last_seen_at`). vivla-api **sustituye** reservas en vez de editarlas —crea un documento hijo nuevo y el anterior deja de existir—, así que una reserva desaparecida conserva su fila con fechas futuras y estado activo: sin este filtro el reconcile le abría un canal a alguien que no viene. La ventana de 48 h cubre el caso de que el sync esté fallando y por tanto nadie haya reclasificado nada.
+- **Archivar**: reutiliza el mismo conjunto que la etiqueta `archive_now` (canal activo con `check_out_date` + días de gracia ya vencido). El corte usa el `max(check_out)` de **todas** las reservas no canceladas asociadas al canal (`getLiveBookingChannelStayEnds`), no solo la reserva primaria, para no cerrar a mitad de estancia un canal de semanas encadenadas. `archiveBookingChannel` devuelve `409` si el canal aún tiene una reserva viva; el archivado manual (`PATCH /chat/channels/:id/archive`) no se toca.
+- **Cerrar por desaparición, no solo por calendario** (`reconcileOrphanedBookingChannels`): si el canal no conserva ninguna reserva viva, se archiva y —cuando la sucesora cumple las condiciones normales— se crea uno **nuevo** para ella; no se transfiere. Si el canal **sí** conserva alguna reserva viva, no se archiva: se suelta únicamente el enlace de la reserva muerta en `channel_bookings` y el canal sigue intacto. Caso deliberadamente sin automatizar: la reserva **primaria** desaparecida en un canal que aún tiene reservas vivas — se registra en `needsReview` y lo decide una persona, porque repuntar la primaria a ciegas no es reversible.
+- **Creador del canal**: el usuario Auth0 autenticado o, si la llamada viene por `x-api-key` (Windmill), `VIVLA_ADMIN_USER_ID`. Si no hay ninguno de los dos, el endpoint falla con un error explícito en vez de crear canales sin dueño.
+- **Respuesta estructurada**: `{ dryRun, windowDays, created[], merged[], archived[], orphanChannels{archived[], unlinked[], needsReview[]}, skipped[{bookingId, reason}], streamUsersSynced[], errors[{bookingId, stage, error}], counts }`. `merged[]` lista las reservas que se anexaron a un canal de estancia continua existente en vez de abrir uno nuevo (también se reporta en dry-run). Un fallo por booking o por usuario (`user_not_in_chat`, `chat_disabled`, `cx_internal_occupant`, sync a Stream, creación, archivado) se aísla en la respuesta — nunca aborta el resto del batch. `cx_internal_occupant` no es un "todavía no" en la práctica: se midió que ninguna de las reservas pasadas a nombre de esa cuenta se reescribió nunca al usuario real. El filtro es correcto —evita atribuir un canal a la cuenta de CX—, pero el nombre del huésped se recupera aparte (ver más abajo).
+- **dryRun**: computa el mismo plan sin mutar nada (no crea canal, no archiva, no sincroniza a Stream); los usuarios pendientes de sync se cuentan igual como resultado planificado.
+- **Ciclo de vida de la reserva y su historial**: el sync diario marca `last_seen_at` en cada corrida y, al cierre, clasifica lo que ha dejado de llegar en el feed comparando **casa + semana exacta** contra el feed del día: `superseded` (otro `rent`/`exchange` ocupa la semana), `returned` (la ocupa un `book` del propietario), `released` (solo queda la oferta) o `vanished` (nada la ocupa). **Nunca se escribe `cancelled`**: una sustitución no es una cancelación, la estancia ocurre con otro ocupante. Cada cambio —desaparición, cambio de ocupante, de fechas o de canal— se anota en `bookings_snapshot_history`, con la misma forma que `chat_ticket_status_history`, y se lee en `GET /chat/bookings/:id/history` y en la card «Historial de la reserva» de la ficha. Es el único registro que existe: ni Firestore ni el Postgres v2 de vivla-api guardan historia de reservas. Backfill de lo ya congelado: `pnpm backend backfill:bookings-lifecycle` (simulacro por defecto; no archiva ni borra nada).
+- **Puente de ids con v2** (`BookingsV2BridgeService`): cada noche, tras el sync, empareja `bookings_snapshot` con el Postgres v2 de vivla-api por `bookings.old_bid` y guarda `v2_booking_id` / `v2_stay_id`. Ese puente **solo existe mientras conviven las dos fuentes**: el día que vivla-api corte, `old_bid` deja de publicarse y reconstruir el mapeo sería imposible sin él. Registra además la deriva en `bookings_v2_drift` (`missing_in_v2`, `missing_in_v1`, `field_mismatch`), que retrata el estado **actual** — cada corrida la reemplaza. Es solo lectura sobre v2 y nunca aborta el sync. Quedan fuera del cotejo, por ser desacuerdos de modelo conocidos y no deriva: las ofertas `to_rent`/`to_swap` (v2 no las modela) y `book` frente a `thirdhome` (v1 lo lleva como `third_home_status`). ⚠️ El esquema de v2 se mueve mientras dura la migración: el 5-ago-2026 `bookings.start_day`/`end_day` pasaron a llamarse `from`/`to`.
+- **Campos espejo vs. campos derivados**: `bookings_snapshot` **no se regenera** —el sync hace upsert por id y nada borra filas—, pero **sí reescribe 36 de sus 42 columnas en cada corrida**, escribiendo `null` cuando el origen no trae valor. Para un campo espejo eso es correcto. Para los que tools **deduce** en vez de copiar (`main_guest_name/email/phone`, ver abajo) no lo es: la resolución del origen puede fallar cualquier noche y borraría un dato bueno. `preserveDerivedFields` (`snapshot-field-policy.ts`) conserva el valor anterior cuando el nuevo llega vacío — un cambio real sí lo sustituye. **Cualquier campo nuevo que se calcule en vez de copiarse tiene que añadirse a `DERIVED_SNAPSHOT_FIELDS`**, o el sync se lo come sin dejar rastro. Es el mismo fallo que hubo que arreglar tres veces en el sync de casas.
+- **Huésped real**: cuando CX gestiona un alquiler por fuera, la reserva hija queda a nombre de la cuenta interna de CX y el nombre de quien va vive en la **oferta del propietario** (`main_guest`). El provider lo hereda del documento origen —resuelto por `origin_book` y, si falta, por casa + semana— y lo guarda en `main_guest_name/email/phone`, que la ficha ya muestra como «Huésped externo». Es texto libre escrito a mano y a veces se contradice con las notas: es un dato de gestión, no una identidad, y nunca se usa para atribuir un canal.
+- **Primer mensaje automático**: al crear el canal, `BookingWelcomeService` publica como usuario Vivla el mensaje de bienvenida que CX antes pegaba a mano — la quick reply `check-in-breve`, interpolada con el nombre de la casa y las fechas de la estancia. Es best-effort (nunca aborta la creación del canal) y está apagado salvo que se ponga `BOOKING_WELCOME_ENABLED=true` en el backend; si la quick reply se borra o pierde el placeholder `{{propertyName}}`, no se envía.
+
+Cron de referencia en Windmill: `f/vivla_tools/chat/reconcile_booking_channels` — ver [Windmill → Booking channels reconcile](/platform/windmill#booking-channels-reconcile-diario).
+
+### Lola (asistente de IA)
+
+`chat/ai-agent/` (antes `chat/lola/`; el módulo se renombró para ser **agente-agnóstico** y poder alojar varias IAs sobre la misma infraestructura) añade una asistente de IA —**Lola**— que atiende canales directamente en Stream, sobre la misma infraestructura de webhooks que el copiloto. Los endpoints HTTP siguen expuestos bajo `/chat/lola/…`. Piezas:
+
+- **Policy + Trigger**: `AiAgentPolicyService` decide si responder (solo mensajes de propietario/huésped y solo cuando Lola es el agente activo del canal); `AiAgentTriggerService` agrupa las ráfagas con un debounce y deduplica por id de mensaje para que un reintento del webhook nunca genere una segunda respuesta. Si llega un mensaje nuevo mientras un turno sigue en vuelo, aborta el turno en curso y encola el último (lock por canal), en vez de solaparlos.
+- **Responder**: `AiAgentResponderService` llama al agente remoto de concierge (`ConciergeAgentClient`) y publica la respuesta como Lola, **troceada en burbujas por párrafo** sobre el stream (regla RÁFAGA de su persona; nunca parte dentro de un bloque de código). Si el turno falla (error o timeout), un **failsafe** deriva el canal a la persona de guardia con una nota técnica en vez de dejar al propietario en silencio; no reintenta el turno (el concierge puede seguir ejecutándose tras un abort del cliente, así que un reintento duplicaría efectos).
+- **Reacciones y acks deterministas (VIV fluidez/reacciones)**: Lola puede reaccionar al último mensaje del propietario con un emoji (`love`/`like`) en vez de —o además de— responder con texto, vía la tool de IA `chat_react_to_message`; el canal se resuelve **server-side** desde el `channelId` del contexto (nunca lo elige el modelo, mismo anti-spoofing que `chat_handoff_to_human`). Un turno cuya única acción fue una reacción con éxito (**turno solo reacción**) no publica ninguna burbuja. Además, mientras el turno trabaja, el responder publica **acks deterministas** (uno como máximo por turno, en el primer `tool_use` de una whitelist) para que un turno lento no deje al propietario esperando en silencio. Las reacciones del propietario sobre los mensajes de Lola (`reaction.new`) también se reenvían a la memoria de concierge como una nota de contexto.
+- **Visión ("Lola ve fotos", VIV-2099)**: cuando el turno trae fotos (hasta `MAX_IMAGES_PER_TURN` = 4, tras colapsar la ráfaga en el debounce), `AiAgentImageService` las descarga server-side y las normaliza con `sharp` (rota por EXIF, reescala a 1568 px en el lado largo y reencoda a JPEG; así resuelve HEIC, formatos raros y cuerpos gigantes de una pasada), y el responder las manda como `content` multimodal junto al texto. Los turnos sin fotos —la inmensa mayoría— envían el `content` de texto plano de siempre. Si una descarga falla, se avisa en el mensaje en vez de ignorar la foto en silencio.
+- **Memoria ("escuchar ≠ responder")**: `AiAgentIngestForwarderService` reenvía **toda** la conversación (incluidos los mensajes de CX) al ingest de memoria de concierge, responda Lola o no; las fotos se anotan en memoria en vez de descartarse. Endurecido con reintento, read-repair y un reconcile programado (`POST /chat/lola/ingest-reconcile`).
+- **Guardia**: `POST /chat/lola/guardia` enciende/apaga a Lola como agente activo global mediante un único turno dedicado en `chat_shifts` (mismo motor que los turnos humanos); Windmill la pone de guardia según horario.
+- **Handoff a humano**: Lola puede derivar la conversación al equipo mediante los endpoints `GET /chat/lola/handoff/pending/:channelId` y `POST /chat/lola/handoff/:id/acknowledge`. El estado se persiste en la tabla `chat_handoffs` y el frontend muestra el aviso con `HandoffBanner`. Al reconocerlo, CX puede dejar una nota y marcar «ya he contactado al cliente por otro canal» (*salvoconducto*): Lola publica entonces una constancia al propietario y el barrido deja de perseguir ese canal. Ese **barrido durable** —`POST /chat/lola/handoff/sweep`, lanzado por Windmill cada ~5 min— sustituye a los antiguos temporizadores en proceso (que morían en cada deploy y solo cubrían urgencia alta): auto-reconoce el handoff si ya hubo respuesta humana no-IA en el canal y, si no, escala por urgencia (alta: recordatorio de buzón a los 15 min + Slack/email a CX a los 30 min, incluido el fallback sin CX asignado; normal: solo email a CX a las 4 h en horario laboral), idempotente vía `reminded_at`/`escalated_at` (migración `192`). **Gate día/noche (Handoff v2)**: un handoff creado fuera del horario de atención de CX (Europe/Madrid L-V 9-19, Sáb 10-15) y sin guardia cubriendo la propiedad no se reasigna en el acto —se registra con `deferred_until` y `reassigned_at` en `NULL`, Lola sigue de agente activo— y el barrido lo **promociona** (reresolviendo el destinatario) al abrir la ventana de CX; los handoffs inmediatos (horario laboral o guardia activa) sellan `reassigned_at` al crearse. La escalera de escalación cuenta la antigüedad desde `reassigned_at ?? created_at`, así que un pase diferido nunca escala de noche (columnas en la migración `202`).
+- **Escalación a un equipo interno**: cuando el tema queda fuera del alcance de CX, Lola puede llamar a la tool de IA `chat_send_team_escalation` para avisar por email al equipo que corresponde (finanzas, legal, ventas u `otro`). El propietario y la casa se resuelven **server-side** desde el canal —Lola nunca ve ni inventa una dirección— y solo se persiste una fila en `agent_escalations` (migración `191`) cuando el email se envió de verdad, para que Lola nunca diga «ya he avisado» sin haberlo hecho. Buzones configurables por env (`LOLA_ESCALATION_EMAIL_*`).
+- **Modo borrador y modo sombra (F8, VIV-2099-shadow)**: cuando un canal —o todo el sistema— está en **modo borrador**, el turno de Lola corre completo pero **no se postea**: las burbujas que habría enviado se guardan como `agent_draft_messages` pendientes (migración `218`) y CX las aprueba/edita/descarta desde una tarjeta en la conversación (patrón draft→approve→send). `AiAgentDraftModeService` resuelve el modo con dos fuentes independientes (gana cualquiera true, fail-closed a `false`): el kill-switch PostHog `ai-agent-draft-mode` (identidad estable, todo-o-nada) y el opt-in por canal `draftMode` en el custom data de Stream. En **modo sombra**, `AiAgentPolicyService` abre un segundo camino de respuesta: aunque el agente activo del canal sea un humano, si el canal está en `draftMode` Lola redacta igualmente en la sombra en vez de callar. El diff `content` vs `edited_content` es la métrica de promoción de autonomía. **Un solo borrador pendiente por canal (VIV-2099, supersede-on-create):** cada mensaje del propietario dispara un turno nuevo, así que `createDraft` retira antes todos los `pending` previos del canal (`status='discarded'`, `discard_reason='reemplazado por un borrador más nuevo'`, sin evento de actividad por descarte) y el nuevo queda como único vivo — antes se apilaban sobre el compositor (CX vio hasta 5 en un canal). La tarjeta en la conversación arranca **colapsada** (una línea sage "Lola tiene una respuesta preparada · N burbujas · Ver") y se expande al pulsar, para no tapar el chat; la del home despacho (variant `compact`) no cambia. Endpoints bajo `chat/agent-drafts`: `GET /chat/agent-drafts` (lista, filtrable por `status`/`channelId`), `GET /chat/agent-drafts/stats` (tasas approve/edit/discard por canal y global sobre N días, más `upVotes`/`downVotes` globales), `POST /chat/agent-drafts/:id/approve|edit|discard` (`discard` acepta motivo opcional, migración `219`), y `POST /chat/agent-drafts/:id/feedback` (voto cualitativo 👍/👎 + comentario opcional, VIV-2099, migración `227`; idempotente, válido sobre cualquier `status`). Lectura con `viewer`, mutaciones con `editor` sobre `tool-chat`.
+- **Consulta al equipo ("ask a teammate", F2)**: Lola puede llamar a la tool de IA `chat_ask_team` para preguntar internamente **sin traspasar el canal** —la conversación se queda con ella—; registra una fila en `agent_team_questions` (migración `216`), asigna al Responsable del canal (`chat_channels.default_agent_user_id`) pero avisa a todo el buzón admin/moderador para que quede team-visible. CX responde con `PATCH /chat/agent-questions/:id/answer`, lo que dispara un turno asíncrono de Lola para que conteste al propietario ella misma; `GET /chat/agent-questions` lista las preguntas (para la sección ChannelInfo). Un **barrido durable** —`POST /chat/lola/questions/sweep`, lanzado por Windmill (gate `admin`)— recuerda al asignado a las 4 h laborables y escala por email al buzón de CX a las 24 h, idempotente vía `reminded_at`/`escalated_at`.
+
+Todos los endpoints de `chat/lola`, `chat/agent-drafts` y `chat/agent-questions` usan el guard `Auth0OrApiKeyGuard`.
+
+<Note>
+  En los mensajes de sistema al conectarse/desconectarse, Lola siempre se identifica como asistente de IA de Vivla (transparencia EU AI Act); nunca se la presenta como "bot".
+</Note>
+
+### Guardias (turnos): sync con Google Calendar y reconciler
+
+Las guardias de CX se planifican en un **Google Calendar** (`chat/shifts/gcal/`) y se aplican como turnos en `chat_shifts`. Todo el intercambio es best-effort y anti-eco (last-write-wins por `gcal_updated_at`).
+
+- **Pull (Google → Tools)**: `POST /chat/shifts/sync/gcal` (guard `Auth0OrApiKeyGuard`) crea un job `sync_guardias` y `GcalSyncService` escribe **directo** en `chat_shifts` (`source='gcal'`), saltándose `ShiftsService` (sin notificaciones ni audit). Solo eventos all-day titulados `GUARDIA <NOMBRE>` con un invitado `@vivla.com` que resuelva a un usuario `moderator`/`admin`; el evento se mapea a la ventana 19:00→08:00 Europe/Madrid. Incremental por `syncToken`, con fallback de ventana completa `[hoy − 1 mes, hoy + 6 meses]`. **Nunca** marca `is_active`: activar es trabajo del reconciler.
+- **Push (Tools → Google)**: `GcalPushService` se dispara desde `ShiftsService.create/update/remove` solo para turnos `shiftTypeKey='shift'`; sella `google_event_id`/`gcal_updated_at`/`synced_at` en la fila para que el siguiente pull reconozca el evento como ya aplicado.
+- **Reconciler**: `POST /chat/shifts/reconcile` (guard `Auth0OrApiKeyGuard`, `@RequireTool('tool-chat','admin')`) activa/desactiva la guardia sincronizada vigente. Es idempotente y opera solo sobre filas `source='gcal'`. Antes de tocar nada aplica una **máscara de cobertura** (`isWithinGuardiaMask`: noches L-V 19:00→08:00, findes continuo Vie 19:00 → Lun 08:00), para que un evento multi-día no reasigne canales en horario de oficina — la salvaguarda contra el incidente del 2026-07-28 que reasignó 463 canales.
+- **Silent relief**: el reconciler pasa `postSystemMessages=false`, así que el relevo (DB + `active_agent` en Stream) ocurre sin publicar los mensajes de sistema "X se ha unido/desconectado" — es un handoff interno de CX, no noticia para el propietario. La activación manual y la guardia de Lola sí los publican. La activación/desactivación de turnos solo toca canales de **propiedad y booking** (`GUARDIA_CHANNEL_TYPES`).
+- **Asiento de IA**: el flag `users.is_ai_agent` (migración `189`) + `AiAgentsService` son la única fuente de verdad de qué usuarios son agentes de IA. Una guardia humana **no roba** canales atendidos por una IA (`excludeAiAgentAttendedChannels`); el reconciler solo avisa por log si va a desalojar el asiento de IA, pero no cambia el resultado (last-to-activate wins).
+- **Restore consciente de ausencias**: al desactivar un turno, cada canal vuelve a su `default_agent`, salvo que ese agente esté en un turno de ausencia (`vacation`, `work_travel`, `sick_leave`, `personal_day`), en cuyo caso se redirige a su `coverage_agent`.
+
+Esquema: la migración `188` añade a `chat_shifts` las columnas `source`, `google_event_id`, `gcal_updated_at`, `synced_at` y crea la tabla `chat_gcal_sync_state`. Env del pull/push: `GOOGLE_CALENDAR_SERVICE_ACCOUNT_JSON` + `CX_GUARDIAS_CALENDAR_ID` (ambas ausentes → no-op). Crons de referencia en Windmill: `sync_guardias` y `reconcile_guardias` — ver [Windmill → Guardias](/platform/windmill#guardias-gcal-sync-y-reconciler).
+
+### Gestión de tickets
+
+1. Un agente selecciona mensajes de una conversación
+2. Crea un ticket con título, prioridad y los mensajes seleccionados
+3. El ticket se puede actualizar, agregar más mensajes y resolver
+4. Filtros por estado, prioridad, propiedad y agente asignado
+
+## Webhooks
+
+El sistema recibe eventos externos en:
+
+| Endpoint | Origen | Validación |
+|----------|--------|------------|
+| `POST /api/chat/webhooks/stream` | Stream.io | Firma de Stream |
+| `POST /api/chat/webhooks/invitation-accepted` | Vivla | HMAC-SHA256 (X-Vivla-Signature) |
+
+<Note>
+  Los webhooks son públicos (sin Bearer token) pero están protegidos por validación de firma criptográfica.
+</Note>

@@ -1,0 +1,110 @@
+---
+title: "Community"
+description: "Plataforma de gestión de propiedades, guías, inventario y limpieza"
+---
+
+# Community
+
+El módulo Community es la plataforma de gestión de propiedades de Vivla. Permite administrar guías de uso, inventario, protocolos de limpieza, planos, fotos y reglas de estilo para cada propiedad.
+
+## Dashboard
+
+Ruta: `/app/community/`
+
+El dashboard principal muestra métricas de completitud a nivel global:
+
+| Métrica | Descripción |
+|---------|-------------|
+| Propiedades | Cantidad de propiedades activas vs inactivas |
+| Guías | Guías publicadas vs en borrador |
+| Planos | Porcentaje de propiedades con planos completos |
+| Limpieza | Cobertura de guías de limpieza |
+| Estancias | Porcentaje de propiedades con ambientes configurados |
+| Fotos | Cobertura fotográfica por propiedad |
+| Styling | Completitud de reglas de estilo |
+
+## Gestión de propiedades
+
+Ruta: `/app/community/properties/`
+
+### Vista de lista
+
+Grid de tarjetas de propiedad con:
+- Filtros por tipo de propiedad y ubicación
+- Estado activo/inactivo
+- Diálogo de creación de nueva propiedad
+
+### Vista de propiedad
+
+Ruta: `/app/community/properties/$propertyId/`
+
+Cada propiedad tiene las siguientes secciones:
+
+<CardGroup cols={2}>
+  <Card title="Dashboard" icon="chart-bar">
+    **`/dashboard`** — Métricas de completitud específicas de la propiedad. Incluye generación de QR codes para acceso público, links de compartir y edición de datos de la propiedad.
+  </Card>
+  <Card title="Guía de uso" icon="book">
+    **`/guide`** — Builder de guías con contenido enriquecido. Guías organizadas por categoría de electrodoméstico/equipamiento.
+  </Card>
+  <Card title="Limpieza" icon="broom">
+    **`/cleaning`** — Reglas de limpieza organizadas por tipo de estancia. Incluye galería de fotos por paso y gestión de sesiones de limpieza.
+  </Card>
+  <Card title="Galería" icon="images">
+    **`/gallery`** — Gestión de fotos de la propiedad con capacidad de subida.
+  </Card>
+  <Card title="Inventario" icon="boxes-stacked">
+    **`/inventory`** — Inventario por estancia: electrodomésticos, menaje de cocina, ropa de cama, decoración, mobiliario, iluminación.
+  </Card>
+  <Card title="Planos" icon="map">
+    **`/planos`** — Planos de planta con soporte para imágenes y PDFs.
+  </Card>
+  <Card title="Ambientes" icon="door-open">
+    **`/ambientes`** — Configuración de estancias/espacios de la propiedad.
+  </Card>
+  <Card title="Electrodomésticos" icon="blender">
+    **`/appliances`** — Documentación de electrodomésticos con guías de uso.
+  </Card>
+  <Card title="Styling" icon="palette">
+    **`/styling`** — Reglas de estilo visual para la propiedad.
+  </Card>
+</CardGroup>
+
+## Templates globales
+
+Además de la gestión por propiedad, existen vistas globales para administrar templates reutilizables:
+
+| Ruta | Descripción |
+|------|-------------|
+| `/app/community/guides` | Editor de guías (seleccionar propiedad → editar) |
+| `/app/community/appliances` | Templates globales de electrodomésticos |
+| `/app/community/cleaning` | Templates de limpieza con filtro por tipo de propiedad (playa/ski/todas) |
+| `/app/community/inventory` | Templates globales de inventario |
+| `/app/community/photos` | Templates y directrices de fotografía |
+| `/app/community/styling` | Reglas de estilo globales |
+
+## Backend: sub-módulos
+
+El backend del módulo Community (`/api/community/`) se compone de **15 sub-módulos**:
+
+| Sub-módulo | Prefijo API | Operaciones |
+|------------|-------------|-------------|
+| Properties | `/properties` | CRUD + asignación + integración API externa |
+| Rooms | `/rooms` | CRUD de estancias |
+| Locations | `/locations` | Gestión de ubicaciones |
+| Items | `/items` | CRUD de ítems individuales |
+| Inventory | `/inventory` | Gestión de inventario por propiedad |
+| Cleaning | `/cleaning` | Reglas de limpieza |
+| Cleaning Sessions | `/cleaning-sessions` | Sesiones de limpieza (tracking) |
+| Cleaning Templates | `/cleaning-templates` | Templates reutilizables |
+| Photos | `/photos` | Gestión de fotos |
+| Floor Plans | `/floor-plans` | Planos de planta |
+| Guides | `/guides` | Guías de uso |
+| Appliance Guides | `/appliance-guides` | Guías de electrodomésticos |
+| QR Codes | `/qr-codes` | Generación de códigos QR |
+| Styling Rules | `/styling-rules` | Reglas de estilo |
+| Dashboard | `/dashboard` | Métricas de overview |
+
+<Note>
+  Las propiedades también se pueden crear mediante integración API externa (`POST /api/community/properties/api-integration`) usando autenticación por API key, lo que permite automatizar la creación desde otros sistemas de Vivla.
+</Note>

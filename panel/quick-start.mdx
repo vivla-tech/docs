@@ -1,0 +1,75 @@
+---
+title: "Inicio rápido"
+description: "Cómo levantar el Panel en local"
+---
+
+# Inicio rápido
+
+Guía para arrancar el Panel en tu máquina por primera vez.
+
+## Requisitos previos
+
+- **Node.js** y **Yarn** instalados
+- Acceso al repo [vivla-tech/vivla-panel](https://github.com/vivla-tech/vivla-panel)
+- Credenciales de Auth0 y Sentry (pídelas al equipo)
+
+## Instalación
+
+```bash
+git clone git@github.com:vivla-tech/vivla-panel.git
+cd vivla-panel
+yarn install
+cp env.template .env.localdev
+```
+
+## Variables de entorno
+
+Edita `.env.localdev` con tus valores:
+
+```env
+VITE_APP_ENV=localdev
+VITE_API_BASE_URL=http://localhost:3000
+VITE_AUTH0_CLIENT_ID=...
+VITE_AUTH0_DOMAIN=...
+VITE_AUTH0_AUDIENCE=...
+VITE_SENTRY_DSN=...
+```
+
+<Tip>
+  Para apuntar a la API local de Vivla, levanta `vivla-api` en `localhost:3000` antes de arrancar el panel.
+</Tip>
+
+## Arrancar el servidor de desarrollo
+
+```bash
+yarn dev
+```
+
+El panel queda disponible en `http://localhost:5173`.
+
+### Otros modos
+
+| Comando | Entorno |
+| --- | --- |
+| `yarn dev` | localdev (API local) |
+| `yarn dev --mode staging` | staging |
+| `yarn dev --mode prod` | producción |
+
+## Builds
+
+| Comando | Resultado |
+| --- | --- |
+| `yarn build:local` | Build con envs de localdev |
+| `yarn build:staging` | Build para staging |
+| `yarn build:prod` | Build para producción |
+| `yarn preview` | Sirve el build localmente |
+
+## Calidad de código
+
+```bash
+yarn lint
+```
+
+## Siguiente paso
+
+Si vas a tocar código, revisa la página de **Arquitectura** para entender la organización de `src/features` y `src/pages`.

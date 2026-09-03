@@ -1,0 +1,292 @@
+---
+title: 'Servicios Compartidos'
+description: 'Servicios globales: API client, storage, upload y más'
+---
+
+# Servicios Compartidos
+
+Ubicación: `src/shared/services/`
+
+Los servicios encapsulan lógica de infraestructura y comunicación con sistemas externos. Todos son singletons o funciones puras sin estado de UI.
+
+## API Client
+
+**Archivo:** `api/client.ts`
+
+El cliente HTTP central de la aplicación, construido sobre Axios.
+
+### Configuración
+
+| Parámetro     | Valor                   | Descripción                               |
+| ------------- | ----------------------- | ----------------------------------------- |
+| Timeout       | 30 segundos             | Tiempo máximo por request                 |
+| Token caching | 5 segundos              | Evita lecturas repetidas al SecureStore   |
+| Retry         | 3 intentos, 500ms delay | Vía axios-retry, solo para errores de red |
+| Idioma        | Query param automático  | Inyecta el idioma actual del usuario      |
+| Guest mode    | Soportado               | Permite requests sin autenticación        |
+
+### Interceptores
+
+<Tabs>
+  <Tab title="Request">
+    1. Obtiene el access token (con cache de 5s) 2. Agrega header `Authorization: Bearer {token}` 3.
+    Inyecta el idioma como query parameter 4. Si el token está expirado, intenta refresh antes de
+    enviar
+  </Tab>
+  <Tab title="Response">
+    1. Retorna `response.data` directamente 2. En caso de 401: intenta refresh del token 3. Encola
+    requests pendientes mientras se refresca el token 4. Reintenta requests encolados con el nuevo
+    token
+  </Tab>
+</Tabs>
+
+### Métodos disponibles
+
+```typescript
+apiClient.get<T>(url, config?)
+apiClient.post<T>(url, data?, config?)
+apiClient.put<T>(url, data?, config?)
+apiClient.patch<T>(url, data?, config?)
+apiClient.delete<T>(url, config?)
+apiClient.request<T>(config)
+```
+
+<Warning>
+  Nunca instancies un segundo cliente Axios. Usa siempre `apiClient` exportado desde este módulo
+  para garantizar la inyección de tokens y el manejo de refresh.
+</Warning>
+
+---
+
+## Error Handler
+
+**Archivo:** `api/errorHandler.ts`
+
+Clasifica y procesa errores de red para mostrar mensajes amigables al usuario e informar a Sentry.
+
+### Clasificación de errores
+
+| Tipo      | Condición                             | Acción                              |
+| --------- | ------------------------------------- | ----------------------------------- |
+| Timeout   | `ECONNABORTED` o `code === 'TIMEOUT'` | Mensaje de timeout al usuario       |
+| DNS       | `ENOTFOUND`                           | Mensaje de conexión                 |
+| TLS       | Error de certificado                  | Mensaje de seguridad                |
+| Cancelled | `CancelledError` o abort              | Silenciado                          |
+| Unknown   | Cualquier otro                        | Mensaje genérico + reporte a Sentry |
+
+### Integración con Sentry
+
+- Agrega breadcrumbs con detalles del request (URL, método, status)
+- Reporta errores no cancelados como excepciones
+- Incluye contexto extra: response body, headers relevantes
+
+---
+
+## Mock Response Handler
+
+**Archivo:** `api/mockResponseHandler.ts`
+
+<Note>
+  Este servicio solo está activo en modo desarrollo. En producción no se incluye en el bundle.
+</Note>
+
+Proporciona respuestas simuladas para endpoints durante desarrollo local:
+
+- `register` — Simula registro de usuario
+- `deleteAccount` — Simula eliminación de cuenta
+- Endpoints de booking — Simula flujos de reserva
+
+---
+
+## Secure Storage
+
+**Archivo:** `storage/secureStorage.ts`
+
+Wrapper de `expo-secure-store` con retry y backoff exponencial.
+
+### Configuración de retry
+
+| Parámetro          | Valor               |
+| ------------------ | ------------------- |
+| Máximo de intentos | 3                   |
+| Estrategia         | Backoff exponencial |
+| Primer retry       | ~100ms              |
+
+### Datos gestionados
+
+<CardGroup cols={2}>
+  <Card title="Tokens de autenticación">
+    - Access token - Refresh token - Token expiry timestamp
+  </Card>
+  <Card title="Datos de usuario">
+    - Información del perfil serializada - Se almacena como JSON cifrado
+  </Card>
+</CardGroup>
+
+### Métodos
+
+| Método                                 | Descripción                              |
+| -------------------------------------- | ---------------------------------------- |
+| `storeTokens(access, refresh, expiry)` | Guarda los tres tokens de autenticación  |
+| `getTokens()`                          | Recupera access + refresh + expiry       |
+| `getAccessToken()`                     | Obtiene solo el access token             |
+| `getRefreshToken()`                    | Obtiene solo el refresh token            |
+| `storeUserData(data)`                  | Persiste datos del usuario               |
+| `getUserData()`                        | Recupera datos del usuario               |
+| `clearAllAuthData()`                   | Elimina todos los datos de autenticación |
+| `isTokenExpired()`                     | Verifica si el access token ha expirado  |
+
+<Warning>
+  Nunca almacenes tokens o datos sensibles en AsyncStorage. Usa siempre SecureStorage para
+  información de autenticación.
+</Warning>
+
+---
+
+## Upload Service
+
+**Archivo:** `uploadService.ts`
+
+Gestiona la subida de imágenes a S3 con compresión previa y tracking de progreso.
+
+### Flujo de upload
+
+1. **Compresión** de la imagen según parámetros configurados (quality, maxWidth, maxHeight)
+2. **Obtención** de una signed URL desde el backend
+3. **Upload** directo a S3 vía `PUT` con la signed URL
+4. **Tracking** del progreso para actualizar la UI
+
+### Categorías de upload
+
+| Categoría         | Uso                                   |
+| ----------------- | ------------------------------------- |
+| `home-issues`     | Fotos de incidencias en la propiedad  |
+| `property-photos` | Fotos de la propiedad para el listing |
+| `profile-photos`  | Foto de perfil del usuario            |
+| `documents`       | Documentos adjuntos                   |
+
+---
+
+## Linking Service
+
+**Archivo:** `linkingService.ts`
+
+Parser y router de deep links. Gestiona la navegación desde URLs externas hacia pantallas de la app.
+
+### Capacidades
+
+- Soporta URL schemes nativos y links web (universal links)
+- Crea links compartibles para diferentes entidades
+- Mapea URLs entrantes a rutas de Expo Router
+- Procesa deep links provenientes de push notifications
+
+### Tipos de link soportados
+
+| Tipo             | Descripción                     |
+| ---------------- | ------------------------------- |
+| `invite`         | Invitación a la plataforma      |
+| `booking`        | Enlace a una reserva específica |
+| `booking-review` | Enlace a review de una estancia |
+| `property`       | Enlace a una propiedad          |
+| `custom`         | Links con rutas personalizadas  |
+
+<Note>
+  El servicio tiene configuradas más de 20 rutas de pantalla. Cada ruta mapea un patrón de URL a una
+  pantalla específica de Expo Router.
+</Note>
+
+---
+
+## Query Invalidation Service
+
+**Archivo:** `queryInvalidationService.ts`
+
+Centraliza la invalidación de caches de React Query para mantener la coherencia de datos entre módulos.
+
+### Métodos
+
+| Método                             | Descripción                                               |
+| ---------------------------------- | --------------------------------------------------------- |
+| `invalidateAllStaysQueries()`      | Invalida todas las queries de estancias                   |
+| `invalidateBookingQueries()`       | Invalida queries de reservas                              |
+| `invalidatePropertyQueries()`      | Invalida queries de propiedades                           |
+| `invalidateWalletBalanceQueries()` | Invalida queries de balance del wallet                    |
+| `forceRefreshStays()`              | Fuerza re-fetch de estancias                              |
+| `forceRefreshAll()`                | Invalida y refresca todos los caches                      |
+| `onPropertySelectionChange()`      | Limpia caches al cambiar de propiedad                     |
+| `onBookingStateChange()`           | Invalida caches afectados por cambio de estado de booking |
+| `clearAllUserData()`               | Limpia todos los caches del usuario (logout)              |
+
+---
+
+## Version Gate
+
+**Ubicación:** `services/versionGate/`
+
+Servicio que verifica la versión instalada de la app contra los valores `min` y `current` del backend, mostrando un modal bloqueante (actualización obligatoria) o un banner dismissible (actualización recomendada).
+
+### Archivos
+
+| Archivo               | Descripción                                                      |
+| --------------------- | ---------------------------------------------------------------- |
+| `types.ts`            | `VersionInfo` (respuesta API) y `VersionCheckResult` (estado)    |
+| `api.ts`              | `fetchAppVersions()` — raw axios GET, retry once, fail open      |
+| `useVersionCheck.ts`  | Hook principal: comparación semver, dismiss, deep link a store   |
+| `versionGateStore.ts` | Zustand store que expone `isActive` para coordinar otros modales |
+| `index.ts`            | Barrel exports                                                   |
+
+### API Call
+
+```typescript
+GET {API_URL}/v1/app-versions?platform=ios|android
+```
+
+- **Sin autenticación** — usa `axios.get()` directo, no el cliente centralizado
+- **Timeout:** 5 segundos
+- **Retry:** 1 reintento en caso de fallo
+- **Fail open:** si ambos intentos fallan, el usuario pasa sin bloqueo
+- **Response format:** soporta tanto `{ min, current }` (filtrado) como `{ ios: {...}, android: {...} }` (nested)
+
+### Comparación de versiones
+
+Compara la versión instalada (`Constants.expoConfig?.version`) contra:
+
+| Condición              | Resultado            | UI                             |
+| ---------------------- | -------------------- | ------------------------------ |
+| `installed < min`      | `update-required`    | Modal bloqueante (sin dismiss) |
+| `installed < current`  | `update-recommended` | Banner dismissible             |
+| `installed >= current` | `up-to-date`         | Sin UI                         |
+
+### Coordinación con otros modales
+
+El `versionGateStore` expone `isActive: boolean` que otros componentes pueden consultar para esperar a que el version gate se resuelva antes de mostrar sus propios modales. Por ejemplo, `AutoShowReviewModal` espera a que `isActive` sea `false`.
+
+### Store URLs
+
+| Plataforma | URL                                                           |
+| ---------- | ------------------------------------------------------------- |
+| iOS        | `https://apps.apple.com/es/app/vivla/id6448851807`            |
+| Android    | `https://play.google.com/store/apps/details?id=com.vivla.app` |
+
+### Analytics
+
+| Evento                     | Trigger                                             |
+| -------------------------- | --------------------------------------------------- |
+| `version_update_dismissed` | Usuario toca "Maybe later" en el banner recomendado |
+
+---
+
+## Onboarding Service
+
+**Archivo:** `onboardingService.ts`
+
+Wrapper del `onboardingStore` que expone métodos simples para gestionar el estado del onboarding.
+
+### Métodos
+
+| Método                     | Descripción                                  |
+| -------------------------- | -------------------------------------------- |
+| `getOnboardingStatus()`    | Obtiene si el usuario ya vio el onboarding   |
+| `markOnboardingComplete()` | Marca el onboarding como completado          |
+| `clearOnboardingStatus()`  | Resetea el estado (para testing/debug)       |
+| `markOnboardingUnseen()`   | Fuerza que el onboarding se muestre de nuevo |

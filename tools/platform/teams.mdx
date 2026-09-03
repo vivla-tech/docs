@@ -1,0 +1,74 @@
+---
+title: "Equipos"
+description: "Gestión de equipos, miembros y roles en la plataforma"
+---
+
+# Equipos
+
+El módulo de Teams permite organizar usuarios en equipos, gestionar membresías y definir permisos a nivel de equipo.
+
+## Interfaz
+
+Ruta: `/app/teams/`
+
+La interfaz tiene dos pestañas:
+
+### Miembros
+
+Tabla de **personas** (una fila por persona): las identidades de Auth0 que comparten el mismo email normalizado —por ejemplo la de Google y la de email/contraseña sin vincular— se agrupan en una sola fila. Cada fila muestra:
+- Nombre, email e icono de proveedor(es) de acceso (Google / email y contraseña)
+- Columna **Última sesión** (fecha relativa, con la fecha exacta en el tooltip)
+- Matriz de acceso a herramientas (checkmarks por cada herramienta; para una persona con varias identidades es la unión de sus accesos)
+- Filas expandibles para gestión detallada, **por identidad** (si hay más de una, se avisa de que los permisos/equipo pueden diferir entre ellas):
+  - Cambiar rol por herramienta (admin/editor/viewer)
+  - Quitar acceso a herramientas individuales
+  - Gestionar membresía de equipos
+
+Sobre la tabla hay un **buscador** (por nombre o email) y tres filtros multi-selección —**Equipo**, **Permisos** (herramienta) y **Proveedor**— que se aplican en cliente sobre la lista agrupada y se combinan entre sí; un botón **Limpiar filtros** los resetea.
+
+### Invitar usuario
+
+Formulario para invitar nuevos usuarios:
+- Campo de email
+- Selector múltiple de herramientas con rol por herramienta
+- Los usuarios invitados reciben acceso automáticamente a las herramientas seleccionadas
+
+<Note>
+  La gestión de equipos requiere rol de administrador. Los usuarios sin permisos de admin ven un mensaje de acceso restringido.
+</Note>
+
+## API
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| POST | `/api/teams` | Crear equipo |
+| GET | `/api/teams` | Listar equipos |
+| GET | `/api/teams/:id` | Obtener equipo por ID |
+| PATCH | `/api/teams/:id` | Actualizar equipo |
+| DELETE | `/api/teams/:id` | Eliminar equipo |
+| POST | `/api/teams/:id/members` | Agregar miembro al equipo |
+| PATCH | `/api/teams/:id/members/:userId` | Actualizar miembro |
+| DELETE | `/api/teams/:id/members/:userId` | Quitar miembro |
+| GET | `/api/teams/:id/members` | Listar miembros del equipo |
+
+## Relación con permisos
+
+Los equipos se integran con el sistema de permisos:
+
+- Los permisos se pueden asignar a un equipo completo (no solo a usuarios individuales)
+- La visibilidad de módulos y grupos se controla por equipo
+- Cuando un usuario pertenece a un equipo, hereda los permisos del equipo (si no tiene permisos individuales asignados)
+
+## Gestión de herramientas por usuario
+
+Desde la sección de Teams también se gestionan las asignaciones de herramientas:
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| POST | `/api/tools/:toolId/invite` | Invitar usuario a herramienta |
+| POST | `/api/tools/:toolId/assign` | Asignar usuario |
+| PATCH | `/api/tools/:toolId/users/:userId/role` | Cambiar rol |
+| DELETE | `/api/tools/:toolId/users/:userId` | Quitar acceso |
+| GET | `/api/tools/:toolId/users` | Listar usuarios de herramienta |
+
+Estas operaciones se realizan a través de Auth0, actualizando los claims del JWT del usuario para reflejar sus permisos en las herramientas.

@@ -1,0 +1,99 @@
+---
+title: 'Hooks Compartidos'
+description: 'Custom hooks globales disponibles en toda la app'
+---
+
+# Hooks Compartidos
+
+Ubicación: `src/shared/hooks/`
+
+Estos hooks encapsulan lógica reutilizable a nivel global de la aplicación. Están disponibles para cualquier módulo o pantalla.
+
+## Catálogo completo
+
+| Hook                      | Archivo                            | Parámetros                                                  | Retorno                                                                       | Descripción                                                                         |
+| ------------------------- | ---------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `useAppInitialization`    | `hooks/useAppInitialization.ts`    | —                                                           | `{ appIsReady: boolean, hasTimedOut: boolean }`                               | Inicializa la app: carga fonts, i18n, auth, onboarding, chat. Timeout de 2 minutos. |
+| `useAppLoadingState`      | `hooks/useAppLoadingState.ts`      | —                                                           | `{ isLoading: boolean, isHomeReady: boolean }`                                | Calcula estado de carga desde hidratación de auth/property.                         |
+| `useAnalyticsProfileSync` | `hooks/useAnalyticsProfileSync.ts` | `enabled: boolean`                                          | `void`                                                                        | Sincroniza tipos de propiedad del usuario con PostHog.                              |
+| `useCombinedUnreadCount`  | `hooks/useCombinedUnreadCount.ts`  | —                                                           | `number`                                                                      | Agrega conteo de chat + notificaciones no leídas. Actualiza badge de la app.        |
+| `useKeyboardAwareScroll`  | `hooks/useKeyboardAwareScroll.ts`  | `{ enabled?, extraScrollHeight?, keyboardVerticalOffset? }` | `{ scrollViewRef, handleInputFocus, handleScrollViewLayout, handleScroll }`   | Scroll automático cuando el teclado aparece sobre un input.                         |
+| `useLinking`              | `hooks/useLinking.ts`              | —                                                           | Objeto con 8 métodos de link/parse                                            | Wrapper del linkingService para deep links.                                         |
+| `useNavigation`           | `hooks/useNavigation.ts`           | —                                                           | `void` (side effects)                                                         | Orquesta routing basado en estado: auth, onboarding, home, error.                   |
+| `useOnboardingStatus`     | `hooks/useOnboardingStatus.ts`     | —                                                           | `{ hasSeenOnboarding, isOnboardingLoaded }`                                   | Lee estado del onboarding e inicializa si es necesario.                             |
+| `usePropertySelection`    | `hooks/usePropertySelection.ts`    | —                                                           | `{ isPropertySelected, isPropertySelectionRequired, hasPropertiesAvailable }` | Determina si se requiere selección de propiedad.                                    |
+| `useScrollVisibility`     | `hooks/useScrollVisibility.ts`     | `{ threshold?, triggerOnce? }`                              | `{ ref, isVisible, onLayout }`                                                | Detecta visibilidad de un componente durante scroll.                                |
+| `useStorageDiagnostics`   | `hooks/useStorageDiagnostics.ts`   | `enableDiagnostics?: boolean`                               | `StorageDiagnostics \| null`                                                  | Health checks de AsyncStorage + SecureStore.                                        |
+
+## Detalle de hooks clave
+
+### useAppInitialization
+
+Es el hook principal que orquesta el arranque de la app. Se ejecuta una sola vez al montar el componente raíz.
+
+<Tabs>
+  <Tab title="Secuencia de inicialización">
+    1. Carga de fuentes tipográficas 2. Inicialización de i18n (detección de idioma) 3. Hidratación
+    del estado de autenticación 4. Carga del estado de onboarding 5. Inicialización del servicio de
+    chat
+  </Tab>
+  <Tab title="Timeout">
+    Si la inicialización no se completa en **2 minutos**, `hasTimedOut` pasa a `true`, permitiendo
+    mostrar una pantalla de error al usuario.
+  </Tab>
+</Tabs>
+
+### useKeyboardAwareScroll
+
+Resuelve el problema común en formularios donde el teclado oculta los inputs activos.
+
+```tsx
+const { scrollViewRef, handleInputFocus, handleScrollViewLayout, handleScroll } =
+  useKeyboardAwareScroll({
+    enabled: true,
+    extraScrollHeight: 20,
+    keyboardVerticalOffset: 80,
+  });
+
+return (
+  <ScrollView ref={scrollViewRef} onLayout={handleScrollViewLayout} onScroll={handleScroll}>
+    <TextInput onFocus={handleInputFocus} />
+  </ScrollView>
+);
+```
+
+### useCombinedUnreadCount
+
+Combina el conteo de mensajes no leídos del chat con las notificaciones pendientes. Además, actualiza automáticamente el badge numérico del icono de la app en el dispositivo.
+
+### useNavigation
+
+<Warning>
+  Este hook tiene side effects importantes. Redirige al usuario automáticamente según su estado de
+  autenticación, onboarding y selección de propiedad. No debe usarse en componentes que no sean
+  parte del flujo de navegación raíz.
+</Warning>
+
+## Hooks de módulos específicos
+
+Los hooks que pertenecen a un dominio particular **no viven en `shared/hooks/`**, sino en el directorio de hooks de su módulo correspondiente:
+
+<CardGroup cols={2}>
+  <Card title="Booking" icon="calendar">
+    `src/modules/booking/hooks/` Hooks para el flujo de reservas, calendario, selección de fechas.
+  </Card>
+  <Card title="Stays" icon="house">
+    `src/modules/stays/hooks/` Hooks para gestión de estancias y reviews.
+  </Card>
+  <Card title="Chat" icon="message">
+    `src/modules/chat/hooks/` Hooks para mensajería en tiempo real.
+  </Card>
+  <Card title="Profile" icon="user">
+    `src/modules/profile/hooks/` Hooks para perfil de usuario y configuración.
+  </Card>
+</CardGroup>
+
+<Note>
+  Si un hook es utilizado por más de un módulo, debe vivir en `src/shared/hooks/`. Si es exclusivo
+  de un módulo, debe permanecer en el directorio de hooks de ese módulo.
+</Note>

@@ -1,0 +1,85 @@
+---
+title: "Guías de mantenimiento"
+description: "Herramienta interna para crear y gestionar guías de mantenimiento de propiedades"
+---
+
+# Guías de mantenimiento
+
+Las guías de mantenimiento son parte del módulo Community y permiten crear, organizar y compartir instrucciones de limpieza, uso de equipamiento y protocolos de mantenimiento para cada propiedad de Vivla.
+
+## Builder de guías
+
+Ruta: `/app/community/properties/$propertyId/guide`
+
+El editor de guías permite crear contenido enriquecido organizado por categorías de equipamiento. Cada guía incluye:
+
+- Instrucciones de uso paso a paso
+- Categorización por tipo de electrodoméstico/equipamiento
+- Estado de publicación (borrador / publicado)
+- Asociación directa a la propiedad
+
+## Templates de limpieza
+
+Ruta: `/app/community/cleaning`
+
+Sistema de templates de limpieza con:
+
+- **Filtrado por tipo de propiedad**: playa, ski o todas
+- **Organización por estancia**: cocina, salón, dormitorios, baños, exterior
+- **Reglas de limpieza**: checklist de tareas por estancia
+- **Galería de fotos**: referencia visual para cada paso de limpieza
+- **Reglas de styling**: cómo debe quedar cada espacio después de la limpieza
+
+### Gestión por propiedad
+
+Ruta: `/app/community/properties/$propertyId/cleaning`
+
+Dos pestañas:
+1. **Reglas de limpieza**: configuración de tareas por tipo de estancia
+2. **Sesiones**: historial de sesiones de limpieza realizadas
+
+Cada regla de limpieza puede tener:
+- Descripción detallada de la tarea
+- Fotos de referencia (antes/después)
+- Categorización por zona del espacio
+
+## Templates de electrodomésticos
+
+Ruta: `/app/community/appliances`
+
+Templates globales para documentar electrodomésticos comunes. Permiten reutilizar guías de uso entre propiedades con equipamiento similar.
+
+Ruta por propiedad: `/app/community/properties/$propertyId/appliances`
+
+## Inventario
+
+Ruta global: `/app/community/inventory`
+Ruta por propiedad: `/app/community/properties/$propertyId/inventory`
+
+Tracking de equipamiento organizado por categoría:
+
+| Categoría | Ejemplos |
+|-----------|----------|
+| Electrodomésticos | Lavadora, horno, microondas |
+| Menaje de cocina | Vajilla, cubiertos, utensilios |
+| Ropa de cama | Sábanas, toallas, almohadas |
+| Decoración | Cuadros, jarrones, alfombras |
+| Mobiliario | Sofás, mesas, sillas |
+| Iluminación | Lámparas, luces empotradas |
+
+## API endpoints relacionados
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| GET/POST/PATCH/DELETE | `/api/community/guides` | CRUD de guías |
+| GET/POST/PATCH/DELETE | `/api/community/cleaning` | Reglas de limpieza |
+| GET/POST/PATCH/DELETE | `/api/community/cleaning-sessions` | Sesiones de limpieza |
+| GET/POST/PATCH/DELETE | `/api/community/cleaning-templates` | Templates de limpieza |
+| GET/POST/PATCH/DELETE | `/api/community/items` | Ítems individuales |
+| GET/POST/PATCH/DELETE | `/api/community/inventory` | Inventario por propiedad |
+| GET/POST/PATCH | `/api/community/floor-plans` | Planos de planta |
+| GET/POST | `/api/community/qr-codes` | Códigos QR |
+
+<Note>
+  Las guías creadas desde el panel interno se visualizan en el portal público de Community (`community-frontend`) accesible por huéspedes y personal de limpieza a través de tokens de acceso.
+</Note>

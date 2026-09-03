@@ -1,0 +1,283 @@
+---
+title: "Home Excellence"
+description: "Portal de propietarios con metricas NPS, calidad, tickets e inspecciones"
+---
+
+# Home Excellence
+
+`apps/home-excellence` es una aplicacion Next.js 14 para propietarios de Vivla. Muestra metricas de satisfaccion NPS, estado de calidad, tickets, protocolos y resultados del Home Review 2026.
+
+**Dominio**: `hx.vivla.com`  
+**Puerto**: 3003  
+**Acceso**: publico via HID (Home ID) en query parameter — sin login.
+
+## Arquitectura
+
+La app consume tres backends a traves de rewrites en Next.js:
+
+```
+Browser → Next.js (port 3003)
+  │
+  ├─ /api/surveys/*    → Monorepo Backend (port 3001)
+  │   └─ Home Review 2026: resultados, action plans, legacy NPS
+  │
+  ├─ /api/dashboard/*  → dashboard.vivla.com
+  │   └─ NPS scores, propiedades, factores, clientes, tickets calidad
+  │
+  └─ /api/vivla/*      → api.vivla.com/v1
+      └─ Homes, tickets Zendesk, inspecciones, checkpoints, estancias
+```
+
+Este patron proxy evita CORS, permite inyeccion de tokens server-side, y mantiene un unico origen.
+
+## Rutas
+
+| Ruta | Descripcion |
+|------|-------------|
+| `/` | Landing page para propietarios |
+| `/home-status?hid=XXX` | "El parte de tu casa" (rediseño VIV-2102 round 4): veredicto de salud + comparativa susurrada, al dia (tickets en curso/resueltos), historia de cuidado unificada, valoracion real de las estancias + revision anual, propon una mejora |
+| `/protocols?hid=XXX` | Protocolos de limpieza y mantenimiento |
+| `/opportunities?hid=XXX` | Propuestas de mejora con tabla filtrable y formulario de envio |
+| `/home-review?hid=XXX` | Resultados del Home Review 2026 (encuestas del monorepo) |
+| `/tickets?hid=XXX` | Tickets de tu casa: filtros por estado (Todas/En curso/Resueltas/Cerradas) + grid de cards (estado, categoria/zona, fechas) |
+| `/tickets/{id}?hid=XXX` | Detalle de un ticket: titulo/resumen curados por IA (o fallback saneado), timeline + comentarios publicos |
+
+## Stack tecnico
+
+| Tecnologia | Uso |
+|------------|-----|
+| Next.js 14 | Framework (App Router, standalone output) |
+| React Query | Cache de estado del servidor |
+| Axios | HTTP client con interceptor de auth |
+| Recharts | Graficos (area, bar, radial, ring) |
+| Tailwind CSS | Estilos con tokens de Vivla |
+| Radix UI | Componentes (dialog, select, tooltip) |
+| i18next | Internacionalizacion (ES/EN) |
+| PostHog | Analytics |
+| Sneak + Teodor | Fuentes custom (bundled via next/font/local) |
+
+## Variables de entorno
+
+| Variable | Requerida | Descripcion |
+|----------|-----------|-------------|
+| `NEXT_PUBLIC_VIVLA_API_TOKEN` | Si | Bearer token para Vivla API |
+| `NEXT_PUBLIC_API_URL` | No | Backend monorepo. Default: `http://localhost:3001/api` |
+| `DASHBOARD_API_URL` | No | Dashboard API. Default: `https://dashboard.vivla.com/api` |
+| `VIVLA_API_URL` | No | Vivla API. Default: `https://api.vivla.com/v1` |
+| `NEXT_PUBLIC_POSTHOG_KEY` | No | PostHog analytics key |
+| `NEXT_PUBLIC_POSTHOG_HOST` | No | PostHog API host |
+
+### Feature flags
+
+| Variable | Efecto |
+|----------|--------|
+| `NEXT_PUBLIC_DISABLE_MENU` | Oculta menu de navegacion |
+| `NEXT_PUBLIC_ANONYMIZE_DATA` | Anonimiza datos de propietarios |
+| `NEXT_PUBLIC_HIDE_MAINTENANCE_LIST_BUTTON` | Oculta boton de mantenimiento |
+
+## Endpoints consumidos
+
+### Monorepo Backend (publicos, sin auth)
+
+| Endpoint | Descripcion |
+|----------|-------------|
+| `GET /surveys/public/results?property={HID}&surveyType=home-review` | Resultados agregados del Home Review |
+| `GET /surveys/public/legacy-results?property={HID}&surveyType=home-review` | Datos legacy NPS de Firestore |
+| `GET /surveys/public/legacy-results/notes?property={HID}` | Notas de texto de respuestas |
+| `GET /surveys/public/action-plans?property={HID}` | Planes de accion por scope |
+| `GET /surveys/public/scores?property={HID}` | Headline scores por propiedad |
+| `GET /surveys/public/home-review-results?property={HID}` | Participacion, top rated, oportunidades |
+
+### Dashboard API (via rewrite `/api/dashboard/*`)
+
+`/api/dashboard/*` reescribe a `apps/backend`'s `home-excellence` module
+(adaptador `@Public()`, sin auth), no al dashboard legacy.
+
+- NPS scores y evolucion por propiedad
+- Factores de calidad (limpieza, confort, equipamiento, mantenimiento)
+- Informacion de clientes
+- Tickets de calidad
+- **"Estado de tu casa" — hero + revision anual** (VIV-2102 round 4), ambos
+  `@Public()`, sin auth:
+  - `GET /home-summary?hid={HID|UUID}` — `{ verdict, benchmark, tickets:
+    {open, inProgress, resolvedThisYear}, heroImage }`. `verdict` sale de
+    `PropertyHealthTool.computeHealth` (≥80 excellent · 65-79 good · <65
+    attention); `benchmark` compara el stay-review de esta casa contra el de
+    toda la flota **en memoria** (`ScoreSummaryService.getScores`) y
+    devuelve SOLO el bucket (`topQuartile/aboveAverage/average/
+    belowAverage/insufficientData`, este ultimo si hay <4 casas con dato o
+    la propia casa no tiene). **Nunca** el score 0-100 crudo ni el nombre/
+    numero de otra casa — es el contrato central del endpoint (ver specs de
+    saneamiento en `home-excellence.service.spec.ts`). `tickets.open` =
+    `created+assigned`, `resolvedThisYear` = `resolved_at` en el año en
+    curso. `heroImage` = `properties.main_image_url`.
+  - `GET /home-review-summary?hid={HID|UUID}` — wrapper null-safe de
+    `HomeReviewResultsService`: `{ overallRating, totalOwners,
+    respondedOwners, topSpace, opportunitySpace }`; `null` si la casa aun no
+    tiene revision anual (el bloque se oculta, nunca ceros inventados).
+- **Tickets de la casa** (VIV-2102) — `chat_tickets`, client-safe:
+  - `GET /tickets?propertyId={HID|UUID}` — lista: `id, title, status,
+    statusLabel, category, zone, createdAt, resolvedAt` (+ campos legacy
+    `foreignId/propertyId/associatedTopics/state` que sigue leyendo el
+    widget "Estado de tu casa"). Excluye tickets soft-deleted
+    (`invalid=true`). `title` sirve el `owner_title` curado por IA cuando
+    ya esta ALMACENADO (round 2) — esta ruta **nunca genera**, solo lee.
+  - `GET /tickets/{id}?propertyId={HID|UUID}` — detalle: `id, title,
+    description, status, statusLabel, category, zone, createdAt,
+    resolvedAt, timeline[{status, statusLabel, at}],
+    comments[{id, body, authorName, createdAt}],
+    maintenanceFeeCoverage`. **Nunca** expone `priority`, asignacion, los
+    euros del coste, aprobaciones, notas internas, IDs de Zendesk ni
+    comentarios privados — ver `HomeExcellenceService.getTicketDetail` para
+    la lista exhaustiva de campos excluidos. El unico dato de coste es
+    `maintenanceFeeCoverage` (migracion 223): un enum **cualitativo**
+    `covered | has_extra | unknown` derivado de `cost_covered_by_fee` /
+    `cost_extra` — los euros **nunca** salen del backend. `unknown` cuando el
+    desglose no se ha capturado (tickets historicos o aun abiertos),
+    `covered` si el coste entero cae dentro de la cuota de mantenimiento,
+    `has_extra` si parte se facturo aparte al propietario. `timeline` solo
+    incluye transiciones
+    `field='status'` de `chat_ticket_status_history` (nunca
+    assignee/resolution_team/priority). `comments` solo `is_public=true`,
+    sin `html_body`/`attachments`/campos Zendesk; el autor cae a "Equipo
+    Vivla" cuando no hay un usuario de Tools que resolver.
+    `title`/`description` sirven `owner_title`/`owner_summary` curados por
+    IA cuando existen (generando en esta misma llamada si el hash cambio,
+    ver "Curacion IA" abajo); si no, caen a titulo crudo + descripcion
+    saneada. `comments[].body` sigue el mismo patron por comentario (round
+    3): curado (`owner_comments`, matched por id) cuando existe, si no
+    `stripInternalBoilerplate(raw)`.
+  - **Anti-enumeracion**: un ticket que no existe, que pertenece a otra
+    propiedad, o un HID invalido — todos devuelven el mismo 404 (una sola
+    query `id + property_id + invalid-safe`, sin distinguir el motivo).
+  - **Contrato de URL** (para el deep-link movil VIV-2103/2104):
+    `https://hx.vivla.com/tickets/{ticketId}?hid={propertyId}`, con
+    `ticketId = chat_tickets.id` (UUID).
+
+#### Curacion IA de tickets (VIV-2102 round 2 + 3)
+
+Los tickets sincronizados desde Zendesk traen jerga interna en el titulo y un
+bloque de boilerplate al final de la descripcion (`Internal Ticket ID: …`,
+`Channel ID: …`, `Property ID: …`, `Booking ID: …` + separador `---`, ver
+`tickets.service.ts` `buildTicketDescription`). Round 2 reescribe eso para el
+propietario; round 3 extiende la MISMA llamada a los comentarios publicos y
+refuerza la prohibicion de nombres propios (GDPR — el ticket es visible para
+TODOS los copropietarios de la casa):
+
+- **Modelo**: alias literal `claude-haiku-4-5` (constante
+  `DEFAULT_OWNER_SUMMARY_MODEL` en `ticket-owner-summary.service.ts`),
+  overridable por `AI_OWNER_SUMMARY_MODEL`. Via `AiService.generateStructured`
+  (zod schema `{ ownerTitle, ownerSummary, ownerComments: [{id, body}] }`,
+  tool-choice forzado, trace en Langfuse) — el `AiService` global no se
+  modifico.
+- **Prompt**: PROHIBIDO el nombre propio de CUALQUIER persona (propietarios,
+  huespedes, compañeros o agentes de Vivla) en `ownerTitle`/`ownerSummary`/
+  `ownerComments` — referirse de forma neutra ("un propietario", "un
+  huesped", "el equipo de Vivla"). Sigue prohibido: IDs internos/UUIDs,
+  costes, aprobaciones internas, referencias a Zendesk/channel/booking id.
+- **Patron generar-y-persistir** (`TicketOwnerSummaryService.getOrGenerate`):
+  `source_hash = sha256(title + ' ' + description + ' ' + status + ' ' +
+  comments)` — round 3 anade los comentarios publicos (id+body) al hash, asi
+  que añadir/editar un comentario invalida el resumen igual que un cambio de
+  status. Hash-hit (nada cambio desde la ultima vista) → devuelve lo
+  almacenado, **cero llamadas a IA**. Hash-miss → genera una vez — titulo,
+  resumen Y cada comentario publico en la MISMA llamada — y hace upsert por
+  `ticket_id`. La IA se llama **solo** en este path (detalle, en el momento
+  del hash-miss) y en el backfill CLI — la lista **nunca** genera, solo lee
+  `owner_title` ya guardados (`getStoredTitles`, `.in()` chunked de a 100).
+- **Tabla** `chat_ticket_owner_summaries` (migracion 173 + 174): `id,
+  ticket_id (unique, FK a chat_tickets, cascade), owner_title, owner_summary,
+  owner_comments (jsonb, array de {id, body}, default `[]`), source_hash,
+  model, generated_at`.
+- **Comentarios curados**: `getTicketDetail` sirve `comment.body` = la
+  entrada de `owner_comments` con el mismo `id` cuando existe; un comentario
+  ausente del set curado (p. ej. añadido despues de generar el resumen) cae a
+  `stripInternalBoilerplate(raw)` — el siguiente request lo detecta por hash
+  y regenera, backfilleando ese comentario. Tickets sin comentarios publicos:
+  `ownerComments: []`, sin cambio de comportamiento.
+- **Fallback determinista siempre presente**: si la IA no esta configurada
+  (`ANTHROPIC_API_KEY` ausente) o falla, `getOrGenerate` devuelve `null` y el
+  adaptador sirve titulo crudo + `stripInternalBoilerplate(description)` +
+  comentarios saneados — la pagina nunca falla ni bloquea por la IA.
+  `stripInternalBoilerplate` (`chat/tickets/ticket-boilerplate.ts`) corta desde
+  la primera aparicion de cualquiera de los 4 marcadores (el que aparezca
+  antes) y elimina un `---` colgante final; es la ultima linea de defensa
+  contra el boilerplate, con o sin IA. El helper vive en `chat/tickets/`
+  (junto al codigo que ESCRIBE el bloque) porque Tools tambien lo aplica ahora
+  en su propio detalle de ticket — ver `docs/wiki/tickets/index.mdx`.
+- **Backfill**: `pnpm backfill:owner-summaries [--dry-run] [--limit=N]`
+  (`src/cli/backfill-owner-summaries.command.ts`) — pre-genera resumenes para
+  el backlog existente (tickets no invalid de propiedades activas, no
+  `[Test]`), 3 tickets en paralelo, idempotente (un ticket con hash fresco se
+  salta a coste cero incluso en una re-ejecucion). Sigue sin pasar
+  comentarios (omite el campo opcional `comments` de `getOrGenerate`,
+  default `[]`) — un ticket con comentarios reales se autocorrige en su
+  primera vista real (el hash no coincide).
+- **Limitacion conocida**: el resumen se genera en espanol; el toggle EN de la
+  UI traduce las labels pero no el texto del resumen.
+
+### Vivla API (via rewrite `/api/vivla/*`)
+
+| Endpoint | Descripcion |
+|----------|-------------|
+| `GET /homes/{HID}` | Metadata del home (Firebase, dashboard, Zendesk) |
+| `GET /homes/list-with-dashboard` | Listado de homes con integracion dashboard |
+| `GET /tickets?home={name}` | Tickets Zendesk por propiedad |
+| `GET /tickets/home-repair-stats/{name}` | Estadisticas de reparaciones |
+| `GET /tickets/repairs?home={name}` | Tickets de reparacion |
+| `GET /tickets/improvement-proposals?home={name}` | Propuestas de mejora |
+| `GET /checkpoints?homeName={name}` | Checkpoints de mantenimiento |
+| `GET /stays/{HID}/inspections` | Inspecciones programadas |
+| `GET /stays/{HID}/stats` | Estadisticas de estancias |
+| `GET /getAnnualHomeRevision?homeName={name}` | Estado de revision anual |
+| `GET /homes/{HID}/room-images` | Imagenes por habitacion |
+
+## Funcionalidades principales
+
+- **"El parte de tu casa"** (`/home-status`, VIV-2102 round 4 — reemplaza el
+  dashboard de consultora anterior de 4 donuts + breakdown NPS simulado +
+  tabla de incidencias de 6 columnas): hero con veredicto + comparativa
+  susurrada (sin numeros, ver `home-summary` arriba), "Al dia" (tiles
+  en curso/resueltos → `/tickets`), historia de cuidado unificada (tickets
+  curados + la revision anual como unico item futuro, mostrado por
+  **estacion** — "Otoño" — nunca una fecha exacta que no podemos garantizar),
+  valoracion real de las estancias (stay-review propio vs. la misma
+  comparativa susurrada + barras por espacio del home-review, `nps-design`),
+  resumen de la revision anual (enlace a `/home-review` **gateado por el
+  flag** `useHomeReviewFlag`), y formulario de propuesta de mejora inline
+  (texto + estancia + banda de inversion). Sin selector de casa visible —
+  `hidList` sobrevive via `navigateWithHid` en todos los enlaces internos.
+  Nombre de la casa en la cabecera (`TabNav`, burger a la izquierda en
+  movil, nombre a la derecha en todas las paginas HX).
+- **Evolucion NPS**: graficos area/bar con escala cromatica de 11 pasos
+- **Calidad por habitacion**: mapa visual de scores por espacio
+- **Tickets de calidad**: tabla con estado y seguimiento
+- **Tickets de tu casa** (`/tickets`, VIV-2102): lista + detalle client-safe de
+  `chat_tickets` — estado, timeline y comentarios publicos, sin campos
+  internos (prioridad, coste, asignacion, notas). Lista con filtros por
+  estado (Todas/En curso/Resueltas/Cerradas, client-side) y grid de cards
+  (1/2/3 columnas segun breakpoint). Titulo/descripcion/comentarios del
+  detalle curados por IA y sin nombres propios cuando hay resumen generado
+  (round 2 + 3, ver "Curacion IA" abajo). Categoria/zona se muestran
+  humanizadas via i18n (`ticketsPage.category.*`/`ticketsPage.zone.*`,
+  `ticket-topic-labels.ts`) con un prettifier de fallback (underscore→espacio
+  + mayuscula inicial) para cualquier slug no mapeado.
+- **Incidencias**: reporte con severidad y resolucion
+- **Oportunidades**: tabla filtrable con envio de propuestas y upload de
+  imagenes. La propuesta inline de `/home-status` usa el mismo
+  `POST /improvement-proposals` (sin ficheros): asigna `assigned_agent_id` a
+  la responsable de chat de la casa (`property_agent_assignments`,
+  `assignment_type='chat_agent'` — null si no hay asignacion) y emite el
+  MISMO evento `ticket.created` que `TicketsService.create` (VIV-2080), asi
+  que el aviso al asignado (buzon + email, migracion 171) sale gratis; una
+  segunda flow (migracion 175), condicionada a `ticketKind=
+  'improvement_proposal'`, avisa ademas al canal de Slack de CX
+  (`SLACK_NOTIFICATIONS_CX_WEBHOOK_URL`) con la casa, la propuesta y la
+  banda de inversion — nunca a incidencias normales.
+- **Home Review**: participacion, ratings por espacio, distribucion de sentimiento
+
+## Despliegue
+
+- **Modo**: standalone (binario autocontenido)
+- **Plataforma**: Railway / Vercel
+- **Auth**: acceso publico via HID — sin login

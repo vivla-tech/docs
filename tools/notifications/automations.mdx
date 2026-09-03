@@ -1,0 +1,346 @@
+---
+title: "Automaciones"
+description: "Sistema event-driven para envío automático de notificaciones — builder visual + API pública para emitir eventos"
+---
+
+# Automaciones
+
+Sistema de notificaciones **event-driven**. Cualquier acción de negocio (crear reserva, completar encuesta, etc.) puede emitir un evento de dominio; los flujos configurados en el backoffice escuchan esos eventos y disparan acciones (push, in_app, tools_inbox, email, chat).
+
+Ruta del backoffice: `/app/notifications/automations`
+
+## Modelo conceptual
+
+```
+                                                ┌─────────────────────┐
+vivla-backend ──POST /public/events/ingest────►│                     │
+                                                │  domain_events      │──► Windmill ──► flows ──► acciones
+External systems ──POST /public/events/ingest─►│  (vivla-tools)      │
+                                                │                     │
+vivla-tools internal ──ingestEvent() directo──►│                     │
+                                                └─────────────────────┘
+```
+
+Cada flujo es **lineal e inmediato**: `trigger → (condition opcional) → action`. No hay step de "espera" — para disparos no-inmediatos (3 días antes, 24h después, etc.), se usan **eventos derivados** emitidos por crons diarios.
+
+## Step builder
+
+El builder visual usa drag-and-drop sobre un canvas (xyflow). Tres tipos de step:
+
+| Step | Propósito | Configuración |
+|---|---|---|
+| **Trigger** | Punto de entrada (uno por flujo) | Selecciona el `event_type` del catálogo |
+| **Condition** | Bifurca según campo del payload | Reglas con AND/OR sobre `payload.field` operador (ver [Operadores de condición](#operadores-de-condición)) |
+| **Action** | Envía la notificación | Canales (push, in_app, tools_inbox, email, chat) + target user id + template multi-idioma |
+
+Al guardar, el grafo se valida con `validateDAG` (un solo trigger, action es leaf node, sin ciclos).
+
+### Operadores de condición
+
+Definidos en `packages/common/src/types/automation-flow/conditions.ts` y evaluados en
+`apps/backend/src/notifications/engine/evaluate-rule.ts`.
+
+| Operador | Compara | Notas |
+|---|---|---|
+| `eq` / `neq` | Igualdad como string | `String(campo) === String(valor)` |
+| `gt` / `lt` / `gte` / `lte` | Orden numérico | Ambos lados se convierten a número |
+| `in` | Pertenencia a lista | El valor de la regla es un array |
+| `present` | **El campo llegó** | Unario: ignora el valor de la regla |
+| `absent` | **El campo no llegó** | Unario: ignora el valor de la regla |
+
+`present` / `absent` tratan como ausente `undefined`, `null` y el string vacío o de solo espacios. El
+`0` y el `"0"` cuentan como presentes.
+
+<Warning>
+**Para preguntar "¿vino este campo?", usa `present`. Nunca `neq` contra `""`.**
+
+`neq` compara strings: `String(undefined) !== ""` es `true`, así que una regla `campo neq ""` se
+cumple **precisamente cuando el campo no llegó** — lo contrario de lo que parece. El error simétrico
+también existe: condicionar sobre un campo que el emisor nunca manda deja la rama muerta para
+siempre, porque `String(undefined) === "true"` nunca se cumple. Dos flujos (`FV001` y `FV002`)
+estuvieron meses sin disparar por eso, y no hay ninguna señal de que ocurra: una rama que no dispara
+no escribe en `notification_dispatches` ni deja error, solo un log efímero.
+
+Regla práctica: **condiciona sobre la presencia del dato, no sobre un flag que el emisor debería
+mandar.** Antes de usar un campo en una condición, confirma que está en el schema Zod del evento
+(`apps/backend/src/notifications/engine/schemas/event-schemas.ts`) y que el emisor lo envía de verdad.
+</Warning>
+
+Un operador no reconocido tampoco falla al guardar: el `switch` de `evaluate-rule.ts` cae en `default`
+y devuelve `false`, con el mismo resultado de rama muerta. Escríbelos siempre desde el desplegable del
+builder.
+
+## Catálogo de eventos
+
+Lista vivamantenida (también disponible vía `GET /public/events/registered-events` y en el catálogo informativo de `packages/common`).
+
+### Emitidos por vivla-backend (HTTP POST)
+
+**Onboarding** — `user.welcomed`, `user.first_login`
+
+**Reservas** — `booking.created`, `booking.info_updated`, `booking.cancelled`, `booking.guest_invited`, `booking.rent_requested`, `booking.rent_approved` (🔴 crítico), `booking.rent_created_by_admin`, `booking.exchange_executed` (bidireccional), `booking.liberated`, `booking.third_home_published`, `booking.third_home_exchanged`
+
+**Llaves** — `keys.recovered`, `keys.expiring_soon`, `keys.extended`, `keys.fidelity_bonus_credited` (los últimos tres desde crons internos del backend)
+
+### Emitidos internamente por vivla-tools
+
+**Encuestas** — `survey.completed` (ramifica por `lowestNormalized`, la nota más baja normalizada a `/10`: absorbe los antiguos `nps_high`/`nps_low`)
+
+**Tickets** — `ticket.created`, `ticket.updated` (discriminador `field` + `previousValue`/`newValue`), `ticket.assigned`, `ticket.resolved` (transición de `status` a resuelto/cerrado — identidad propia, sustituye a `ticket.updated` para esa transición), `ticket.comment_added`. Emitidos desde el módulo de tickets (mutaciones del panel + webhook de Zendesk). Los targets `creatorId`/`assigneeId`/`actorId` son `users.id` de staff interno, direccionables sin mapeos. Ver [Avisos de tickets](#avisos-de-tickets-creador--asignado).
+
+### Emitidos por crons de Windmill
+
+**Oportunidades** — `booking.stays_available_reminder` (mensual)
+
+**Lifecycle de usuario** — `user.inactive` (60d sin uso de llaves)
+
+> Eventos descartados en la revisión con CX (no emitir, el ingest los rechaza): `booking.listed_for_exchange`, `booking.exchange_requested`, `booking.exchange_matched`, `booking.dates_changed`, `booking.rent_rejected`, `booking.rent_opportunity`, `user.payment_not_setup`, `survey.nps_high`, `survey.nps_low`. Detalle en [Events API → Eventos descartados](./events-api#eventos-descartados-no-emitir).
+
+**Eventos derivados** (reemplazan los antiguos patterns delay+condition):
+
+| Evento | Cron | Reemplaza |
+|---|---|---|
+| `booking.pre_stay_30d_due` | `daily_pre_stay_30d` 09:00 | "delay -30d desde startDate" |
+| `booking.pre_stay_7d_due` | `daily_pre_stay_7d` 09:00 (stand-by) | "delay -7d desde startDate" |
+| `booking.pre_stay_3d_due` | `daily_pre_stay_3d` 09:00 | "delay -3d desde startDate" |
+| `booking.arrival_review_due` | `daily_arrival_review` 10:30 | "delay +1d desde startDate" — lanza arrival_review survey |
+| `booking.stay_review_due` | `daily_stay_review` 10:00 | check-out de HOY — lanza stay_review survey (también nudge de salida) |
+| `survey.reminder_3d_due` | `daily_survey_reminder` 10:15 | "delay 3d + condition no respondida" |
+| `booking.followup_7d_due` | `reserva_followup` 10:45 | canal de reserva creado hace 7d, propietario sin contestar (T14b) |
+| `booking.arrival_greeting_due` | `buen_viaje` 08:00 | fecha de llegada (real sobre reservada) = hoy (T14b) |
+
+**T14b — mensajes conversacionales al canal de reserva** (no tarjeta): `booking.followup_7d_due`
+y `booking.arrival_greeting_due` alimentan flows cuya acción `chat` lleva `text_slug` en vez de
+título/mensaje — el motor manda el texto de `quick_replies` (slug `seguimiento-reserva` /
+`buen-viaje`) interpolado, firmando Vivla, en vez de construir una tarjeta. Candidatos y
+exclusiones (cancelada, archivada, `@vivla.`, propiedad inactiva) los resuelve
+`GET /surveys/reports/survey-candidates?kind=followup|buen_viaje`. Flows sembrados
+`is_active=false`.
+
+## API pública para integradores
+
+`POST /public/events/ingest` — el único path por el que cualquier sistema externo (incluyendo vivla-backend) introduce eventos.
+
+Convenciones de la API v1: response envelope `{ object, id, type, status, created_at }`, idempotencia vía header `Idempotency-Key`, errores estructurados con `error.code`, headers de rate limit y `X-Request-ID`. Detalle exhaustivo en [Events API](./events-api).
+
+### Request resumido
+
+```http
+POST /api/public/events/ingest
+Content-Type: application/json
+x-api-key: <NOTIFICATIONS_API_KEY>
+Idempotency-Key: booking_abc123_created   ← recomendado
+
+{
+  "event_type": "booking.created",
+  "aggregate_id": "booking_abc123",
+  "aggregate_type": "booking",
+  "source": "vivla-backend",
+  "payload": {
+    "bookingId": "booking_abc123",
+    "ownerId": "user_xyz",
+    "ownerName": "Juan Pérez",
+    "ownerEmail": "juan@example.com",
+    "propertyId": "prop_001",
+    "propertyName": "Casa del Mar",
+    "propertyLocation": "Ibiza",
+    "startDate": "2026-06-15",
+    "endDate": "2026-06-22"
+  }
+}
+```
+
+> **Nota v3.1**: el body field `event_id` fue eliminado. La idempotencia se hace **siempre** vía header `Idempotency-Key`. Internamente se hashea de forma determinística al campo UNIQUE `domain_events.event_id`. Detalle en [Idempotencia](../api/idempotency).
+
+### Response shapes
+
+```json
+// 202 Accepted (primer POST)
+{ "object": "event", "id": "...", "type": "booking.created", "status": "pending", "created_at": "..." }
+
+// 200 OK (Idempotency-Key repetida con mismo body)
+{ "object": "event", "id": "...", "type": "booking.created", "status": "idempotent", "created_at": "..." }
+
+// 400 / 401 / 409 / 429 / 5xx → error envelope (ver Códigos de error)
+```
+
+### Garantías del servidor
+
+- **Idempotencia** vía hash determinístico de `Idempotency-Key` → `domain_events.event_id` UNIQUE.
+- **Validación estricta** por `event_type` — Zod schemas en `apps/backend/src/notifications/engine/schemas/event-schemas.ts`.
+- **Whitelist** de tipos — sólo se aceptan los registrados.
+- **Rate limiting**: 200 req/min con headers `X-RateLimit-Limit/Remaining/Reset` y `Retry-After` en 429.
+- **Observabilidad** — logs estructurados con `request_id` + métrica PostHog `event.ingested`.
+- **Health check** — `GET /public/events/health`.
+
+### Listar eventos soportados
+
+```
+GET /api/public/events/registered-events
+→ { "object": "list", "data": ["user.welcomed", "booking.created", ...] }
+```
+
+→ **Referencia completa con payload por evento, headers, ejemplos y status codes**: ver [Events API](./events-api).
+
+## Endpoints CRUD del builder
+
+Aparte del endpoint público de ingest, el backoffice usa los siguientes (auth Auth0 + RolesGuard, envelope v1):
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| GET | `/api/v1/notifications/automations` | Listar flujos (envelope `{ object: "list", data, has_more, next_cursor }`) |
+| GET | `/api/v1/notifications/automations/:id` | Obtener un flujo |
+| POST | `/api/v1/notifications/automations` | Crear flujo (acepta `Idempotency-Key`) |
+| PUT | `/api/v1/notifications/automations/:id` | Actualizar flujo |
+| POST | `/api/v1/notifications/automations/:id/toggle` | Activar/desactivar |
+| POST | `/api/v1/notifications/automations/:id/duplicate` | Duplicar (acepta `Idempotency-Key`) |
+| POST | `/api/v1/notifications/automations/:id/validate` | Validar contra el trigger sin guardar |
+| POST | `/api/v1/notifications/automations/:id/test` | **Test mode**: ejecuta `walkFlow` con `targetOverride = current user`. Body: `{ payload?: object, dry_run?: boolean }`. Útil para probar un flow contra uno mismo antes de activarlo |
+| DELETE | `/api/v1/notifications/automations/:id` | Eliminar |
+
+> Las rutas legacy `/api/notifications/automations/*` siguen vivas pero están marcadas como deprecadas — el frontend ya consume `/v1`. Ver [Convenciones API](../api/conventions) para el envelope.
+
+## Endpoints de operaciones (admin)
+
+Inspección del pipeline de eventos. Todos requieren rol admin.
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| GET | `/api/v1/events?status=&event_type=&source=&user_id=&limit=&cursor=` | Lista cursor-paginated. `user_id` filtra por `payload.userId` / `ownerId` / `guestId` |
+| GET | `/api/v1/events/:id` | Detalle (incluye `payload` completo) |
+| POST | `/api/v1/events/:id/replay` | Reset `status='pending'` + `retry_count=0` para reprocesar un evento `failed` |
+
+## Mantenimiento
+
+Endpoints `x-api-key`-protegidos para crons de Windmill (no llamar manualmente):
+
+| Método | Endpoint | Acción |
+|---|---|---|
+| POST | `/api/v1/admin/maintenance/idempotency-keys/cleanup` | Borra `idempotency_keys` con `expires_at < now()` |
+| POST | `/api/v1/admin/maintenance/domain-events/cleanup` | Soft-delete `domain_events` con `created_at` >90 días |
+| POST | `/api/v1/admin/maintenance/sync-logs/cleanup` | Hard-delete `chat_sync_logs` con `created_at` >30 días |
+
+## Frequency warnings
+
+`SendingService` corre un check soft antes de cada push: cuenta los pushes a ese user en últimas 24h y 7d. Si excede 1/día o 3/semana, **NO bloquea** el envío pero:
+- Loggea warning con `notification_id`, `user_id`, conteos.
+- Emite evento PostHog `notification.frequency_warning` con `cap_type` (`daily` / `weekly` / `both`).
+
+El threshold viene del PRD initial (1/día, 3/semana) y por ahora es informativo. Si los warnings son consistentemente bajos, no se enforce; si son altos hay que decidir si se aplican como hard caps o se relajan.
+
+## Modelo de datos
+
+`automation_flows` (vivla-tools Postgres):
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `id` | UUID | PK |
+| `name` | JSONB (i18n) | `{ es, en }` |
+| `description` | JSONB (i18n) | Opcional |
+| `trigger_event` | string | Tipo de evento que dispara |
+| `graph` | JSONB | `{ nodes, edges }` del builder |
+| `is_active` | boolean | Si está corriendo |
+| `run_count` | integer | Veces ejecutado |
+| `last_run_at` | timestamp | Última ejecución |
+
+`domain_events` (vivla-tools Postgres):
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `id` | UUID | PK |
+| `event_id` | UUID UNIQUE | Hash determinístico del header `Idempotency-Key`. Usado para dedupe a nivel DB. |
+| `event_type` | string | Tipo |
+| `aggregate_id` | string | Entidad principal |
+| `aggregate_type` | string | Categoría |
+| `payload` | JSONB | Datos del evento |
+| `source` | string | Quién lo emitió |
+| `status` | string | `pending` / `published` / `failed` |
+| `retry_count`, `last_error` | | Para reintentos |
+
+## Pipeline de procesamiento
+
+```
+[caller] ──POST /public/events/ingest──► domain_events (status=pending)
+                                                │
+                                  ┌─────────────┴─────────────┐
+                                  ▼                            ▼
+                       Windmill `process_pending`        Windmill `health_check`
+                       (cron 30s)                        (cron 5min)
+                                  │                            │
+                                  ▼                            ▼
+                       walkFlow → action                  alert si pending > 5min
+                                  │
+                                  ▼
+                       status=published
+```
+
+<Note>
+v3.0: ya no existe el `delay` step ni la tabla `scheduled_notifications`. Los disparos no-inmediatos se modelan como eventos derivados emitidos por crons diarios.
+</Note>
+
+## Avisos de tickets (creador + asignado)
+
+El creador y el asignado de un ticket reciben avisos por **buzón interno de Tools** (`tools_inbox`) + **email** de todo lo que le pasa a "su" ticket. Sembrados por las migraciones `171_seed_ticket_notification_flows.sql` (created/updated/assigned/comment_added, plantillas + flows ACTIVOS al desplegar; UUIDs con segmento `2081`) y `178_seed_ticket_resolved_notification_flow.sql` (resolved).
+
+| Flow | Trigger | A quién avisa |
+|---|---|---|
+| Ticket creado | `ticket.created` | Solo al **asignado** (si existe). Al creador no — el self-ack no aporta. |
+| Ticket actualizado | `ticket.updated` | Creador + asignado, **solo** en campos relevantes (`status`, `priority`, `repair_status`, `resolution_team`, `expected_resolution_at`, `title` — condición `field in [...]` para no hacer ruido con, p.ej., notas internas). No dispara para la transición que ya cubre `ticket.resolved` (ver abajo). |
+| Ticket asignado | `ticket.assigned` | Nuevo asignado + creador. |
+| Ticket resuelto | `ticket.resolved` | Creador + asignado. Dispara cuando `status` entra en un estado resuelto (`resolved`/`closed`) — sustituye al `ticket.updated` de esa transición, nunca ambos. Un reopen (resuelto → abierto) sigue saliendo como `ticket.updated` normal. |
+| Comentario en ticket | `ticket.comment_added` | Creador + asignado (comentarios de Tools y respuestas de agente vía webhook de Zendesk). |
+
+El link de cada plantilla apunta al detalle en Tools: `https://tools.vivla.com/app/tickets/list/{{ticketId}}`.
+
+### Metadata enriquecida para el buzón
+
+Para los eventos `ticket.*`, el motor añade además un bloque `metadata.ticket` (ticketId, title, status, priority, ticketKind, propertyName, assigneeName) a la fila de `inbox_messages` — aditivo, no toca el `metadata` de otros flows — para que el sidebar pinte una card rica (`TicketMessageCard`) sin volver a pedir el ticket. Ver [Inbox → Tickets via Automation Engine](/chat/inbox#tickets-via-automation-engine-ticket-).
+
+### Anti-ruido: `skipIfTargetEquals`
+
+`ActionConfig.skipIfTargetEquals` (opcional) es una lista de **paths del payload**: si el destinatario resuelto (`target`) coincide con el valor de alguno de esos campos, el motor **salta la acción entera** (`engine.service.ts` → `matchedSkipField`). Genérico y declarativo; se evalúa antes de cualquier canal y se ignora en test-mode (`targetOverride`).
+
+Los flows de tickets lo usan para dos cosas:
+
+- **No avisarte de tu propio cambio** — todas las acciones excluyen `actorId` (quién hizo el cambio; `null` = sistema/Zendesk, nunca suprime).
+- **Deduplicar creador==asignado** — la acción del creador excluye además `assigneeId`, así cuando son la misma persona solo se envía la copia del asignado (una notificación, no dos).
+
+Valores `null`/vacíos del payload nunca matchean.
+
+## Suppressions (opt-out)
+
+Ronda D agregó la tabla `notification_suppressions` (migración 089). El motor consulta `PreferencesService.findActiveSuppression()` antes de cada send (push/email/in_app/tools_inbox/chat) y skipea con un log si hay match — la flow se sigue ejecutando, simplemente este canal no dispara para ese destinatario.
+
+Reglas de match (en orden):
+
+1. `scope='all'` con el canal correspondiente bloquea **todo** el canal para ese user.
+2. `scope='category'` matchea cuando `scope_value === template.category`.
+3. `scope='template'` matchea cuando `scope_value === template_id`.
+
+Origen típico: clicks de unsubscribe (`source='list_unsubscribe'`), también la UI de preferencias del usuario o inserciones manuales de support.
+
+Inspección desde SQL:
+
+```sql
+SELECT s.user_id, u.email, s.channel, s.scope, s.scope_value, s.source, s.created_at
+FROM notification_suppressions s
+JOIN users u ON u.id = s.user_id
+WHERE u.email = 'foo@example.com'
+ORDER BY s.created_at DESC;
+```
+
+Eliminar manualmente (re-suscribir):
+
+```sql
+DELETE FROM notification_suppressions
+WHERE user_id = '...' AND channel = 'email' AND scope = 'category' AND scope_value = 'promotional';
+```
+
+Detalle de las best practices transaccionales (preheader, List-Unsubscribe, UTM, Schema.org, color-scheme) en [Email](./email).
+
+## Referencias para integradores
+
+- **Backend handoff completo** (para vivla-backend dev team): [`docs/internal/tools/notifications/implementation/epics/notification-automation-system/specs/backend-handoff.md`](https://github.com/vivla-tech/vivla-tools/blob/main/docs/internal/tools/notifications/implementation/epics/notification-automation-system/specs/backend-handoff.md)
+- **PRD técnico v3.0**: [`docs/internal/tools/notifications/implementation/epics/notification-automation-system/02-prd-technical.md`](https://github.com/vivla-tech/vivla-tools/blob/main/docs/internal/tools/notifications/implementation/epics/notification-automation-system/02-prd-technical.md)
+- **Catálogo de eventos**: [`docs/internal/tools/notifications/implementation/epics/notification-automation-system/03-events-catalog.md`](https://github.com/vivla-tech/vivla-tools/blob/main/docs/internal/tools/notifications/implementation/epics/notification-automation-system/03-events-catalog.md)
+- **Schemas Zod**: `apps/backend/src/notifications/engine/schemas/event-schemas.ts`

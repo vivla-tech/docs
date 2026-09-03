@@ -1,0 +1,140 @@
+---
+title: "Adjuntos de tickets"
+description: "Archivos a nivel ticket alojados en nuestro Cloudinary"
+---
+
+# Adjuntos de tickets
+
+Los tickets de soporte pueden llevar archivos adjuntos (fotos de incidencias, facturas y presupuestos en PDF, etc.). A diferencia de los adjuntos de Zendesk, estos viven en **nuestro Cloudinary** y son la **fuente de verdad propia**: con Zendesk ya desconectado (agosto 2026), los archivos siguen siendo nuestros.
+
+## Modelo
+
+Los adjuntos se almacenan en la tabla `chat_ticket_attachments` y los binarios en Cloudinary, dentro del folder `chat/tickets/{nº}` (adjuntos a nivel ticket) o `chat/tickets/comments/{ticketId}` (adjuntos de un comentario del hilo, ver abajo). El destino de un adjunto — ticket completo o un comentario concreto — lo marca `comment_id` (mig 213): `NULL` es adjunto a nivel ticket (comportamiento original); poblado es un adjunto que se subió al redactar un comentario y se renderiza inline en su burbuja **además** de aparecer aquí. Una sola fuente de verdad: no se duplica en el JSONB `chat_ticket_comments.attachments` (ese campo sigue existiendo solo para los adjuntos legacy importados de Zendesk, ver más abajo).
+
+Acepta imágenes, vídeos y otros tipos de archivo (PDF, documentos…). Las imágenes se re-codifican a WebP optimizado antes de subirse a Cloudinary; el resto de archivos (vídeo incluido) se suben tal cual — Cloudinary usa `resource_type='auto'` y los clasifica como `video`/`raw` según corresponda.
+
+| Columna | Descripción |
+|---------|-------------|
+| `id` | UUID, PK |
+| `ticket_id` | FK a `chat_tickets` (`ON DELETE CASCADE`) |
+| `comment_id` | FK opcional a `chat_ticket_comments` (`ON DELETE CASCADE`, mig 213). `NULL` = adjunto a nivel ticket; poblado = adjunto de ese comentario del hilo |
+| `cloudinary_public_id` | ID del asset en Cloudinary (para borrarlo después) |
+| `resource_type` | `image` \| `raw` \| `video` — namespace de Cloudinary |
+| `url` | `secure_url` de Cloudinary |
+| `filename` | Nombre original del archivo |
+| `content_type` | MIME type |
+| `size` / `width` / `height` | Metadatos del archivo |
+| `source` | Origen del adjunto (ver abajo) |
+| `uploaded_by` | FK a `users` — quién lo subió (solo en `upload`) |
+| `zendesk_attachment_id` | ID del adjunto de Zendesk re-alojado (idempotencia del import) |
+| `zendesk_upload_token` | Token devuelto por el write-back a Zendesk (trazabilidad) |
+| `metadata` | JSONB libre |
+| `created_at` | Timestamp de creación |
+
+<Note>
+  Un índice único parcial sobre `zendesk_attachment_id` garantiza que un adjunto de Zendesk se re-aloje **una sola vez**. Un índice parcial sobre `comment_id` (`WHERE comment_id IS NOT NULL`) acelera la carga de adjuntos por comentario al pintar el hilo.
+</Note>
+
+## Orígenes (`source`)
+
+| `source` | Cómo llega |
+|----------|------------|
+| `upload` | Subida manual desde Vivla Tools (al crear el ticket o desde el detalle) |
+| `chat` | Imagen de un mensaje de chat adjuntada al ticket y re-alojada en Cloudinary |
+| `zendesk_import` | Re-alojado desde un adjunto de Zendesk |
+
+Los orígenes `chat` y `zendesk_import` entran por el método `importFromUrl()`: descarga el archivo desde una URL externa (con `Authorization` si hace falta), lo sube a nuestro Cloudinary y crea la fila. Es **best-effort** e **idempotente** por `zendesk_attachment_id` (no rompe el import/sync si falla).
+
+## Endpoints
+
+Todos requieren Auth0 + `tool-chat` (rol `viewer`).
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `GET` | `/chat/tickets/:id/attachments` | Lista **todos** los adjuntos del ticket (nivel ticket y de comentario, orden por `created_at` asc) |
+| `POST` | `/chat/tickets/:id/attachments` | Sube uno o varios archivos a nivel ticket (campo `files`, multipart) |
+| `DELETE` | `/chat/tickets/:id/attachments/:attachmentId` | Borra un adjunto (Cloudinary + fila) |
+| `POST` | `/chat/tickets/:ticketId/comments/:commentId/attachments` | Sube uno o varios archivos a un comentario del hilo (mig 213, campo `files`, multipart) — valida que el comentario pertenezca al ticket |
+
+Ambos `POST` aceptan **hasta 10 archivos** de **50 MB** cada uno (mismo `FilesInterceptor`). El borrado elimina primero el asset de Cloudinary (best-effort, según `resource_type`) y luego la fila.
+
+## Write-back a Zendesk (retirado)
+
+Al desconectar Zendesk (agosto 2026) se retiró el write-back: los adjuntos que se suben desde Tools **viven solo en Cloudinary**, que es donde ya estaba el 100% de esta tabla. `zendesk_upload_token` queda `null` en las filas nuevas; las viejas conservan el suyo. Antes se re-subía el archivo original a Zendesk (`uploadAttachment`) y se creaba una única nota interna con todos los tokens del lote; ese camino ya no existe.
+
+## Proxy de adjuntos legacy de Zendesk
+
+Los adjuntos viejos que viven en comentarios de Zendesk apuntan a URLs del tipo `https://vivlahelp.zendesk.com/attachments/token/.../`, que tienen dos problemas para mostrarlos en el navegador:
+
+- Requieren **Basic auth**: puestas directas en un `<img>` devuelven 401.
+- Las subidas de iOS llegan en **HEIC/HEIF**, que Chrome/Firefox no renderizan inline.
+
+El controlador `ZendeskAttachmentProxyController` (`GET /chat/zendesk-attachments/proxy?url=…`) resuelve ambos:
+
+1. Valida que la URL sea `https` y del host de Zendesk configurado (anti-SSRF).
+2. Descarga con nuestra Basic auth vía `ZendeskProvider`.
+3. Si el archivo es HEIC/HEIF, lo **transcodifica a JPEG** con `sharp` (q85). Si `libheif` no está disponible en el servidor, devuelve `415` para que el frontend caiga a un enlace de descarga.
+4. Devuelve los bytes con `Cache-Control: private, max-age=3600`.
+
+Requiere la misma auth que el resto de endpoints de tickets (Auth0 + `tool-chat` viewer). **No es un proxy público.**
+
+## Adjuntos de comentario (mig 213)
+
+Desde la web de Tools, redactar un comentario en el hilo de un ticket admite adjuntar uno o varios ficheros (imagen o documento), por el **mismo camino** que los adjuntos a nivel ticket: Cloudinary, no URLs de Zendesk. El flujo es: crear el comentario → subir los ficheros al endpoint `POST .../comments/:commentId/attachments` con el `commentId` devuelto → el resultado (filas con `comment_id` poblado) se renderiza **inline en la burbuja del comentario** y aparece **además** en la pestaña de Adjuntos del ticket, con una marca "desde comentario" que enlaza de vuelta a esa burbuja.
+
+`TicketCommentsService.findByTicketId` carga esas filas (una query por `comment_id IN (...)`) y las expone en un campo nuevo del response, `uploadedAttachments`, **separado** del legacy `attachments` (JSONB, ver abajo) — no se duplica nada, es la misma tabla de siempre con una columna más.
+
+<Note>
+  El body del comentario sigue siendo obligatorio: un comentario "solo adjunto" (sin texto) se filtraría al leer el hilo (mismo filtro anti-eco/vacío de siempre, que mira el JSONB legado, no `uploadedAttachments`). Encaja con el caso de uso — "escribo qué se hizo y adjunto la foto" — pero si algún día se quiere soportar comentario-solo-imagen, ese filtro es el sitio a tocar.
+</Note>
+
+## Legacy: adjuntos de comentarios importados de Zendesk
+
+Los adjuntos **históricos** del hilo de comentarios (importados antes de mig 213, o que siguen entrando por el import/webhook de Zendesk) no viven en `chat_ticket_attachments`: se guardan como fichas dentro del JSONB `chat_ticket_comments.attachments` (nombre, tamaño, tipo), pero el fichero en sí es una URL con token de Zendesk. Al cancelar la cuenta esas URLs mueren, así que hay que re-alojarlos igual que los adjuntos a nivel de ticket. El proxy de arriba solo los sirve inline mientras tanto; la migración es el arreglo permanente. Los adjuntos **nuevos** de comentario (arriba) ya nacen en Cloudinary + la tabla, así que no necesitan este paso.
+
+El CLI `migrate-comment-attachments` recorre los comentarios con adjuntos JSONB, descarga cada fichero de Zendesk con auth (vía `ZendeskProvider`, que valida el host configurado), lo sube a **nuestro Cloudinary** y **reescribe `contentUrl`** en el JSONB.
+
+- **Idempotente y reversible**: guarda el original en `zendeskContentUrl` y añade `cloudinaryPublicId`, que es además la marca de "ya migrado" (esos adjuntos se saltan).
+- Escribe **una vez por comentario**, con todos sus adjuntos ya reescritos, para no dejar el JSONB a medias si algo falla a mitad. Un fallo suelto se cuenta y no aborta la migración.
+- **Imágenes**: por defecto se optimizan (WebP q80, máx 2560px), como los adjuntos nuevos. Los **vídeos no se tocan**. `--no-compress` las sube tal cual para conservar el EXIF (fecha/GPS), útil si la foto puede acabar en una reclamación.
+
+```bash
+# Prueba sin escribir nada
+node dist/src/cli/migrate-comment-attachments.command.js --dry-run
+# Migración acotada / completa
+node dist/src/cli/migrate-comment-attachments.command.js --limit=20
+node dist/src/cli/migrate-comment-attachments.command.js
+```
+
+<Note>
+  A propósito **no** usa `TicketAttachmentsService.importFromUrl`: ése escribe en `chat_ticket_attachments` (nivel ticket) y el hilo se renderiza desde el JSONB del comentario, así que no arreglaría lo que hay que arreglar.
+</Note>
+
+## UI
+
+El componente `TicketAttachments` (frontend) muestra una galería en el detalle del ticket:
+
+- **Drag & drop**, **pegar** (⌘/Ctrl+V) o botón **Subir** (acepta `image/*`, `video/*` y `application/pdf`, máx. 50 MB).
+- Preview en miniatura para imágenes; **chip con icono** y nombre de archivo para PDFs.
+- Botón de **borrar** por adjunto (visible al hover).
+- Cada tile enlaza al archivo en una pestaña nueva y muestra su tamaño.
+
+También hay una caja de subida en el formulario de **alta** del ticket. El copy lo deja claro: *"Se guardan en el ticket y se sincronizan con Zendesk."*
+
+El componente `TicketCommentsThread` (el hilo de comentarios) tiene su propio selector de ficheros (botón de clip junto al switch de "Nota interna", mismo `ACCEPT`/límite de 50 MB) — los ficheros elegidos se muestran como chips removibles antes de enviar y se suben tras crear el comentario. En la burbuja, los adjuntos nuevos (`uploadedAttachments`, Cloudinary) se renderizan directos por `<img>`/enlace de descarga; los legacy (`attachments`, JSONB de Zendesk) siguen pasando por `ProxiedZendeskImage` sin cambios.
+
+### Pegar desde el portapapeles
+
+Como en Zendesk, se puede **pegar** una captura o imagen del portapapeles con ⌘/Ctrl+V y se adjunta directamente, sin pasar por el selector de archivos. Funciona en el **modal de alta**, la **sección de adjuntos del detalle** y el **composer del hilo de comentarios**, y comparte la misma validación de tipo/tamaño que el drag & drop (mismo `ACCEPT` y límite de 50 MB).
+
+Detalles de comportamiento (hook `usePasteFiles`):
+
+- Solo actúa sobre archivos del portapapeles (`clipboardData` con `kind === 'file'`); un pegado de **solo texto** sigue su curso normal.
+- Filtra por mimetype (`image/*`, `video/*`, `application/pdf`) y por los 50 MB; descarta en silencio lo que no encaje.
+- Renombra las capturas con nombre genérico del portapapeles (`image.png`) a `captura-<yyyyMMdd-HHmmss>.<ext>` para que el `filename` mostrado en Zendesk/DB sea reconocible. Un archivo con nombre propio se respeta.
+- En el **modal**, con el diálogo abierto pegar desde cualquier campo adjunta la imagen. En el **detalle** (página completa con otros campos de texto) el pegado se ignora si el foco está en un `input`/`textarea`/`contenteditable`, para no subir un adjunto por sorpresa mientras se escribe.
+
+## Follow-ups
+
+- **Re-hosting de adjuntos del import de Zendesk** (`source='zendesk_import'`): gateado a comentarios nuevos que entran vía webhook. Pendiente.
+- **Backfill** de los adjuntos viejos ya existentes en Zendesk. Pendiente.

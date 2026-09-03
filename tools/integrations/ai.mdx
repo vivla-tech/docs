@@ -1,0 +1,306 @@
+---
+title: "AI (Anthropic) + MCP server"
+description: "Vivla AI assistant, MCP server with OAuth Connectors flow, and Anthropic SDK helpers"
+---
+
+# AI + MCP
+
+Esta pagina cubre tres capas que viven en el mismo modulo:
+
+1. **`AiService`** — wrapper sobre el SDK de Anthropic para insights y texto on-demand.
+2. **`AiAssistantModule`** — chat interno de Vivla con tools, conversaciones persistentes, generative UI.
+3. **MCP server** — expone las mismas tools a clientes externos (Claude Desktop, Claude Code, Cursor, agentes custom) via OAuth 2.1 + PKCE.
+
+---
+
+## 1. Configuracion
+
+| Variable de entorno | Requerida | Descripcion |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Si | API key de Anthropic (para AiService) |
+| `AI_DEFAULT_MODEL` | No | Modelo por defecto. Default: `claude-sonnet-4-6` |
+| `LANGFUSE_PUBLIC_KEY` | No | Observabilidad LLM (traza prompt/respuesta/tokens/latencia) |
+| `LANGFUSE_SECRET_KEY` | No | Par del public key de Langfuse |
+| `LANGFUSE_HOST` | No | URL de la instancia Langfuse |
+| `AUTH0_DOMAIN` | Si | Tenant Auth0 (compartido con el resto del backend) |
+| `AUTH0_API_AUDIENCE` | Si | Audience que validan los guards |
+
+Si `ANTHROPIC_API_KEY` no esta configurada, `AiService.generateText`/`generateStructured` retornan `null` silenciosamente. Langfuse es **fail-open**: si las `LANGFUSE_*` no estan, el wrapper no-opera y el AI sigue funcionando.
+
+---
+
+## 2. AiService (Anthropic SDK)
+
+```typescript
+generateText(options: {
+  systemPrompt: string
+  userPrompt: string
+  model?: string        // default: claude-sonnet-4-6
+  maxTokens?: number    // default: 1024
+  temperature?: number  // default: 0.3
+}): Promise<{ text: string; model: string; inputTokens: number; outputTokens: number } | null>
+
+streamWithTools(options: AiStreamOptions): AsyncIterable<AiStreamEvent>
+
+generateStructured<T>(options: {
+  systemPrompt: string
+  userPrompt: string
+  schema: ZodType<T>        // zod schema; se convierte a JSON Schema para la tool
+  schemaName?: string       // nombre de la tool, default 'response'
+  model?: string
+  maxTokens?: number
+  temperature?: number
+}): Promise<{ data: T; model: string; inputTokens: number; outputTokens: number } | null>
+```
+
+`streamWithTools` permite el loop agentico (text delta + tool_use + tool_result) que consume `AiOrchestratorService`.
+
+`generateStructured<T>` garantiza salida JSON valida via **tool-use forzado** (`tool_choice: { type: 'tool', name }`): el schema zod se convierte a `input_schema` con `zod-to-json-schema`, el modelo esta obligado a llamar a esa unica tool, y el bloque `tool_use` se valida con `schema.parse()` antes de devolver el objeto tipado. Sustituye el patron fragil de "pedir JSON por prompt + `JSON.parse`" (lo usaba Survey Insights). Reservar para extraccion estructurada (sugerencias, clasificacion, drafts); para texto libre seguir con `generateText`.
+
+Timeout: 30 segundos por request.
+
+### Observabilidad — Langfuse
+
+`LangfuseService` (`apps/backend/src/shared/langfuse/`) es un wrapper fino y **fail-open** sobre el que `AiService` apoya cada llamada (`generateText`, `generateStructured`, `streamWithTools`): traza prompt, respuesta, modelo, tokens y latencia. Se inyecta como `@Optional()` — si el modulo no esta o las `LANGFUSE_*` faltan, el AI funciona igual sin trazas. **No** gestiona prompts todavia (el prompt-management migra a Mastra en Q3).
+
+### Survey Insights (consumidor principal de `generateText`)
+
+Cache de insights por encuesta en `survey_insights`. Rate-limit a 3 generaciones/dia por `(survey_id, scope_type, scope_id, section)`. Invalidacion al detectar nuevas respuestas. Deduplicacion in-flight.
+
+```
+apps/backend/src/surveys/insights/survey-insights.service.ts
+```
+
+### Survey Ticket Drafts (consumidor de `generateStructured`)
+
+Descompone el comentario libre de una respuesta de encuesta (stay-review / arrival-review) en N problematicas y redacta un borrador de ticket interno por cada una — ver [Encuestas · Borradores de ticket (IA)](../surveys#borradores-de-ticket-ia). Solo `title`/`description`/`ticketKind`/`category`/`urgency` los redacta el modelo; prioridad, equipo de resolucion, casa, destino, reserva y cliente se derivan deterministicamente. Prohibido por prompt proponer costes/plazos/compromisos de reparacion. Cache sin TTL en `survey_ticket_drafts` (clave `response_id` + hash del comentario + `prompt_version`), rate-limit 3 generaciones/dia.
+
+```
+apps/backend/src/surveys/ticket-drafts/survey-ticket-drafts.service.ts
+```
+
+---
+
+## 3. Chat interno (Vivla AI)
+
+El icono Sparkles aparece tanto en la home (`ToolSuiteHome`) como dentro de `ToolLayout`; en ambos abre el mismo `AskSidebar`. La ruta `/app/ai` es el chat full-width con lista de conversaciones a la izquierda — el titulo de cada una se puede renombrar inline (doble-click o el lapiz al hover).
+
+### Tool registry
+
+Todas las tools viven bajo `apps/backend/src/ai/tools/`. El `ToolRegistry` las descubre via Nest DI y las expone tanto al chat interno como al MCP server. Cada tool define:
+
+```typescript
+interface ToolDefinition {
+  name: string
+  description: string                  // el LLM la lee para decidir cuando llamarla
+  category: 'read' | 'write' | 'action' | 'ui'
+  minRole: 'viewer' | 'editor' | 'admin'
+  inputSchema: JSONSchema
+  execute(input, ctx: { user, conversationId }): Promise<ToolResult>
+}
+```
+
+`ToolExecutor` chequea permisos antes de ejecutar y registra mutations en el audit trail con `source: 'ai'`.
+
+### Allow-list de ejecucion del agente (Lola / M2M)
+
+Ademas del chequeo de rol, el `ToolExecutor` aplica una **allow-list de ejecucion** para el agente de IA (Lola) y cualquier otro actor máquina-a-máquina (`agent-tool-allowlist.ts`, defensa en profundidad). Las llamadas de Lola llegan con un token Auth0 client-credentials (`auth0Id` termina en `@clients`) y el MCP publica **todo** el catálogo, así que el system prompt no es un límite de seguridad. La política, chequeada en código antes de correr cualquier tool:
+
+- El agente puede ejecutar **cualquier tool `category: 'read'`** (la clasificación real del registry, no un heurístico por nombre).
+- Más un set explícito de tools no-read: `ticket_create`, `chat_send_team_escalation`, `chat_handoff_to_human`, `chat_react_to_message`, `chat_ask_team`, `create_product_request`.
+- Todo lo demás (writes, `action`, `ui` generativa) queda **denegado** para el agente.
+
+La lista vive en código (versionada, revisada en PR) — a propósito **no** es un env var, para que cualquier cambio en el radio de acción del agente aparezca en un diff.
+
+### Categorias actuales
+
+El registry expone **107 tools** y el MCP server las **publica todas** — incluidas las de categoria `ui` (generative UI) y `navigate_to`. vivla-tools es la plataforma que renderiza, asi que su MCP declara el vocabulario completo de componentes para que cualquier agente conectado los descubra; esos componentes **solo renderizan en las superficies web de vivla-tools** (detalle en [§4 · Componentes de UI por MCP](#componentes-de-ui-por-mcp-patron-mcp-apps-mcp-ui)). Una tool queda fuera del MCP solo si pone `mcpExposed: false` explicitamente.
+
+| Grupo | Tools | Notas |
+|---|---|---|
+| **Cross-cutting AI summary** | `daily_briefing`, `property_health_score`, `list_properties_by_health`, `guest_context` | Agregan datos + opcional resumen via `AiService` |
+| **Operacionales** | `list_active_stays`, `list_check_ins`, `list_check_outs`, `list_owner_stays`, `property_occupancy_calendar`, `find_owner`, `list_property_agents` | Joins de `bookings_snapshot` + `user_properties` + `properties` |
+| **Bookings** | `list_bookings`, `get_booking` | |
+| **Properties** | `list_properties`, `get_property`, `update_property` | Update es `write` |
+| **Surveys** | `list_surveys`, `get_survey_scores`, `get_survey_summary`, `list_action_plans`, `get_survey_insights`, `list_survey_responses`, `get_survey_response`, `aggregate_survey_responses`, `list_survey_property_configs`, `list_survey_participation_exclusions` | `aggregate_survey_responses` agrupa por `week|month|property|score_band` con metricas `avg_score|nps|count|distribution`. NPS = %promotores (≥9) − %detractores (≤6), no es la media. |
+| **Tickets** | `list_tickets`, `get_ticket`, `create_ticket`, `update_ticket` | Create/update son `write` |
+| **Channels & chat** | `list_channels`, `get_channel`, `list_channel_messages`, `get_chat_analytics`, `list_invitations`, `list_shifts`, `list_chat_notifications`, `list_property_assignments`, `get_property_main_agent` | |
+| **Quick replies** | `list_quick_replies` | Respuestas rapidas canonicas del equipo CX, agrupadas por categoria |
+| **Users & teams** | `list_users`, `get_user`, `list_teams`, `get_team` | |
+| **Community (catalogos)** | `list_rooms`, `get_inventory`, `get_cleaning_status`, `list_appliance_guides`, `get_appliance_guide`, `list_locations`, `list_items`, `list_cleaning_templates`, `list_floor_plans`, `list_property_photos`, `list_qr_codes`, `get_property_dashboard` | |
+| **Web module** | `list_amenities`, `list_property_amenities`, `get_property_web_data`, `list_property_videos`, `list_web_texts` | Sincronizacion Airtable |
+| **Notifications** | `list_notification_templates`, `list_notification_automations`, `list_notification_history`, `list_deep_links`, `get_notification_dashboard`, `list_email_blocks`, `list_email_assets`, `list_notification_suppressions`, `list_email_events` | |
+| **Admin** | `list_app_releases`, `get_app_store_status`, `list_permissions` | |
+| **Inbox** | `list_inbox_messages` | |
+| **AI-powered** | `summarize_conversation`, `draft_reply`, `compare_properties`, `generate_report`, `get_audit_trail` | Usan `AiService` para componer |
+| **Generative UI** | `render_data_table`, `render_chart`, `render_property_card`, `render_ticket_card`, `render_user_card`, `render_action_buttons`, `propose_replies`, `suggest_quick_replies`, `show_channel_info` | Se exponen via MCP con `outputSchema`; solo renderizan en superficies web de vivla-tools |
+| **Ticket proposal** | `propose_ticket` | Propone borrador de ticket (categoria `ui`, `ticket_draft`); via MCP con `outputSchema` + `structuredContent`, solo renderiza en web |
+| **Component proposal** | `propose_booking_card`, `propose_ticket_update`, `propose_survey_card` | Contraparte conversacional de la pestaña "Componentes" del panel — proponen una `VivlaComponent` (v2: card generica y server-driven, `{type:'card', category, title, badges[{label,tone}], actions, fallbackText}`, ver `packages/common/types/vivla-component.ts`) para que CX la revise y pulse "Enviar al cliente"; via MCP con `outputSchema` + `structuredContent`, solo renderizan en web |
+| **Component send** | `send_chat_component` | Categoria `action` (no `ui`, sin `outputSchema`) — envia una `VivlaComponent` directamente al canal de la entidad (ticket/booking), sin confirmacion humana, como el usuario sistema Vivla (`getVivlaAdminStreamUserId()`). Guardrail: no acepta channel/user destino, solo `entityId`/`scopeId`; el canal se resuelve server-side desde la entidad (`ComponentSenderService`). Acepta opcionalmente `component` (una card ya armada, ej. `news_card`) para enviarla tal cual en vez de construirla — el canal sigue resolviendose desde la entidad. Pensada para el concierge/Lola via MCP, no para el copiloto de Fabián |
+| **Navigation** | `navigate_to` | Se expone via MCP; la navegacion solo aplica en superficies web de vivla-tools |
+| **Diagrams** | `property_hierarchy_diagram`, `team_org_chart_diagram` | Mermaid; renderiza en cualquier cliente |
+| **Survey suggested message** | `resolve_survey_response_channel`, `send_owner_message` | Fontaneria (no el redactado) del "mensaje sugerido al propietario" — ver [Encuestas · Mensaje sugerido al propietario](../surveys#mensaje-sugerido-al-propietario-ia). `send_owner_message` postea a un canal de **cliente**: ver doctrina en [Chat · Copiloto](../chat/copilot) |
+
+### Persistencia de conversaciones
+
+Migrations `076_create_ai_conversations.sql` + `077_create_ai_message_feedback.sql`. Tabla `ai_conversations` (titulo auto-generado por AI cheaper), `ai_messages` (roles `user|assistant|tool_use|tool_result`).
+
+El titulo del chat se genera automaticamente: provisional desde los primeros 80 chars del primer mensaje, luego `generateAndSetTitle` lo reemplaza fire-and-forget con un titulo corto (3-6 palabras) generado por Claude. La UI tambien permite editar inline (doble-click o el lapiz al hover).
+
+### REST endpoints (`/api/ai`)
+
+| Endpoint | Descripcion |
+|---|---|
+| `GET /api/ai/agents` | Lista los agentes seleccionables del asistente (`capability: 'assistant'`); persona y prompts se eliminan server-side. Detalle en [Fabián](/chat/copilot). |
+| `POST /api/ai/conversations` | Crea una conversacion (opcionalmente con `title`) |
+| `GET /api/ai/conversations` | Lista las conversaciones del usuario |
+| `GET /api/ai/conversations/:id` | Devuelve la conversacion con todos sus mensajes |
+| `PATCH /api/ai/conversations/:id` | Renombra (`{ title }`, valida ownership por `user_id`) |
+| `DELETE /api/ai/conversations/:id` | Borra la conversacion |
+| `POST /api/ai/conversations/:id/messages` | Envia un mensaje y recibe la respuesta como SSE (acepta `agentKey` para elegir agente; default `vivla-ai`) |
+| `POST /api/ai/messages/:id/feedback` | Thumbs-up / thumbs-down (`{ rating, comment? }`) |
+
+### System prompt — guidance temporal y NPS
+
+`buildSessionContext` inyecta `Today: YYYY-MM-DD (weekday, UTC)` para que el modelo pueda resolver "esta semana", "ultimos 30 dias", "abril" a fechas ISO concretas. El `TOOL_USE_SECTION` recuerda explicitamente:
+
+- Convertir relativas temporales a `from`/`to` para `list_survey_responses` o `aggregate_survey_responses` (no decir "no puedo filtrar por fecha").
+- Calcular NPS con la formula correcta — usar `aggregate_survey_responses` con `metric: 'nps'`, nunca la media.
+
+---
+
+## 4. MCP server (Connectors flow)
+
+### Endpoints
+
+| Endpoint | Auth | Descripcion |
+|---|---|---|
+| `POST /api/mcp` | OAuth 2.1 Bearer | JSON-RPC client→server (Streamable HTTP transport, MCP spec 2025-11-25) |
+| `GET /api/mcp` | OAuth 2.1 Bearer | Stream server→client (SSE) del mismo transport Streamable HTTP |
+| `DELETE /api/mcp` | OAuth 2.1 Bearer | Cierra la sesion MCP |
+| `GET /.well-known/oauth-protected-resource` | Publico | RFC 9728 metadata para discovery de Connectors |
+
+El controlador `McpController` esta marcado `@Public()` para saltarse el guard global y aplica solo `McpOAuthGuard`. El guard:
+
+- Valida JWTs Auth0 contra **multiple audiences** (`AUTH0_API_AUDIENCE` + el resource URL `{host}/api/mcp`)
+- En 401 devuelve `WWW-Authenticate: Bearer realm="vivla-mcp", resource_metadata="https://{host}/.well-known/oauth-protected-resource"` — los clientes Connectors leen esta cabecera y disparan el flow OAuth automatico
+
+### Flow en Claude Desktop / Cursor (Connectors)
+
+```
+1. Usuario: Settings -> Connectors -> Add custom -> pega https://api.vivla.tools/api/mcp
+2. Claude Desktop POST /api/mcp -> 401 + WWW-Authenticate
+3. Claude GET /.well-known/oauth-protected-resource -> aprende auth server
+4. Claude GET https://vivlapro.eu.auth0.com/.well-known/openid-configuration
+5. Claude POST /oidc/register (Dynamic Client Registration) -> obtiene client_id
+6. Claude abre browser -> Auth0 universal login -> redirect callback
+7. Claude intercambia code por access_token
+8. Claude POST /api/mcp con Bearer -> 200 + todo el registry de tools disponible
+```
+
+### Auth0 setup (one-time, ya hecho en prod)
+
+1. **Application "Vivla MCP"** (Native + PKCE, callback `http://localhost:9876/callback` para CLI bridge, sin callback fijo para Connectors)
+2. **Tenant Settings -> Advanced -> OIDC Dynamic Application Registration: ON** (permite Open DCR)
+3. **Settings -> API Authorization Settings -> Default Audience: `https://backend-production-51ce.up.railway.app`**
+
+Detalle completo en `docs/internal/specs/ai-mcp-layer/mcp-deployment-guide.md`.
+
+### `.mcpb` bundle (fallback / Claude Desktop pre-Connectors)
+
+Tambien hay un bundle MCPB en `packages/mcp-server/`:
+
+```sh
+pnpm --filter @vivla-tools/mcp pack:mcpb
+# produce packages/mcp-server/dist/vivla-tools.mcpb
+```
+
+El bundle wrappea el CLI `@vivla-tools/mcp` (stdio <-> HTTP). En instalacion pide solo el API URL; el OAuth lo hace por browser PKCE al primer launch y cachea el token en `~/.vivla/credentials.json`. Util para clientes que no soporten Custom Connectors todavia (Claude Code antes de cierta version, agentes custom). Se distribuye via GitHub Releases (`mcp-vX.Y.Z` tag) o via private extension directory.
+
+### Componentes de UI por MCP (patron MCP Apps / MCP-UI)
+
+vivla-tools es la **plataforma que renderiza**, asi que su MCP server **declara el vocabulario completo de componentes generativos** para que cualquier agente conectado (el concierge de Fabián hoy, otros mañana) los descubra — en vez de que cada agente reimplemente el contrato.
+
+**Tools expuestas** (categoria `ui` + `navigate_to`): `render_data_table`, `render_chart`, `render_property_card`, `render_ticket_card`, `render_user_card`, `render_action_buttons`, `propose_replies`, `suggest_quick_replies`, `show_channel_info`, `propose_ticket` (`ticket_draft`), `propose_booking_card` (`booking_card_proposal`), `propose_ticket_update` (`ticket_update_proposal`), `propose_survey_card` (`survey_card_proposal`), `navigate_to`.
+
+**Capability por superficie.** Estos componentes **solo renderizan en las superficies web de vivla-tools**. La descripcion de cada tool lo declara explicitamente ("Renders only on vivla-tools web surfaces; do not call it from other hosts (Slack, mobile)"), para que un host que cure por superficie (Slack, movil) no las invoque. La razon vieja ("los clientes externos no pueden renderizar") queda superseded por esta curacion por cliente.
+
+**`outputSchema`** (ListTools). Cada tool de UI publica el JSON Schema de su salida `{ success, ui: { type, props } }` (`apps/backend/src/ai/tools/ui-output-schemas.ts`) — la declaracion publica del contrato. Un agente lee el schema y sabe la forma exacta que recibira.
+
+**`structuredContent`** (CallTool). Cuando el resultado de una tool trae `ui` (y opcionalmente `navigation`), el response MCP incluye `structuredContent` con el objeto completo, y **mirrorea el mismo objeto como bloque de texto `content`** (el spec 2025-06 exige que `content` siga presente). Las tools sin `ui` mantienen la forma legacy (su `data` serializada como texto).
+
+Ejemplo — `propose_replies`:
+
+```jsonc
+{
+  "content": [
+    { "type": "text", "text": "{ ...el mismo objeto, stringify... }" }
+  ],
+  "structuredContent": {
+    "success": true,
+    "ui": {
+      "type": "suggestion_chips",
+      "props": { "chips": [{ "text": "¿Te ayudo con la reserva?" }] }
+    }
+  },
+  "isError": false
+}
+```
+
+`navigate_to` añade ademas `navigation: { route }` dentro de `structuredContent`.
+
+**Unwrap en el gateway.** El adaptador del runtime remoto (`concierge-stream.adapter.ts`) extrae `ui`/`navigation` de un tool-result en tres formatos, en este orden: (1) directo en el result (tools nativas in-process), (2) bajo `structuredContent`, (3) JSON dentro de `content[0].text` (fallback para hosts que descartan `structuredContent`). Asi emite los eventos `ui_component` / `navigation` sea cual sea el runtime que produjo la tool.
+
+---
+
+## 5. Estructura de codigo
+
+```
+apps/backend/src/shared/ai/         # AiService (Anthropic wrapper) + generateStructured
+apps/backend/src/shared/langfuse/   # LangfuseService (observabilidad LLM, fail-open)
+apps/backend/src/chat/copilot/      # Cimientos del copiloto de agentes (ver abajo)
+apps/backend/src/ai/
+  ai.controller.ts                  # /api/ai/* (REST + SSE)
+  ai.service.ts                     # AiOrchestratorService (agentic loop)
+  conversation/                     # CRUD de conversaciones + mensajes
+  mcp/
+    mcp.controller.ts               # POST /api/mcp
+    mcp-metadata.controller.ts      # GET /.well-known/oauth-protected-resource
+    mcp-oauth.guard.ts              # JWT validation + WWW-Authenticate
+    mcp.service.ts                  # Fresh McpServer per request (stateless)
+  tools/                            # 107 tools (todas via MCP; los componentes de UI solo renderizan en web)
+    tool.registry.ts                # DI-driven discovery
+    tool.executor.ts                # Permission check + audit log
+    ui-output-schemas.ts            # outputSchema publico de las tools de UI generativa
+
+apps/frontend/app/
+  components/ask/                   # AskSidebar + AskMessage + generative UI
+  hooks/ai/                         # useAsk, useAskStream, useConversations
+  routes/app.ai.tsx                 # Full-page chat
+
+packages/mcp-server/                # @vivla-tools/mcp CLI bridge + MCPB bundle
+docs/internal/specs/ai-mcp-layer/   # PRD, architecture, deployment guide
+```
+
+---
+
+## 6. Copiloto de agentes — cimientos (Alma Q2)
+
+`chat/copilot/` es la capa **agent-agnostica** sobre la que se montan los agentes de IA del chat (el primero es **Fabián**, copiloto de CX). El runtime multi-agente real llega con Mastra en Q3; aqui viven solo los *seams* y la persistencia. **Nada se llama "fabian" en el esquema** — el discriminador es un `agent_key` generico (`'fabian'` es solo un valor de config).
+
+**Modelo de datos** (migracion `137_create_chat_ai_sessions.sql`):
+
+| Tabla | Para que |
+|---|---|
+| `chat_conversation_sessions` | Estado vivo de una conversacion por canal. Regla de sesion: si pasan >24h desde `last_message_at` se cierra la sesion abierta y se abre una nueva. Un **indice parcial unico** `(channel_id) WHERE status='open'` garantiza una sola sesion abierta por canal. Guarda `topic`/`urgency`/`sentiment`/`sentiment_trajectory`/`summary` (los rellena el motor de VIV-1755). |
+| `chat_agent_suggestions` | Cache de sugerencias por-agente. `UNIQUE (session_id, agent_key)` → upsert por turno. `suggestions[0]` = ghost-text. Sin columnas de telemetria (accept/edit/discard van a PostHog). |
+
+**Config de agente** — registro TS en `chat/copilot/config/agents.ts` (no tabla): `key`, persona, prompts versionados, capacidades. Fabián es la primera entrada; los prompts reales llegan con VIV-1751.
+
+**Endpoint** (read-only, gateado como el resto del chat con `Auth0AuthGuard` + `ToolAccessGuard`):
+
+| Endpoint | Descripcion |
+|---|---|
+| `GET /chat/copilot/channels/:channelId/suggestions` | Estado de la sesion abierta + sugerencias cacheadas del agente por defecto |
+
+`CopilotService` resuelve/continua la sesion (regla 24h) y lee/upserta sugerencias via Supabase JS. Stream queda **solo como IO** para que la logica migre a Concierge/Mastra sin reescritura. El **motor de generacion** (pase por turno: contexto → `generateStructured` → clasificacion → cache) **no** vive aqui todavia — es VIV-1755.
