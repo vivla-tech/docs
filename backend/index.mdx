@@ -50,7 +50,8 @@ La API se organiza en módulos NestJS (`src/app.module.ts`).
 |--------|--------------|
 | **Bookings** | Reservas: crear, cancelar, alquilar, intercambiar. v1 (Firestore) y v2 (experiencias + llaves). |
 | **Calendars** | Calendario de cada casa, slots, temporadas, disponibilidad. Vive dentro de `bookings/calendars`. |
-| **Homes** | Casas y propiedades. Controllers v1/v2 + variantes `admin` y `tools`. |
+| **Homes** | Casas: lectura de las casas del usuario, listados y localizaciones (v1/v2 + controller `tools` por HMAC). Sus endpoints de catálogo `admin` se están migrando al módulo **Properties**. |
+| **Properties** | Catálogo de propiedades (dirección, amenities, proveedores, bancos, hosting, parking, documentos e imágenes). Controllers `admin` y `apps`; destino de la migración desde `Homes`. |
 | **Users** | Usuarios y perfiles. Controllers v1/v2 + variantes `admin` y `tools`. |
 | **Auth** | Autenticación y guard de permisos (`PermissionGuard` + `@RequirePermission`). |
 | **Notifications** | Envío de notificaciones (push / buzón Firestore). |

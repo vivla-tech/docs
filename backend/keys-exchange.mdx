@@ -79,6 +79,17 @@ Hubo una regla de lanzamiento **con fecha fija en el código**: hasta el **15/03
   **Estado del rollout de `NEW_EXCHANGE_SYSTEM`: PENDIENTE confirmar.** Que el motor nuevo esté activo (globalmente o por lista de usuarios) es configuración de entorno, no código. La fecha `15/03/2026` sí está hardcodeada como regla temporal.
 </Warning>
 
+## Coste en llaves de una reserva de intercambio (v2)
+
+Al registrar un intercambio desde la app o el panel, el coste en llaves se calcula **siempre en el momento de validar los slots**, haya o no una estancia asociada a la reserva (`src/bookings/v2/admin/bookings.admin.service.ts:630`; `src/bookings/v2/apps/bookings.apps.service.ts:1134`). El coste es:
+
+- **Última hora → 1 llave fija** (`bookings.apps.service.ts:1279`; `bookings.admin.service.ts:630`).
+- **Resto de intercambios →** coste de la temporada de la casa × número de slots. El coste por temporada sale de la tabla de equivalencias de la casa (`calculateSlotKeys`, `src/bookings/v2/bookings.common.repository.ts:629`).
+
+Si la casa **no tiene coste en llaves configurado** para esa temporada, `calculateSlotKeys` devuelve 0 y el registro del intercambio se rechaza con el error `KEYS_NOT_CONFIGURED` ("No hay un coste en llaves configurado para la temporada de la casa seleccionada") (`bookings.apps.service.ts:1140`; `bookings.admin.service.ts:637`). Es una salvaguarda para no crear intercambios de 0 llaves.
+
+Al **cambiar el tipo** de una reserva a intercambio desde el panel, la reserva debe tener una **temporada asociada** en su slot; si no la tiene no se puede convertir (se necesita para calcular las llaves) (`bookings.common.repository.ts:2270`).
+
 ## ThirdHome
 
 ThirdHome es la red externa de intercambio de casas. En `vivla-api` **no hay integración por API**: no se hace ninguna llamada saliente a ThirdHome. Todo el flujo son transiciones de estado **manuales** que gestiona un admin desde el panel (`src/bookings/v1/bookings.service.ts:1952`; endpoints en `bookings-admin.controller.ts:183`).
