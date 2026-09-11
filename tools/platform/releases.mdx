@@ -1,0 +1,142 @@
+---
+title: 'Producto'
+description:
+  'Changelog unificado y actividad de entregas (PRs/commits) de todos los repos
+  de producto'
+---
+
+# Producto
+
+**Producto** (`/app/releases`, antes "App Releases" — la migración `242` solo
+renombra la card del home y el menú, el slug sigue siendo `releases`) reúne dos
+vistas del trabajo que entra a los distintos repos de la compañía: un
+**changelog unificado** de todas las apps y una vista de **Actividad** con
+series de PRs/commits por repo. Vive dentro del módulo `app-releases` del
+backend (`apps/backend/src/app-releases/`).
+
+## Changelog unificado
+
+Al entrar a `/app/releases` lo primero es un feed cronológico con entradas de
+**todos** los repos, no solo uno. Un chip de filtro por proyecto (`Todos` por
+defecto) permite acotar a un repo concreto — al elegir uno, la vista recupera
+las funciones que antes eran el comportamiento por defecto: estado en tiendas
+(solo app móvil), hitos de versión, filtro "solo sin comunicar" y el flujo de
+anuncio a Slack. En la vista `Todos`, cada tarjeta lleva un badge de color con
+el nombre del repo (misma paleta que los gráficos de Actividad,
+`activity/repo-colors.ts`) para que se distinga de un vistazo. Arriba, un strip
+resume el pulso de la semana ("Esta semana: N PRs a producción · M repos
+activos"), leído del mismo endpoint que la vista Actividad; si el sync todavía
+no corrió para ningún repo, el strip se oculta en vez de mostrar un cero
+engañoso.
+
+El gating de siempre se mantiene: usuarios no-admin solo ven entradas
+`published`; las acciones de admin (editar, publicar, borrar) siguen disponibles
+entrada a entrada en cualquiera de las dos vistas. `GET /app-releases/changelog`
+acepta `project` como filtro **opcional** — sin él devuelve entradas de todos
+los proyectos (con el campo `project` en cada una), cambio non-breaking: los
+consumidores que ya mandan `project` (app móvil incluida) siguen funcionando
+igual.
+
+## Dos métricas distintas (vista Actividad)
+
+| Métrica        | Qué cuenta                                                 | Stream       |
+| -------------- | ---------------------------------------------------------- | ------------ |
+| **Releases**   | Trabajo llevado a **producción**                           | `release`    |
+| **Throughput** | Trabajo **completado** (mergeado a la rama de integración) | `throughput` |
+
+Cómo se cuenta un "release" no es igual en todos los repos: se modela por
+proyecto con `release_metric` (`merged_prs` para gitflow, `commits` para repos
+que empujan directo a `master` sin release PRs, como vivla-api) más
+`default_branch` y `throughput_branch`. Cuando `throughput_branch` es `NULL`, la
+rama de producción es el único stream y el evento cuenta como `both` (release y
+throughput a la vez).
+
+## Proyectos rastreados
+
+La bandera `activity_tracked` (independiente de `is_active`, que gobierna la
+visibilidad en el changelog) marca qué repos entran al sync — sin lista
+hardcodeada en el script, se lee de la tabla `app_releases_projects`. Sembrados
+por las migraciones `179` y `242`:
+
+| Slug                 | Repo                          | `release_metric` | `throughput_branch`             |
+| -------------------- | ----------------------------- | ---------------- | ------------------------------- |
+| `vivla-tools`        | vivla-tech/vivla-tools        | `merged_prs`     | `develop`                       |
+| `vivla-mobile-app`   | vivla-tech/vivla-mobile-app   | `merged_prs`     | `develop`                       |
+| `vivla-api`          | vivla-tech/vivla-api          | `commits`        | — (`master` es el único stream) |
+| `vivla-panel`        | vivla-tech/vivla-panel        | `merged_prs`     | —                               |
+| `vivla-cms`          | vivla-tech/vivla-cms          | `merged_prs`     | `develop`                       |
+| `vivla-atlas`        | vivla-tech/vivla-atlas        | `merged_prs`     | `develop`                       |
+| `vivla-smurfs`       | vivla-tech/vivla-smurfs       | `merged_prs`     | `develop`                       |
+| `vivla-concierge`    | vivla-tech/vivla-concierge    | `merged_prs`     | `develop`                       |
+| `micaela`            | vivla-tech/micaela            | `merged_prs`     | — (`master` es el único stream) |
+| `vivla-intelligence` | vivla-tech/vivla-intelligence | `merged_prs`     | — (`main` es el único stream)   |
+
+Los 10 repos rastreados son también, desde la migración `242`,
+`is_active = true` — visibles en el changelog unificado (aunque la mayoría
+todavía no tiene entradas manuales/AI-generadas).
+
+## Modelo de datos (migración 179)
+
+- **`app_releases_activity_events`** — un registro por PR mergeado o commit
+  (`external_id` = número de PR o SHA, único por proyecto → sync idempotente).
+  Se guardan eventos individuales (no pre-agregados) para que semana/mes/quarter
+  sean todos un `GROUP BY` sobre `merged_at`.
+- Columnas nuevas en **`app_releases_projects`**: la config por proyecto
+  (`default_branch`, `throughput_branch`, `release_metric`, `activity_tracked`),
+  el estado del sync (`activity_sync_status` ∈ `never`/`ok`/`error`,
+  `activity_last_synced_at`, `activity_sync_error`) y el LOC (`loc_total`,
+  `loc_by_language`, `loc_measured_at`).
+
+## Endpoints
+
+| Método | Endpoint                      | Auth                     | Descripción                                                                                                                                                    |
+| ------ | ----------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/app-releases/changelog`     | Bearer (Auth0)           | Entradas de changelog. Query: `project` (**opcional** — sin él, todos los proyectos), `status`, `platform`, `communicated`, `page`, `limit`                    |
+| GET    | `/app-releases/projects`      | Bearer (Auth0)           | Catálogo de proyectos activos (`is_active = true`), para los chips de filtro                                                                                   |
+| GET    | `/app-releases/activity`      | Bearer (Auth0)           | Series por proyecto. Query: `metric` (`releases`/`throughput`), `grain` (`week`/`month`/`quarter`), `from`/`to` (`YYYY-MM-DD`, Madrid), `projects` (slugs CSV) |
+| GET    | `/app-releases/activity/loc`  | Bearer (Auth0)           | LOC por proyecto `activity_tracked`, desc                                                                                                                      |
+| POST   | `/app-releases/activity/sync` | Bearer **o** `x-api-key` | Sync desde GitHub. Body: `since` (default hoy−60d), `until` (default ahora), `projects`                                                                        |
+| POST   | `/app-releases/activity/loc`  | Bearer **o** `x-api-key` | Escribe el LOC recalculado (receptor del script de refresco)                                                                                                   |
+
+Los GET son solo Auth0 (lectura del dashboard); los POST aceptan además
+`x-api-key` para el cron de Windmill. El sync es **per-proyecto con try/catch**:
+un repo que el token no puede leer no bloquea al resto (queda con
+`activity_sync_status = 'error'` y se pinta como fallo visible en el banner,
+nunca como un 0 silencioso).
+
+## Autenticación con GitHub
+
+`GitHubService` (`app-releases/ai-agent/github.service.ts`) se autentica como
+**GitHub App** cuando están las tres variables `GITHUB_APP_ID`,
+`GITHUB_APP_INSTALLATION_ID` y `GITHUB_APP_PRIVATE_KEY` (la clave privada puede
+llegar con `\n` escapados desde Railway); si no, cae al **PAT**
+`APP_RELEASES_GITHUB_TOKEN`. Sin ninguna de las dos, la integración queda
+deshabilitada.
+
+## Automatización (Windmill)
+
+Dos scripts de referencia en `apps/windmill/f/vivla_tools/reports/`, ambos
+guardados por `Auth0OrApiKeyGuard` (usan `f/vivla_tools/api_key[_dev|_prod]`):
+
+| Script                  | Schedule (Madrid)            | Qué hace                                                                                                                                                      |
+| ----------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `release_activity_sync` | Diario 07:00 (`0 0 7 * * *`) | Llama a `POST /app-releases/activity/sync`; avisa a Slack de los proyectos que fallaron                                                                       |
+| `release_loc_refresh`   | Lun 05:00 (`0 0 5 * * 1`)    | Clona (shallow) cada repo `activity_tracked`, cuenta LOC (excluye `node_modules`/`dist`/build/lockfiles/minificados) y hace `POST /app-releases/activity/loc` |
+
+<Warning>
+  Ambos schedules **ships con `enabled: false`** — pendientes de alta manual
+  (deploy de Windmill roto, faltan `WMILL_*`). Además `release_loc_refresh`
+  necesita una variable nueva `f/vivla_tools/github_token[_dev|_prod]` (mismo
+  PAT que `APP_RELEASES_GITHUB_TOKEN`; Windmill no lee los envs de Railway, así
+  que el secreto se duplica a propósito). El conteo EXACTO de LOC se clona en
+  los workers de Windmill, no en Railway.
+</Warning>
+
+<Note>
+  Mientras `release_loc_refresh` no esté de alta, el LOC que se ve es el
+  sembrado por la migración 179 (exacto, medido el 21-jul-2026) — correcto, solo
+  no se refresca solo. `micaela` y `vivla-intelligence` (migración 242) todavía
+  no tienen LOC sembrado. El banner de la vista marca un proyecto como
+  **desfasado** si su último sync tiene más de 9 días (varias corridas diarias
+  perdidas antes de alertar).
+</Note>

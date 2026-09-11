@@ -1,0 +1,109 @@
+---
+title: "Administracion"
+description: "Gestion de usuarios, roles y estadisticas del sistema"
+---
+
+# Administracion
+
+El modulo Admin proporciona endpoints para la gestion de usuarios a nivel de sistema: creacion, roles, operaciones en lote y estadisticas generales.
+
+Todos los endpoints requieren rol `admin`.
+
+## Roles de usuario
+
+| Rol | Descripcion |
+|-----|-------------|
+| `admin` | Acceso completo al sistema |
+| `moderator` | Acceso intermedio |
+| `user` | Acceso basico |
+
+## Estados de usuario
+
+| Estado | Descripcion |
+|--------|-------------|
+| `active` | Usuario activo |
+| `inactive` | Usuario desactivado |
+
+## API Endpoints
+
+| Metodo | Endpoint | Descripcion |
+|--------|----------|-------------|
+| POST | `/admin/users` | Crear usuario |
+| GET | `/admin/users` | Listar usuarios (paginado) |
+| PATCH | `/admin/users/:id/role` | Cambiar rol de usuario |
+| DELETE | `/admin/users/:id` | Eliminar usuario |
+| POST | `/admin/users/bulk` | Operaciones en lote |
+| GET | `/admin/stats` | Estadisticas del sistema |
+
+### Crear usuario
+
+```json
+{
+  "email": "user@vivla.com",
+  "firstName": "Nombre",
+  "lastName": "Apellido",
+  "role": "user",
+  "password": "optional-min-8-chars"
+}
+```
+
+### Operaciones en lote
+
+```json
+{
+  "userIds": ["uuid-1", "uuid-2"],
+  "action": "activate"  // "delete" | "activate" | "deactivate"
+}
+```
+
+### Estadisticas
+
+`GET /admin/stats` devuelve:
+
+```json
+{
+  "totalUsers": 150,
+  "activeUsers": 142,
+  "totalTeams": 8,
+  "totalModules": 12,
+  "roleDistribution": {
+    "admin": 5,
+    "moderator": 15,
+    "user": 130
+  }
+}
+```
+
+## Paginacion
+
+`GET /admin/users` acepta:
+
+- `page` (default: 1)
+- `limit` (default: 50)
+
+Respuesta con paginacion:
+
+```json
+{
+  "users": [...],
+  "pagination": {
+    "page": 1,
+    "limit": 50,
+    "total": 150,
+    "totalPages": 3
+  }
+}
+```
+
+## Estructura de modulo
+
+```
+apps/backend/src/admin/
+  admin.module.ts
+  admin.controller.ts
+  admin.service.ts
+  dto/
+    create-user.dto.ts
+    update-user-role.dto.ts
+    bulk-users.dto.ts
+```

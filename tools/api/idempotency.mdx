@@ -1,0 +1,120 @@
+---
+title: "Idempotencia"
+description: "Cómo usar el header Idempotency-Key para retries seguros en mutaciones"
+---
+
+# Idempotencia
+
+Endpoints de mutación pueden aceptar el header `Idempotency-Key` para que reintentos del cliente (red flaky, timeout, retry automático) **no causen efectos duplicados** en el servidor.
+
+## Cuándo usarlo
+
+- Cualquier `POST` / `PUT` / `PATCH` cuyo efecto sea relevante (crear reserva, lanzar notificación, registrar evento).
+- En particular, `POST /api/public/events/ingest` — repetir la misma key con el mismo body es seguro.
+
+## Formato del header
+
+```http
+Idempotency-Key: <string arbitrario, máx 255 caracteres>
+```
+
+- Genera la key tú (UUID v4, hash determinístico, lo que tenga sentido para tu caller).
+- La misma key con el mismo body → segundo POST devuelve la respuesta cacheada del primero.
+- La misma key con un body distinto → `409 idempotency_key_in_use`.
+- Sin header → endpoint procede normal (sin cache de idempotencia).
+
+## Ejemplo: ingest de eventos
+
+```bash
+# Primera llamada
+curl -X POST 'https://tools.vivla.com/api/public/events/ingest' \
+  -H 'x-api-key: <NOTIFICATIONS_API_KEY>' \
+  -H 'Idempotency-Key: booking_abc123_created' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "event_type": "booking.created",
+    "aggregate_id": "booking_abc123",
+    "aggregate_type": "booking",
+    "payload": { ... }
+  }'
+
+# Respuesta:
+# HTTP/1.1 202 Accepted
+# X-Request-ID: req_a1b2c3
+# {
+#   "object": "event",
+#   "id": "<uuid>",
+#   "type": "booking.created",
+#   "status": "pending",
+#   "created_at": "..."
+# }
+
+# Reintento (mismo key, mismo body) — aceptable
+# HTTP/1.1 200 OK
+# {
+#   "object": "event",
+#   "id": "<mismo uuid>",
+#   "type": "booking.created",
+#   "status": "idempotent",
+#   "created_at": "..."
+# }
+
+# Misma key con body distinto — error
+# HTTP/1.1 409 Conflict
+# { "error": { "code": "idempotency_key_in_use", ... } }
+```
+
+## Retención
+
+Las keys se cachean **24 horas**. Pasado ese tiempo, la key puede reutilizarse con un body distinto.
+
+## Implementaciones internas
+
+Hay **dos capas de idempotencia** según el endpoint:
+
+1. **HTTP-level cache** (tabla `idempotency_keys`): para mutaciones genéricas. La response cruda del primer 2xx queda guardada y se replay en reintentos.
+2. **Database-level UNIQUE** (`domain_events.event_id`): específico de `/public/events/ingest`. La `Idempotency-Key` se hashea a UUID y va al campo `event_id` UNIQUE — el mismo evento no se insert dos veces aunque pase tiempo.
+
+Para el caller son indistinguibles. Sólo necesitas saber: **mismo key + mismo body = mismo `id` devuelto**.
+
+## Patrón recomendado de retry
+
+```ts
+async function ingestEvent(event: Event): Promise<EventResource> {
+  const key = `${event.aggregateId}:${event.eventType}:${event.timestamp}`
+  // Determinístico: si reintento por timeout, recalculo la misma key
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch('.../public/events/ingest', {
+        method: 'POST',
+        headers: {
+          'x-api-key': API_KEY,
+          'Idempotency-Key': key,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(event),
+      })
+      if (res.ok) return await res.json()
+      if (res.status === 429) {
+        const retryAfter = Number(res.headers.get('Retry-After') ?? '5')
+        await sleep(retryAfter * 1000)
+        continue
+      }
+      // 4xx no-rate-limit: error del cliente, no reintentar
+      throw await res.json()
+    } catch (err) {
+      // Network error: reintentar con la MISMA key (que es lo bueno de idempotency)
+      if (attempt === 2) throw err
+      await sleep(2 ** attempt * 1000)
+    }
+  }
+  throw new Error('unreachable')
+}
+```
+
+## Qué NO hacer
+
+- ❌ Generar una key nueva en cada retry (defeats the purpose).
+- ❌ Reusar una key vieja con un body distinto (devuelve 409).
+- ❌ Asumir que una key es "consumida" tras un 2xx — sí lo está, pero el cache aún la sirve durante 24h.
+- ❌ Para idempotencia, **NO uses el body field `event_id`** (eliminado): usar siempre el header.

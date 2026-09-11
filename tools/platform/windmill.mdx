@@ -1,0 +1,485 @@
+---
+title: "Windmill (Automatizaciones)"
+description: "Plataforma de automatización para syncs programados, webhooks y notificaciones — desplegada en Railway"
+---
+
+# Windmill
+
+Windmill es la plataforma central de automatizaciones de Vivla. Desplegada en Railway como instancia self-hosted, gestiona syncs programados, webhooks y notificaciones desde un único workspace.
+
+## Arquitectura
+
+```
+┌──────────────┐     ┌──────────────────┐     ┌──────────────┐
+│  Windmill    │────▶│  Vivla Tools API │────▶│  Supabase    │
+│  (Railway)   │     │  (NestJS)        │     │  (PostgreSQL)│
+└──────────────┘     └──────────────────┘     └──────────────┘
+       │                     │
+       │              ┌──────────────┐
+       │              │  Firebase    │
+       │              │  (Firestore) │
+       │              └──────────────┘
+       │
+       ▼
+┌──────────────┐
+│  Slack       │
+│  (alertas)   │
+└──────────────┘
+```
+
+## Workspace
+
+Un único workspace `vivla` organizado por proyecto:
+
+| Carpeta | Proyecto | Contenido |
+|---------|----------|-----------|
+| `f/vivla_tools/sync/` | Vivla Tools | Sync jobs (users, properties, deals, bookings, firebase-legacy-responses) |
+| `f/vivla_tools/notifications/` | Vivla Tools | Reemplazo de Firebase Cloud Functions |
+| `f/vivla_tools/webhooks/` | Vivla Tools | Handlers de eventos externos |
+| `f/vivla_backend/` | vivla-backend | Automaciones de eventos y migraciones |
+| `f/shared/` | Compartido | Utilidades cross-project (HTTP clients) |
+
+## Variables de entorno
+
+Los scripts reciben un parámetro `env` (`'dev'` o `'prod'`) y resuelven variables con el sufijo correspondiente:
+
+```typescript
+const suffix = env === 'prod' ? '_prod' : '_dev'
+const apiUrl = await wmill.getVariable(`f/vivla_tools/api_url${suffix}`)
+const apiKey = await wmill.getVariable(`f/vivla_tools/api_key${suffix}`)
+```
+
+| Variable dev | Variable prod | Secret |
+|-------------|---------------|--------|
+| `f/vivla_tools/api_url_dev` | `f/vivla_tools/api_url_prod` | No |
+| `f/vivla_tools/api_key_dev` | `f/vivla_tools/api_key_prod` | Si |
+
+## Autenticación
+
+Los scripts se autentican contra la API con `x-api-key` header. El backend valida el key via `Auth0OrApiKeyGuard` — el mismo guard que acepta tokens Auth0 para usuarios humanos.
+
+No requiere Auth0 M2M, no expira, no necesita refresh.
+
+## Sync Jobs
+
+### Endpoints
+
+| Endpoint | Método | Descripción |
+|----------|--------|-------------|
+| `/chat/sync/users` | POST | Sync usuarios desde Firebase. Body: `{ chainDealsSync?: boolean }` |
+| `/chat/sync/properties` | POST | Sync propiedades |
+| `/chat/sync/deals` | POST | Sync deals |
+| `/chat/sync/bookings` | POST | Sync bookings |
+| `/chat/sync/firebase-legacy-responses` | POST | Sync respuestas NPS legacy (3 colecciones Firebase → `survey_legacy_responses`) |
+| `/chat/sync/jobs/:id` | GET | Estado del job (incluye `errorMessage` y `steps` en caso de fallo) |
+| `/chat/sync/jobs/:id/logs` | GET | Logs detallados del job |
+| `/chat/sync/jobs` | GET | Listar jobs recientes |
+
+### Flujo de ejecución
+
+1. Windmill llama `POST /chat/sync/{entity}` con `x-api-key`
+2. Backend crea un sync job en `chat_sync_jobs` y ejecuta el sync
+3. Windmill poll `GET /chat/sync/jobs/:id` cada 5 segundos hasta completion
+4. En caso de fallo, el error se guarda en `error_message` + `chat_sync_logs`
+
+## Flows programados
+
+### Daily Full Sync
+
+Sync completo diario de todas las entidades:
+
+- **Path:** `f/vivla_tools/sync/sync_full`
+- **Schedule:** `0 4 * * *` (4:00 AM UTC)
+- **Retry:** 2 reintentos, 5 minutos de backoff
+
+| Step | Script | Input |
+|------|--------|-------|
+| 1 | `sync_users` | `env = flow_input.env`, `chainDealsSync = true` |
+| 2 | `sync_properties` | `env = flow_input.env` |
+| 3 | `sync_bookings` | `env = flow_input.env` — al cierre detecta y clasifica las reservas que han desaparecido del feed (ver [Chat → Reconcile](/chat#reconcile-diario-de-canales-de-booking)) y refresca el puente de ids con el Postgres v2 |
+| 4 | `sync_firebase_legacy_responses` | `env = flow_input.env` |
+| 5 | `slack_notify` | Resultado de steps anteriores |
+
+<Warning>
+  **Cada step debe tener `env` conectado a `flow_input.env`.** Si no se conecta, el step usa el default `'dev'` aunque el schedule pase `'prod'`. Esta es la misconfiguration más común — si el sync prod parece no funcionar, verificar primero este wiring.
+</Warning>
+
+<Note>
+  **`sync_users` (daily) también actualiza usuarios ya existentes, no solo crea.** (`upsertUser` en `sync.service.ts`, VIV-2067). Cuando un usuario matchea por `vivla_user_id`, el sync propaga desde el origen (Firestore) los cambios de `first_name`/`last_name`/`display_name`, `phone` y `avatar` — pero solo cuando el valor de origen es real (nunca pisa un campo guardado con un valor vacío o con el placeholder `'User'`) y difiere del guardado; si nada cambió no se escribe nada (sin bump de `updated_at`). El avatar solo se re-descarga/re-sube a Cloudinary cuando la URL de origen difiere de la última procesada (trackeada en `metadata.syncAvatarSource`), para no re-subir en cada pasada. Si el usuario tiene `chat_user_id`, el nombre/avatar que cambian también se empujan a Stream (`streamService.updateUser`) para que el chat refleje la identidad — los usuarios no pueden editar su nombre en la app, así que si Tools lo actualiza, el chat debe seguirlo. `email`, `client_type`, `role` y `status` siguen fuera de este update. **El job incremental de 30 min (`sync_users_incremental`, solo altas nuevas por cursor sobre la v2 Postgres) sigue siendo create-only** — nunca revisita ni actualiza usuarios existentes.
+</Note>
+
+<Note>
+  **`sync_properties` reconcilia el `status` operativo desde la fuente de verdad.** El `status` lo toma del **enum limpio de la v2 Postgres de vivla-api** (`homes.status` ∈ `inactive`/`pre-active`/`active`), que vivla-api normaliza cada hora desde el `homes.status` crudo de Firestore (que mezcla strings sucios como `secured`/`excellent`/`renovation`) y que el panel admin escribe directo. El sync trae los campos ricos de Firebase y solo superpone `status`/`test_home` desde la v2 por `hid` (`applyV2StatusOverlay`); una casa ausente en la v2 conserva su status de Firebase (mapeado por `mapFirebaseHomeStatusToToolsStatus`: `inactive`/test→`inactive`, resto→`active`). Si la v2 Postgres no está disponible, degrada al status de Firebase. En tools: `inactive`/test → `inactive`; el resto → `active`. Antes el sync nunca tocaba `status`, así que las desactivaciones del origen no se propagaban y `properties` acumulaba casas `active` obsoletas.
+</Note>
+
+<Note>
+  **`sync_properties` también sincroniza la agente de chat responsable por propiedad desde la v2 (fuente de verdad).** Como paso final trae `homes.cx_agent → cx_agents.email` de la v2 (en el mismo overlay que el `status`) y reconcilia `property_agent_assignments` (`assignment_type = 'chat_agent'`, la asignación que usa la creación de canales para poner la agente por defecto): mapea el email v2 a un usuario de tools (case-insensitive) que sea `chat_role` `admin`/`moderator` y crea o **reemplaza** la asignación manual. Si la casa no tiene `cx_agent` en la v2, el email no mapea a un usuario elegible, o la casa no existe en tools, la asignación existente **no se toca** (se cuenta como `skipped_no_match` en los logs del job). **Editar la agente a mano en Settings → Propiedades es efímero: el siguiente `sync_properties` la sobrescribe con el valor de la v2.**
+</Note>
+
+<Note>
+  **Qué campos de `properties` enriquece `sync_properties` desde la v2 (y cuáles ya no).** El último paso del `sync_full` (`enrichPropertiesFromV2`) matchea por `hid = homes.old_id` y escribe **sólo dato operativo**: `wifi`, `parkings`, `access_code`, `alarm_code`, `alarm_secret_word`, `access_details`, `house_secret_word`, `indications`, `storage`, `zip_code`, `province`, `google_maps_url`. Es información de casa ya viva que se mantiene en el panel de vivla-api y que no tiene editor en tools, así que v2 sigue siendo su fuente.
+
+  **Los campos físicos ya NO se escriben** (`bedrooms`, `beds`, `bathrooms`, `bathtubs`, `capacity`, `size`): salen en la ficha pública de vivla.com y desde el cutover (jul-2026) los ownea el CMS vía `PUT /web/properties/:id`. v2 los tenía peor — sobre 61 casas visibles, tools los tenía completos y v2 dejaba 5 sin `bedrooms`, y el enrich ponía a 0 seis casas y cambiaba el valor de otras 22 cada noche. `name`/`type`/`status`/`address`/coordenadas/imágenes los sigue owneando el feed operativo de Firestore.
+
+  Si alguna vez se añade edición de wifi o de códigos de acceso en tools o en el CMS, este enrich la revertirá cada noche: ése es el momento de invertir el flujo y que el panel lea de nosotros.
+</Note>
+
+### NPS Legacy Responses (Hourly)
+
+Sync independiente de respuestas NPS legacy:
+
+- **Path:** `f/vivla_tools/sync/sync_firebase_legacy_responses`
+- **Schedule:** `0 * * * *` (cada hora)
+- **Colecciones:** `nps-home-responses`, `nps-booking`, `nps-home-excellence-values`
+
+El sync es idempotente (upsert en `source_collection + source_doc_id`).
+
+### Booking channels reconcile diario
+
+Thin trigger que llama a `POST /chat/bookings/channels/reconcile`
+(`BookingsService.reconcileBookingChannels`, ver [Chat →
+Reconcile diario de canales de booking](/chat/index#reconcile-diario-de-canales-de-booking)):
+crea canales para bookings con check-in dentro de la ventana configurada que
+aún no tienen canal, y archiva los que ya pasaron el checkout + días de
+gracia. Idempotente — reintentarlo siempre es seguro.
+
+- **Path:** `f/vivla_tools/chat/reconcile_booking_channels`
+- **Schedule (referencia):** `0 0 15 * * *` Europe/Madrid (15:00 Madrid) —
+  después del sync diario de bookings (04:00 Madrid). Se movió de las 07:00 a
+  las 15:00 porque crear un canal ahora **manda también el primer mensaje al
+  propietario** (`BookingWelcomeService`, env-gated por
+  `BOOKING_WELCOME_ENABLED`), así que la hora del cron es la hora a la que le
+  suena el móvil: las 15:00 caen en la franja de trabajo de CX para atender
+  respuestas
+- **Guard del endpoint:** `Auth0OrApiKeyGuard` (igual que `/chat/sync/*`) — el
+  script usa `f/vivla_tools/api_key[_dev|_prod]`, **no**
+  `notifications_api_key` (esa key sólo vale para endpoints con `ApiKeyGuard`,
+  como el daily health digest o el CRM recompute)
+- **Args:** `env`, `dryRun` (default `false`), `windowDays` (opcional, el
+  backend usa 30 si no se pasa)
+
+<Warning>
+  **El schedule real se crea DESACTIVADO por API/UI — gate humano (Joaquín +
+  CX) antes de encenderlo.** El `.schedule.yaml` de este script en el repo es
+  solo de referencia y ships con `enabled: false`, a diferencia del resto de
+  `.schedule.yaml` de este documento (que reflejan un cron ya vivo). No hay
+  ejecución automática hasta que alguien lo active a mano en la UI de
+  Windmill.
+</Warning>
+
+### Idioma de propietarios: refresco diario
+
+Thin trigger que llama a `POST /chat/owner-language/refresh`
+(`OwnerLanguageService`): relee lo que cada propietario ha escrito en
+`chat_message_logs`, pesa palabras funcionales en español e inglés y corrige
+`users.language` — sin modelo ni llamadas externas. Esa columna decide en qué
+idioma sale cada mensaje automático (ver [Notificaciones → Idioma del
+propietario](/notifications/index#idioma-del-propietario)); sin este refresco el
+idioma se congela en la foto del backfill (migración 219) y un propietario que
+empiece a escribir en inglés no se detecta nunca.
+
+- **Path:** `f/vivla_tools/chat/owner_language_refresh`
+- **Schedule (referencia):** `0 0 4 * * *` Europe/Madrid (04:00) — después del
+  sync nocturno (de donde salen los usuarios nuevos) y antes de la actividad del
+  día
+- **Guard del endpoint:** `Auth0OrApiKeyGuard` — el script usa
+  `f/vivla_tools/api_key[_dev|_prod]` (`x-api-key`), **no**
+  `notifications_api_key` (esa key solo vale para endpoints con `ApiKeyGuard`)
+- **Args:** `env`, `windowDays` (opcional, el backend usa 180 si no se pasa)
+- Solo escribe cuando la evidencia es clara: un texto corto, sin marcadores o
+  ambiguo deja la fila intacta, así que una elección hecha a mano por CX no se
+  pisa sola. Idempotente. Avisa por Slack si alguna fila falla.
+
+<Note>
+  El `.schedule.yaml` de este script ships con `enabled: true`, pero como el
+  deploy de Windmill del repo está roto nada de `apps/windmill/` se aplica
+  automáticamente: el cron real se crea por UI/API, igual que el resto.
+</Note>
+
+### Guardias: GCal sync y reconciler
+
+Dos scripts nuevos (`apps/windmill/f/vivla_tools/sync/`) que sincronizan las
+guardias de CX con Google Calendar y las aplican como turnos activos — ver
+[Chat → Guardias](/chat/index#guardias-turnos-sync-con-google-calendar-y-reconciler).
+
+- **`sync_guardias`** — POSTea `/chat/shifts/sync/gcal` y hace polling de
+  `/chat/sync/jobs/:id` (pull Google → Tools). Args: `env`.
+- **`reconcile_guardias`** — POSTea `/chat/shifts/reconcile` (activa/desactiva la
+  guardia vigente). Args: `env`. Devuelve `{ activated, deactivated, noop }`.
+- **Guard de ambos endpoints:** `Auth0OrApiKeyGuard` — los scripts usan
+  `f/vivla_tools/api_url[_dev|_prod]` + `api_key[_dev|_prod]` (`x-api-key`).
+- **Schedule (referencia):** `reconcile_guardias` documenta `0 */15 * * * *`
+  Europe/Madrid (cada 15 min).
+
+<Warning>
+  **Ninguno de los dos está desplegado todavía.** `sync_guardias` no está
+  cableado a ningún flow ni schedule (VIV-2141 solo entrega el script), y el
+  `.schedule.yaml` de `reconcile_guardias` ships con `enabled: false`: el cron
+  real se crea desactivado y se enciende a mano (gate humano Joaquín + CX)
+  cuando se observe corriendo limpio.
+</Warning>
+
+### Lola: watchdog de handoffs
+
+Un script (`apps/windmill/f/vivla_tools/lola/watchdog_handoffs`) que dispara el
+barrido durable de handoffs pendientes de Lola — ver
+[Chat → Lola](/chat/index#lola-asistente-de-ia).
+
+- **`watchdog_handoffs`** — POSTea `/chat/lola/handoff/sweep` (guard
+  `Auth0OrApiKeyGuard`). Args: `env`, `dryRun`. Devuelve
+  `{ scanned, remindersSent, escalated, autoAcked, skipped }`. Idempotente vía
+  `reminded_at`/`escalated_at` (compare-and-set), así que reejecutarlo sin
+  cambios es un no-op.
+- **Schedule (referencia):** `0 */5 * * * *` Europe/Madrid (cada 5 min, por
+  debajo del umbral de recordatorio de 15 min). El SELECT usa un lookback de
+  48 h para no desatar una tormenta de escalación sobre un backlog previo.
+
+<Warning>
+  Su `.schedule.yaml` ships con `enabled: false`: como `reconcile_guardias`,
+  el cron real se crea desactivado y se enciende a mano tras observar un
+  `dryRun` limpio (gate humano Joaquín + CX).
+</Warning>
+
+### Lola: reconciliación de memoria y destilación de bios
+
+Dos crons diarios (`apps/windmill/f/vivla_tools/lola/`) que endurecen la memoria
+de Lola por fuera del forward en vivo de los webhooks:
+
+- **`ingest_reconcile`** — 05:00 Europe/Madrid. POSTea
+  `/chat/lola/ingest-reconcile` (guard `Auth0OrApiKeyGuard`), que relee
+  `chat_message_logs` de las últimas 26 h (día + margen: un run caído lo cubre el
+  siguiente) y lo reenvía al ingest de concierge. Cierra el hueco de los canales
+  donde el forward en vivo no corrió (flag apagado, fallos transitorios) y que si
+  no solo se capturaban por read-repair cuando Lola respondía. Idempotente — el
+  dedupe (`source:channelCid:messageId`) vive en concierge, así que ventanas
+  solapadas o reejecuciones son un no-op. Devuelve
+  `{ sinceHours, channelsProcessed, channelsWithMessages, messagesRead, channelsFailed }`.
+- **`distill_bios`** — 06:00 Europe/Madrid, una hora después del reconcile para
+  trabajar sobre el historial ya reconciliado de la noche. POSTea `/lola/distill`
+  **en concierge** (`f/vivla_tools/concierge_url_prod` + `concierge_api_key_prod`),
+  que relee la memoria reciente de cada propietario y reescribe su bio de
+  working-memory con una llamada a modelo pequeño por propietario. Args
+  `sinceHours=26`, `limit=200`, `dryRun`.
+
+Ambos `.schedule.yaml` ships `enabled: true` (encendidos el 2026-08-05 tras
+verificar el primer run completo).
+
+### Atlas: extracción de conocimiento CX → PR
+
+`apps/windmill/f/vivla_tools/atlas/extract_to_pr` destila cada noche el chat de
+CX en candidatos de conocimiento y abre (y automergea) un PR contra
+`vivla-tech/vivla-atlas`. Es un thin-trigger en dos pasos: la destilación (chat →
+conocimiento estructurado) la hace el backend en
+`POST /ai/knowledge/property-digest` (`KnowledgeExtractService`,
+`@RequireTool('tool-chat', 'admin')`), que lee `chat_message_logs` de las últimas
+`sinceHours` (default 26 h) de los canales de propiedad/booking y corre dos
+pasadas de IA: una por casa con actividad de CX (`digests`) y una extra sobre el
+transcript combinado de todas las casas buscando reglas de producto válidas para
+cualquiera (exchange, ThirdHome, llaves, reservas, políticas → `generalItems`) —
+**solo lectura, nunca escribe en git ni en Atlas**. El script Windmill convierte
+`digests`/`generalItems` en commits sobre una rama `chat-extract` (recreada desde
+`develop` cada noche que el merge anterior tuvo éxito), abre o reusa su PR y lo
+automergea (squash) — nadie revisaba estos PRs a diario, así que la review-then-
+merge solo hacía crecer una PR sin fin y producía diffs con contenido duplicado.
+Un fallo de merge (permisos, conflicto) deja la PR abierta sin tumbar el run.
+Sin dedupe: los bullets repetidos o contradictorios se curan en el doc ya
+mergeado, no en una review previa.
+
+- `knowledge/casas/<slug>.md` — un `digest` por propiedad.
+- `knowledge/zonas/_candidatos-chat.md` — `zonaItems` de todas las propiedades.
+- `knowledge/general/_candidatos-chat.md` — `generalItems`, sin
+  `property_ids`/`property_hids` (el filtro de propiedad de Atlas los sirve sin
+  filtrar).
+
+<Note>
+  `f/vivla_tools/github_token_atlas` (PAT fine-grained scoped a `vivla-atlas`,
+  permisos `Contents: Read and write` + `Pull requests: Read and write`) ya
+  existe y el schedule está `enabled: true`. El PAT confirmado con permisos para
+  push, crear PR y mergear.
+</Note>
+
+## Slack Notifications
+
+El último step del flow envía un resumen a Slack usando Block Kit:
+
+- **Canal:** `#vivla-tools-sync`
+- **Resource:** `slack_auth` (tipo RT.Slack configurado en Windmill)
+
+## Scripts de referencia
+
+Todos los scripts están en el repo como referencia:
+
+```
+docs/internal/tools/chat/implementation/epics/3.2-sync-module-improvements/scripts/
+  sync_users.ts
+  sync_properties.ts
+  sync_deals.ts
+  sync_bookings.ts
+  sync_firebase_legacy_responses.ts
+  sync_full.ts
+  slack_notify.ts
+```
+
+## Sync interino Webflow → módulo web
+
+Mientras Webflow siga siendo la fuente de la verdad del listado público de casas
+(hasta la migración final de la web), un job diario mantiene el módulo web en
+paridad para que `GET /api/v1/web/properties` sirva lo mismo que Webflow
+(consumidor downstream: vivla-api → MyInvestor).
+
+- **Path:** `f/vivla_tools/sync/sync_web_webflow` (snapshot en `apps/windmill/f/vivla_tools/sync/`)
+- **Schedule:** `0 0 7 * * *` diario 07:00 Europe/Madrid, args `env=prod`
+- **Matching de casas existentes:** primero por `slug`; si falla, por **nombre
+  normalizado** (lowercase + sin diacríticos + whitespace colapsado). Webflow **no
+  regenera el slug al renombrar** una casa, así que tras un rename el item llega
+  con el slug viejo y el name nuevo (p.ej. `casa-ribadesella` → name "Casa Xuncu",
+  ya existente en tools como `casa-xuncu`). Esos casos se resuelven por nombre,
+  salen en el resultado como `slug_aliases` (`{webflow_slug, tools_slug, name}`) y
+  **no** cuentan como `extra_in_tools`. Sólo un item sin match por slug **ni** por
+  nombre se considera alta.
+- **Qué escribe en casas existentes** (por slug o por nombre — **Webflow gana en
+  todo**, es la fuente que ve el cliente):
+  - `property_web_data`: `web_title` (nombre público del feed `title`, ← `name`,
+    i18n en/es/fr, compara normalizado), `status_web` (issold→`sold_out`,
+    ishiden→`hidden`, iscomingsoon→`coming_soon` (slug real sin guiones), resto→`listed`), `price_from`
+    (`fraction-price`), `location_text` (i18n = texto Webflow) y `description`
+    (HTML Webflow → Lexical i18n; sólo si el texto plano normalizado difiere).
+  - `properties`: `latitude/longitude` (`coordinates`), `address` y
+    `bedrooms/bathrooms/size` (← `bedrooms`/`bathrooms`/`sqm`). **No** toca
+    `properties.name` (ése lo ownea el feed operativo).
+  - `property_videos`: vídeo **hero** visible ← `fieldData.video.url`. Si la
+    property no tiene vídeo visible → INSERT; si lo tiene → PATCH del hero (o el
+    de menor `sort_order`) cuando la URL difiere. Nunca borra: si Webflow no trae
+    vídeo, no toca nada.
+- **El baile con el sync operativo nocturno (resuelto, jul-2026):** hasta el
+  cutover de vivla.com, `enrichPropertiesFromV2` (`src/chat/sync/sync.service.ts`,
+  dentro del `sync_full` de ~05:00 Madrid) revertía `bedrooms/bathrooms/size` con
+  el valor de vivla-api (v2) en las casas con `hid`, y este job los re-aplicaba a
+  las 07:00 desde Webflow. Sólo tapaba las casas de la colección Listings: las
+  *upcoming* viven en otra colección que este script no lee, así que Casa Emilio
+  se rompía a 0/0/0 a diario. **Desde el cutover, el enrich ya no escribe ningún
+  campo físico** (`bedrooms/beds/bathrooms/bathtubs/capacity/size` los ownea el
+  CMS); v2 sólo aporta el dato operativo (accesos, wifi, parkings, indications,
+  CP/provincia/maps). Con eso, este job de las 07:00 deja de ser necesario y su
+  schedule se apaga.
+- **Altas automáticas (v2):** crea las casas de Webflow sin match por slug ni por
+  nombre — `properties` (status `inactive`, conservador: el sync operativo lo corrige si
+  la casa existe en su fuente) + `property_web_data` + `property_photos`
+  (imágenes subidas a **Cloudinary** con upload firmado, carpeta
+  `web/properties/<slug>`; si un upload falla, cae a la URL de Webflow como
+  fallback) + `property_videos` + `property_web_amenities`. Las casas hidden se
+  crean con `status_web='hidden'`; las draft/archived de Webflow no se crean. **No
+  crea amenities nuevas** (sólo enlaza las que ya existen por slug; un slug sin
+  match sale como `warning`). **Fail-safe:** más de 10 altas en un run se
+  interpreta como respuesta anómala de Webflow y aborta sin escribir. Las altas
+  salen en el resultado (`created[]`) y avisan por Slack; `missing_in_tools` pasa
+  a contener sólo las altas que fallaron.
+- **Qué NO hace:** no borra ni oculta filas de tools ausentes en Webflow
+  (`extra_in_tools`, report-only), no toca `properties.name` (feed operativo) ni
+  borra vídeos.
+- **Excepción al patrón thin-trigger:** escribe directo a Supabase vía PostgREST
+  (variables `f/vivla_tools/supabase_*` + `f/vivla_tools/webflow_token` +
+  `f/vivla_tools/cloudinary_*` para las fotos de las altas) porque es tooling
+  interino que se retira al completar la migración; soporta `dry_run` (las altas
+  se reportan con `would_create` sin subir a Cloudinary ni escribir).
+
+## Debugging
+
+### Ver error de un sync job fallido
+
+```sql
+-- En Supabase SQL Editor
+SELECT id, status, error_message, steps, result
+FROM chat_sync_jobs
+WHERE id = '<job-id>';
+
+-- Logs detallados
+SELECT level, message, context, created_at
+FROM chat_sync_logs
+WHERE job_id = '<job-id>'
+ORDER BY created_at DESC;
+```
+
+### Errores comunes
+
+| Error | Causa | Solución |
+|-------|-------|----------|
+| `MODULE_NOT_FOUND` en CLI | El backend en prod ejecuta JS compilado pero el spawn apunta a `.ts` | Verificar que `sync.service.ts` detecta `dist/` y usa `node` + `.js` |
+| `variable not found` | Variable de Windmill no existe o tiene path incorrecto | Verificar sufijo `_dev`/`_prod` y el path exacto con `f/` prefix |
+| `401 Unauthorized` | API key no coincide con la del backend | Comparar variable de Windmill con `API_KEY` en Railway |
+| Job `failed` sin detalle | Script Windmill no lee `errorMessage` del job | Actualizar script para incluir `errorMessage` y `steps` en el throw |
+| Prod sync hitting dev | `env` no conectado a `flow_input.env` | Abrir flow editor, conectar cada step a `flow_input.env` |
+
+## Notification automation engine
+
+Además de los sync jobs, Windmill orquesta el procesamiento de eventos de dominio del sistema de notificaciones (epic notification-automation-system). Estos scripts viven en `apps/windmill/src/`:
+
+### Cron consumer
+
+- **`process_domain_events.ts`** (cada 30 s) — lee `domain_events WHERE status='pending'`, ejecuta los flows que matchean cada `event_type`, marca como `published` o `failed` con retry. Es el único consumer del pipeline.
+
+### Cron emitters (eventos derivados)
+
+Reemplazan el patrón antiguo de "delay" en el builder. Cada cron consulta vivla-backend (read-only) o vivla-tools, detecta candidatos, y POSTea a `/api/public/events/ingest` con el evento derivado. Idempotent vía `Idempotency-Key` determinística por día.
+
+| Script | Schedule (TZ Madrid) | Evento emitido |
+|---|---|---|
+| `cron-emitters/daily_pre_stay_30d.ts` | Diario 09:00 | `booking.pre_stay_30d_due` |
+| `cron-emitters/daily_pre_stay_3d.ts` | Diario 09:00 | `booking.pre_stay_3d_due` |
+| `cron-emitters/daily_arrival_review.ts` | Diario 10:30 | `booking.arrival_review_due` |
+| `cron-emitters/daily_stay_review.ts` | Diario 10:00 | `booking.stay_review_due` |
+| `cron-emitters/daily_survey_reminder.ts` | Diario 10:15 | `survey.reminder_3d_due` |
+| `cron-emitters/user_lifecycle.ts` | Diario 10:00 | `user.inactive` (60d) |
+
+### Crons de mantenimiento
+
+| Script | Schedule | Endpoint llamado |
+|---|---|---|
+| `cleanup_idempotency_keys.ts` | Diario 03:00 | `POST /v1/admin/maintenance/idempotency-keys/cleanup` |
+| `cleanup_domain_events.ts` | Diario 03:30 | `POST /v1/admin/maintenance/domain-events/cleanup` |
+| `cleanup_sync_logs.ts` | Diario 03:45 | `POST /v1/admin/maintenance/sync-logs/cleanup` |
+| `health_check.ts` | Cada 5 min | Verifica `domain_events` pending > 5 min — alerta Slack |
+
+<Note>
+  `cleanup_sync_logs` hard-borra filas de `chat_sync_logs` con más de 30 días
+  (la tabla no tenía retención y llegó al 79% de la base de datos). El `DELETE`
+  marca páginas reutilizables pero no devuelve espacio al SO: tras la primera
+  ejecución hace falta un `VACUUM FULL public.chat_sync_logs` puntual para que
+  `pg_database_size` baje de verdad.
+</Note>
+
+### Variables adicionales para el engine
+
+| Variable | Uso |
+|---|---|
+| `f/vivla_tools/api_url_{dev,prod}` | base URL de vivla-tools (`https://tools.vivla.com`) |
+| `f/vivla_tools/api_key_{dev,prod}` | `NOTIFICATIONS_API_KEY` para `x-api-key` header |
+| `f/vivla_tools/slack_webhook_url_{dev,prod}` | webhook para alertas (errores en crons, eventos stuck) |
+
+## Deploy desde GitHub (CI)
+
+El workspace de Windmill se sincroniza desde el repo via [`wmill` CLI](https://www.windmill.dev/docs/advanced/cli) en lugar de drag-and-drop manual. El workflow de GitHub Actions vive en `.github/workflows/windmill-deploy.yml`:
+
+- **Trigger**: merge a `main` o `develop` que toque `apps/windmill/**`. También `workflow_dispatch` manual con flag `apply` / `dry-run`.
+- **`develop`** → dry-run (muestra el diff, no aplica).
+- **`main`** → `wmill sync push --yes` (aplica).
+- **Secrets requeridos** en GitHub Settings → Secrets and variables → Actions → "Repository secrets":
+  - `WMILL_TOKEN` (token con scope write)
+  - `WMILL_WORKSPACE_ID` (ej. `vivla`)
+  - `WMILL_BASE_URL` (URL del Windmill self-hosted)
+
+**Lo que sí se sincroniza**: scripts (`.ts`), flows, schedules, resource types — todo lo que esté en `apps/windmill/`.
+
+**Lo que NO se sincroniza** (configurar a mano una vez en la UI):
+
+- Variables (las del cuadro de arriba) — secretos no se suben por CI.
+- Resources (conexiones a Postgres, Slack, etc.) si se usan, normalmente no es nuestro caso.
+- Permisos del workspace.
+
+## Documentación técnica detallada
+
+Para guías paso a paso de configuración del workspace:
+
+- `docs/internal/tools/chat/implementation/epics/3.2-sync-module-improvements/02-windmill-setup-guide.md`
+- `docs/internal/tools/chat/implementation/epics/3.2-sync-module-improvements/03-windmill-configuration-walkthrough.md`
+- Notification automation specs: `docs/internal/tools/notifications/implementation/epics/notification-automation-system/specs/windmill-crons.md`

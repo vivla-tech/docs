@@ -1,0 +1,158 @@
+---
+title: 'Internacionalización'
+description: 'Setup de i18next y soporte multiidioma'
+---
+
+# Internacionalización (i18n)
+
+La aplicación soporta múltiples idiomas mediante **i18next** y **react-i18next**.
+
+## Stack
+
+| Librería        | Versión | Propósito                          |
+| --------------- | ------- | ---------------------------------- |
+| `i18next`       | 24.2.3  | Core de internacionalización       |
+| `react-i18next` | 15.4.1  | Bindings para React / React Native |
+
+## Idiomas soportados
+
+| Idioma  | Código | Estado              |
+| ------- | ------ | ------------------- |
+| Español | `es`   | Completo            |
+| Inglés  | `en`   | Completo (fallback) |
+
+<Note>
+  Si el idioma del dispositivo no es español ni inglés, la app utiliza **inglés** como idioma por
+  defecto.
+</Note>
+
+## Detección de idioma
+
+La detección del idioma se realiza automáticamente al iniciar la app:
+
+1. Se busca la preferencia guardada en AsyncStorage (clave `userLanguage`)
+2. Si no hay preferencia guardada, se detecta el idioma del dispositivo (iOS y Android)
+3. Si el idioma detectado no está soportado, se usa inglés como fallback
+
+## Archivos de traducción
+
+| Archivo | Ubicación                       |
+| ------- | ------------------------------- |
+| Inglés  | `src/core/i18n/languages/en.ts` |
+| Español | `src/core/i18n/languages/es.ts` |
+
+### Secciones de traducción
+
+Cada archivo de traducción contiene las siguientes secciones:
+
+| Sección         | Contenido                                   |
+| --------------- | ------------------------------------------- |
+| `app`           | Textos generales de la aplicación           |
+| `common`        | Palabras y frases comunes (botones, labels) |
+| `profile`       | Pantallas de perfil y configuración         |
+| `auth`          | Login, registro, recuperación de contraseña |
+| `onboarding`    | Pantallas de bienvenida                     |
+| `booking`       | Flujo de reservas                           |
+| `stays`         | Gestión de estancias                        |
+| `properties`    | Propiedades y listings                      |
+| `issues`        | Reporte de incidencias                      |
+| `chat`          | Mensajería                                  |
+| `notifications` | Notificaciones                              |
+| `financial`     | Wallet y transacciones                      |
+
+## Localización de calendarios
+
+Los calendarios (`react-native-calendars`) están configurados con nombres de meses y días en español e inglés. La localización se aplica automáticamente según el idioma seleccionado.
+
+## Inicialización
+
+`initializeI18n()` se invoca durante el hook `useAppInitialization`. No es necesario llamarla manualmente.
+
+## Uso en componentes
+
+<CodeGroup>
+
+```tsx Uso básico
+import { useTranslation } from 'react-i18next';
+
+const MyComponent = () => {
+  const { t } = useTranslation();
+  return <Text>{t('booking.createTitle')}</Text>;
+};
+```
+
+```tsx Con interpolación
+import { useTranslation } from 'react-i18next';
+
+const Greeting = ({ name }: { name: string }) => {
+  const { t } = useTranslation();
+  return <Text>{t('common.greeting', { name })}</Text>;
+};
+
+// en.ts: greeting: "Hello, {{name}}!"
+// es.ts: greeting: "Hola, {{name}}!"
+```
+
+```tsx Cambio de idioma
+import { setLanguage, getCurrentLanguage } from '@/core/i18n';
+
+// Obtener idioma actual
+const lang = getCurrentLanguage(); // 'es' | 'en'
+
+// Cambiar idioma en runtime
+await setLanguage('en');
+```
+
+</CodeGroup>
+
+## Agregar una nueva cadena de texto
+
+<Tabs>
+  <Tab title="Paso 1: Agregar la key">
+    Agrega la nueva key en ambos archivos de traducción:
+
+    ```typescript
+    // src/core/i18n/languages/en.ts
+    export default {
+      // ...
+      booking: {
+        // ...
+        newFeatureTitle: "New Feature",
+      },
+    };
+    ```
+
+    ```typescript
+    // src/core/i18n/languages/es.ts
+    export default {
+      // ...
+      booking: {
+        // ...
+        newFeatureTitle: "Nueva Funcionalidad",
+      },
+    };
+    ```
+
+  </Tab>
+  <Tab title="Paso 2: Usar en el componente">
+    ```tsx
+    const { t } = useTranslation();
+
+    <Text>{t('booking.newFeatureTitle')}</Text>
+    ```
+
+  </Tab>
+</Tabs>
+
+<Warning>
+  Siempre agrega la traducción en ambos idiomas (en.ts y es.ts). Si solo agregas en uno, el usuario
+  verá la key sin traducir en el otro idioma.
+</Warning>
+
+## API de funciones
+
+| Función                | Descripción                                           |
+| ---------------------- | ----------------------------------------------------- |
+| `initializeI18n()`     | Inicializa i18next con la configuración de la app     |
+| `setLanguage(lang)`    | Cambia el idioma en runtime y persiste la preferencia |
+| `getCurrentLanguage()` | Retorna el código del idioma actual (`'es'` o `'en'`) |

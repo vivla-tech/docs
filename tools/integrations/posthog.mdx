@@ -1,0 +1,101 @@
+---
+title: "PostHog"
+description: "Analytics y event tracking para monitoreo de comportamiento de usuarios"
+---
+
+# PostHog
+
+Modulo global de analytics que envia eventos de usuario a PostHog para monitoreo y analisis de comportamiento.
+
+## Configuracion
+
+| Variable de entorno | Requerida | Descripcion |
+|---------------------|-----------|-------------|
+| `POSTHOG_API_KEY` | Si | API key de PostHog |
+| `POSTHOG_HOST` | No | URL de la instancia. Default: `https://eu.i.posthog.com` |
+
+El modulo es **global** — disponible en toda la aplicacion.
+
+En el **frontend** la key es `VITE_POSTHOG_KEY` (publica, `phc_...`, va en el bundle) con host `VITE_POSTHOG_HOST`. Las variables completas estan en `apps/frontend/.env.example` y `apps/backend/.env.example`.
+
+## Gating del copiloto de CX (Fabián)
+
+El copiloto de Fabián se enciende con el feature flag **`chat-copilot-fabian`** en **dos niveles**, ambos obligatorios:
+
+1. **Frontend (si aparece el panel):** el hook `useCopilotFlag` evalua el flag client-side con posthog-js **y** exige rol `editor`/`admin` en `tool-chat`. El panel `FabianCopilotPanel` solo se monta si ambos se cumplen.
+2. **Backend (auto-sugerencias al llegar un mensaje):** `CopilotTriggerService.fire()` evalua el mismo flag server-side.
+
+<Warning>
+**Por que el copiloto aparece en produccion pero no en develop.** El flag es el mismo en todos los entornos (un solo proyecto PostHog), pero si una env **no inyecta `VITE_POSTHOG_KEY`**, posthog-js nunca se inicializa (`app/lib/posthog.ts` hace `return` temprano) y **todo flag se lee como OFF** — el panel no aparece aunque el flag este encendido para tu usuario. El backend, sin `POSTHOG_API_KEY`, devuelve `undefined` (tratado como OFF) y no genera sugerencias. **Hay que inyectar ambas keys en cada entorno donde el copiloto deba verse (incluido develop).** Desde 2026-06, el frontend emite un `console.warn` cuando falta la key, para no confundir ese OFF silencioso con un bug.
+</Warning>
+
+<Note>
+**Trigger backend gatea por agente.** `CopilotTriggerService` resuelve el agente asignado al canal (`active_agent_user_id`, con fallback a `default_agent_user_id`) y evalua el flag con su **email** — la misma identidad con la que el frontend identifica a la persona en PostHog. Asi un rollout por persona (p. ej. el flag `chat-copilot-fabian` segmentado por `email`) funciona tambien en el auto-trigger proactivo, no solo en el panel on-demand. Si el canal no tiene agente asignado, el pass se omite (fail-closed). _(Antes el trigger usaba un `distinctId='backend'` constante que no matcheaba a ningun usuario real; corregido 2026-06.)_
+</Note>
+
+## Servicio
+
+`PostHogService` expone:
+
+```typescript
+capture(params: {
+  distinctId: string              // ID del usuario
+  event: string                   // nombre del evento
+  properties?: Record<string, any> // propiedades adicionales
+}): void
+
+// Feature flags (rollout server-side)
+isFeatureEnabled(key: string, distinctId: string): Promise<boolean | undefined>
+```
+
+La captura es asincrona pero no se espera su resultado (no bloquea el request).
+
+`isFeatureEnabled` delega en el cliente posthog-node. Devuelve **`undefined` cuando PostHog no esta configurado** (distinto de `false`): el caller debe tratar `undefined` como "no hay flag service", no como "flag apagado". Las keys viven tipadas en `shared/posthog/feature-flags.ts` (p. ej. `CHAT_COPILOT_FABIAN = 'chat-copilot-fabian'`) para no usar strings sueltos.
+
+## Eventos rastreados
+
+| Evento | Modulo | Propiedades |
+|--------|--------|-------------|
+| `home_nps_survey_completed` | Surveys | `survey_type`, `survey_id`, `survey_version`, `home_id`, `source`, `filled_by`, `total_steps` |
+
+### Esquema de eventos IA (agent-agnostico)
+
+Esquema unificado para **todos** los agentes de IA (Fabián hoy, Lola y otros despues), definido en `shared/posthog/ai-events.ts`. Toda captura lleva las dimensiones `agent` / `surface` / `feature` para poder cortar el dashboard por agente o por superficie sin acoplarlo a ninguno:
+
+```typescript
+AI_EVENTS = {
+  SUGGESTION_GENERATED, SUGGESTION_SHOWN, SUGGESTION_ACCEPTED,
+  SUGGESTION_EDITED, SUGGESTION_DISCARDED, STRUCTURED_GENERATED
+}
+
+AiEventDims = {
+  agent: string        // agent_key generico, p. ej. 'fabian'
+  surface: string      // 'chat' | 'surveys' | ...
+  feature: string      // 'copilot' | 'insights' | ...
+  model?, promptVersion?, confidence?, inputTokens?, outputTokens?
+}
+```
+
+La telemetria de aceptar/editar/descartar sugerencias vive **solo** en PostHog (por eso `chat_agent_suggestions` no tiene columnas de telemetria).
+
+## MCP Server
+
+PostHog tambien esta disponible como MCP server en Claude Code, permitiendo consultar datos de analytics directamente:
+
+- Feature flags
+- Dashboards
+- Experiments
+- Cohorts
+- Insights y queries
+
+Ver la configuracion en `.mcp.json` del proyecto.
+
+## Estructura de modulo
+
+```
+apps/backend/src/shared/posthog/
+  posthog.module.ts    # Global module
+  posthog.service.ts   # PostHog Node client wrapper (capture + isFeatureEnabled)
+  feature-flags.ts     # Keys de feature flags tipadas
+  ai-events.ts         # Esquema de eventos IA agent-agnostico
+```

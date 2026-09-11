@@ -1,0 +1,83 @@
+---
+title: "Health Check"
+description: "Endpoints de monitoreo de salud del servicio y metricas de sistema"
+---
+
+# Health Check
+
+El modulo Health proporciona endpoints publicos para verificar el estado del servicio. Utilizado por Railway, uptime monitors y balanceadores de carga.
+
+## Endpoints
+
+Ambos endpoints son **publicos** (sin autenticacion).
+
+### `GET /health`
+
+Estado basico del servicio.
+
+```json
+{
+  "status": "healthy",
+  "timestamp": "2026-04-10T12:00:00.000Z",
+  "version": "1.0.0",
+  "environment": "production",
+  "commitSha": "abc1234"
+}
+```
+
+| Campo | Tipo | Descripcion |
+|-------|------|-------------|
+| `status` | `healthy` \| `unhealthy` | Estado del servicio |
+| `timestamp` | ISO 8601 | Momento de la consulta |
+| `version` | string | Version de la API |
+| `environment` | string | `development`, `staging`, `production` |
+| `commitSha` | string? | SHA del commit desplegado (Railway) |
+
+### `GET /health/detailed`
+
+Metricas detalladas del servicio.
+
+```json
+{
+  "status": "healthy",
+  "timestamp": "2026-04-10T12:00:00.000Z",
+  "version": "1.0.0",
+  "environment": "production",
+  "database": {
+    "responseTime": 12
+  },
+  "uptime": 86400,
+  "memory": {
+    "heapUsed": 67108864,
+    "heapTotal": 134217728
+  }
+}
+```
+
+| Campo | Tipo | Descripcion |
+|-------|------|-------------|
+| `database.responseTime` | number | Tiempo de respuesta de Supabase (ms) |
+| `uptime` | number | Tiempo de actividad del proceso (segundos) |
+| `memory.heapUsed` | number | Memoria heap utilizada (bytes) |
+| `memory.heapTotal` | number | Memoria heap total (bytes) |
+
+## Variables de entorno
+
+| Variable | Requerida | Descripcion |
+|----------|-----------|-------------|
+| `NODE_ENV` | No | Nombre del entorno |
+| `RAILWAY_GIT_COMMIT_SHA` | No | SHA del commit (inyectado por Railway) |
+
+## Uso en Railway
+
+Railway verifica `GET /health` periodicamente. Si el endpoint devuelve un status diferente a `healthy` o no responde, Railway marca el servicio como unhealthy y puede reiniciarlo.
+
+## Estructura de modulo
+
+```
+apps/backend/src/health/
+  health.module.ts
+  health.controller.ts
+  health.service.ts
+  dto/health-check.dto.ts
+```

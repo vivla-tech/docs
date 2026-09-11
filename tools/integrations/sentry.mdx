@@ -1,0 +1,106 @@
+---
+title: "Sentry"
+description: "Reporte de errores de backend y frontend, con politica explicita de que se reporta y que no"
+---
+
+# Sentry
+
+Reporte de errores para el backend (NestJS) y el frontend (React) de tools. Los demas productos de Vivla ya estaban en Sentry —`vivla-api`, la app movil y el panel—; tools era el hueco, y su unica forma de ver un error era leer los logs de Railway a mano.
+
+Organizacion **`vivla-lifestyle`**, region **DE** (`https://de.sentry.io`), equipo `vivla`.
+
+## Configuracion
+
+| Variable de entorno | App | Requerida | Descripcion |
+|---------------------|-----|-----------|-------------|
+| `SENTRY_DSN` | backend | No | DSN del proyecto backend. Ausente → Sentry no arranca. |
+| `VITE_SENTRY_DSN` | frontend | No | DSN del proyecto frontend (publico, va en el bundle). |
+| `LOG_LEVEL` | backend | No | Nivel minimo del logger pino. Default `info`. |
+
+El entorno que ve Sentry sale de **`APP_STAGE`** en el backend (`development` / `staging` / `production`) y de `VITE_APP_STAGE` en el frontend — no de `NODE_ENV`, que solo distingue tipo de build.
+
+**Sin DSN no pasa nada.** El backend salta el `init()` y toda llamada `Sentry.*` es un no-op; el frontend hace `return` temprano (y avisa por consola). Local y los tests no necesitan configuracion. El frontend, ademas, **no reporta nunca en stage `development`**: la rama rota de un compañero no es un incidente.
+
+## El orden de arranque importa
+
+`apps/backend/src/instrument.ts` es **el primer import de `main.ts`**, antes de Nest, express y helmet:
+
+```typescript
+import { isSentryEnabled } from './instrument'
+
+import { ValidationPipe, VersioningType } from '@nestjs/common'
+// ...
+```
+
+`@sentry/nestjs` parchea sus objetivos (http, express, postgres, el ciclo de vida de Nest) en tiempo de `require` via OpenTelemetry. Todo lo que ya este importado cuando corre `init()` se queda **sin instrumentar**. Por eso vive en su propio modulo: un `import` con efectos secundarios es la unica forma de garantizar que se evalua antes que los imports hermanos.
+
+<Warning>
+**No copiar el patron de `vivla-api`.** Alli `Sentry.init()` se llama *dentro* de `bootstrap()`, despues de `NestFactory.create()`, y con el DSN hardcodeado en `src/main.ts`. Eso reporta errores pero pierde el arranque y casi toda la auto-instrumentacion. Verificar el orden es facil: en `dist/src/main.js`, `require("./instrument")` tiene que ser el **primer** require del fichero.
+</Warning>
+
+`SentryModule.forRoot()` va como primera entrada de `imports` en `app.module.ts` — engancha el ciclo de vida de Nest. Es inofensivo cuando no hay DSN.
+
+## Que se reporta y que no
+
+La politica vive en `GlobalExceptionFilter.reportToSentry()` (`apps/backend/src/common/filters/global-exception.filter.ts`) y esta cubierta por tests en `global-exception.filter.spec.ts`. **No es "reportar toda excepcion"**, a proposito:
+
+| Situacion | A Sentry | Nivel |
+|---|---|---|
+| 5xx | Si, como excepcion | `error` |
+| 4xx en general (400, 401, 403, 404, 409…) | **No** | — |
+| 404 bajo `/api/web/` | Si, como mensaje | `warning` |
+
+Los 4xx se quedan fuera porque un cliente mandando un payload malo o pegando a un endpoint sin permisos **no es una incidencia**, y reportarlos entierra los errores de verdad: solo los 400 de validacion enanizarian todo lo demas.
+
+<Note>
+**La excepcion de los 404 de `/api/web/`.** Ese prefijo es el puente publico de vivla.com (lo consume `vivla-cms`), asi que un 404 ahi significa que **el site en produccion enlaza a un recurso que ya no existe** — una fuga de SEO silenciosa, no un error de cliente. Es exactamente asi como los slugs retirados `casa-roche` y `casa-fonsalia` pasaron desapercibidos hasta que alguien leyo los logs de Railway por casualidad (arreglado en `vivla-cms` con 39 redirects 301). Ahora esa clase de fuga avisa sola.
+</Note>
+
+### Agrupacion (fingerprints)
+
+- **5xx** → `['api-5xx', metodo, ruta-con-:id, code]`. Los UUID de la URL colapsan a `:id`, asi que un endpoint roto es **una** incidencia, no una por registro.
+- **404 publicos** → `['public-web-404', ruta]`. Los UUID tambien colapsan (un id interno viejo es una incidencia), pero **los slugs se mantienen literales**: cada slug retirado es un item accionable propio ("ponle un 301 a este"), que es justo el objetivo.
+
+El query string se ignora siempre, de modo que `?lang=es` no crea incidencias duplicadas.
+
+## PII y datos sensibles
+
+`sendDefaultPii: false` en las dos apps — Sentry nunca recoge cuerpos de peticion, headers, cookies ni IPs por su cuenta. Encima, un `beforeSend` recursivo (tope de 6 niveles de profundidad) sustituye por `[FILTERED]` cualquier clave que contenga `password`, `token`, `authorization`, `cookie`, `api_key`, `api-key`, `secret`, `credential`, `service_key`, `jwt` o `session`. Se aplica igual a los breadcrumbs. Las listas del backend (`instrument.ts`) y del frontend (`app/lib/sentry.ts`) son espejo la una de la otra; **si tocas una, toca la otra**.
+
+En el frontend se ignora ademas el ruido tipico de navegador que no son bugs nuestros: `Network Error`, `Failed to fetch`, `AbortError`, `ResizeObserver loop` y todo lo que venga de `chrome-extension://` y equivalentes.
+
+La identidad se ata al compañero autenticado con **solo el email** mas el rol de chat como tag (`identifySentry`, llamado junto a `identifyPostHog` en `main.tsx`). Ningun token de Auth0.
+
+## Muestreo de trazas
+
+Los errores son el objetivo; las trazas se muestrean a la baja: `tracesSampleRate` 0.1 en produccion y 1.0 en el resto, en ambas apps.
+
+## Logs estructurados (pino)
+
+Ademas de las excepciones, el backend emite **logs estructurados** con [pino](https://getpino.io) via `nestjs-pino`. `LoggerModule.forRoot(buildLoggerConfig())` se registra en `app.module.ts` (justo despues de `SentryModule`, antes de los modulos de features) y `main.ts` hace `app.useLogger(app.get(Logger))`, de modo que el logger interno de Nest y **todo `Logger` inyectado** en cualquier servicio salen por pino. La config vive aislada y testeable en `apps/backend/src/common/logging/logger.config.ts`.
+
+| Aspecto | Comportamiento |
+|---|---|
+| Formato | JSON en todos los stages (lo que esperan Railway y Sentry). Solo en `APP_STAGE=development` se usa `pino-pretty` multi-linea para un humano en la terminal — se decide por `APP_STAGE`, no por `NODE_ENV`. |
+| Nivel | `LOG_LEVEL` (default `info`). |
+| Ruido de health | Las sondas `/api/health` y `/api/health/detailed` se excluyen del `autoLogging` (Railway/uptime pegan ~1/min y enterrarian el trafico real). |
+
+### Correlacion por request id
+
+`genReqId` (`common/logging/request-id.ts`) etiqueta cada linea de log de una peticion con un `requestId` y lo devuelve en la cabecera de respuesta `X-Request-ID`. Precedencia: `req.requestId` (si `RequestIdMiddleware` ya corrio) → cabecera entrante `x-request-id` (reutilizada verbatim si es sana, ≤200 chars, para que un trace id del llamante sobreviva end-to-end) → un id nuevo con forma `req_<hex>`. `customProps` propaga ese `requestId` a **cada** log escrito durante la peticion, no solo a la linea de "request completed" de pino-http.
+
+### Envio a Sentry
+
+`instrument.ts` activa `enableLogs: true` y anade `Sentry.pinoIntegration()` a las integraciones. Esa integracion auto-instrumenta cada logger pino del proceso y reenvia sus lineas a Sentry como **eventos de log de primera clase**, correlacionados con el mismo trace/span que la peticion que los produjo. Solo funciona porque `instrument.ts` corre **antes** de que pino se importe (ver [El orden de arranque importa](#el-orden-de-arranque-importa)): el hook de instrumentacion en tiempo de `require` de pino tiene que instalarse primero.
+
+### Redaccion en los logs
+
+`buildRedactPaths` (`common/logging/redact.ts`) deriva las `redact.paths` de pino de la **misma** `SENSITIVE_KEY_PATTERNS` que usa el `beforeSend` de Sentry — una sola lista de claves sensibles en todo el codebase. Para cada patron emite la ruta top-level (`password`) y un wildcard de un nivel (`*.password`), mas rutas fijas de cabeceras HTTP que pino-http siempre serializa (`req.headers.authorization`, `req.headers.cookie`, `req.headers["x-api-key"]`, `res.headers["set-cookie"]`).
+
+<Warning>
+La redaccion de pino es **mas debil** que el `scrub` recursivo de Sentry: casa una ruta/clave exacta (via `@pinojs/redact`), sin substring ni wildcard de profundidad arbitraria. Una clave sensible anidada dos o mas niveles (`{ user: { profile: { password } } }`) **no** queda cubierta. Manten los secretos fuera de payloads de log profundamente anidados, o extiende la lista.
+</Warning>
+
+## Triaje automatico (Manitas)
+
+**Manitas** (Handy), de la flota `vivla-smurfs`, coge la incidencia sin resolver mas frecuente, la reproduce, escribe un fix y abre una **PR en draft** contra `develop`. Corre por cron cada 6 h y respeta un limite de una PR abierta por (agente, repo). Estaba fijado a `vivla-mobile-app`; ahora tambien barre tools.

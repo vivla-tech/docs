@@ -1,0 +1,150 @@
+---
+title: 'Beta Tester'
+description: 'Modo beta tester controlado por feature flags de PostHog'
+---
+
+## Descripción
+
+Ubicación: `src/modules/beta-tester/`
+
+Habilita el "modo beta tester", que da acceso anticipado a funcionalidades en desarrollo (alquiler e intercambio de casas) a un conjunto controlado de usuarios y propiedades. Se activa mediante feature flags de PostHog, sin necesidad de publicar una nueva versión de la app.
+
+<Note>
+  Este módulo no expone pantallas propias. Provee hooks y componentes que otros módulos (`home`,
+  `booking`, `stays`, `property`) consumen para adaptar su UI y sus endpoints según el estado de
+  beta tester.
+</Note>
+
+## Feature flags
+
+Los flags se definen en `src/core/featureFlags/flags.ts` y se resuelven en tiempo de ejecución vía PostHog.
+
+| Flag                          | Clave PostHog                    | Descripción                                                                                                                              |
+| ----------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `betaTesterUsers`             | `beta-tester-users`              | Booleano. Marca al usuario actual como beta tester (match por usuario). **Solo identidad**: no altera el comportamiento de ninguna casa. |
+| `betaTesterHomes`             | `beta-tester-homes`              | Payload con `{ allowPropertyIds: string[] }`. Lista de casas beta. **Es el único interruptor que cambia comportamiento.**                |
+| `betaTesterRentAvailable`     | `beta-tester-rent-available`     | Booleano. Libera el alquiler en las casas beta; mientras esté apagado se muestra el placeholder.                                         |
+| `betaTesterExchangeAvailable` | `beta-tester-exchange-available` | Booleano. Libera el intercambio en las casas beta; mientras esté apagado se muestra el placeholder.                                      |
+
+<Warning>
+  El flag de usuarios (`beta-tester-users`) **nunca** debe condicionar alquiler ni intercambio. Si
+  lo hiciera, dar de alta a un copropietario en el programa le bloquearía esos canales en **todas**
+  sus casas, reales incluidas, mientras los flags de disponibilidad estén al 0%. El gating keyea
+  siempre en la casa en scope (`isBetaHome`).
+</Warning>
+
+## Hooks
+
+| Hook                               | Descripción                                                                                            |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `useIsBetaTester()`                | Fuente de verdad del módulo. Devuelve dos señales independientes: identidad de cuenta y casa en scope. |
+| `useBetaTesterRentAvailable()`     | Estado del canal de alquiler **de la casa en scope** (habilitado, placeholder o endpoint de test).     |
+| `useBetaTesterExchangeAvailable()` | Estado del canal de intercambio **de la casa en scope** (habilitado, placeholder o endpoint de test).  |
+| `useAnalyticsBetaSync(enabled)`    | Sincroniza las propiedades de beta tester al perfil de analytics de forma idempotente.                 |
+
+### `useIsBetaTester`
+
+```typescript
+// Modo cuenta (sin argumento): identidad. isBetaHome es siempre false.
+const { isBetaTester, matchesUser, matchesHome, match, betaPropertyIds } = useIsBetaTester();
+
+// Modo por propiedad: isBetaHome es true solo si esa casa está en el beta.
+const { isBetaHome } = useIsBetaTester(selectedPropertyId);
+```
+
+Lee el flag `betaTesterUsers` y el payload de `betaTesterHomes`, y devuelve **dos señales que no deben confundirse**:
+
+- `isBetaTester` — **identidad de cuenta**: match por usuario **o** por casa. Global a la persona. Solo para consumidores account-level (`useAnalyticsBetaSync`, `BetaTesterWelcomeCard`).
+- `isBetaHome` — **la casa en scope es una casa beta**. Es la única señal que puede condicionar comportamiento (alquiler / intercambio), para que una casa real nunca cambie de comportamiento por el hecho de que su propietario entre en el programa.
+
+El parámetro opcional `propertyId?: string | null` decide el modo:
+
+- **Modo cuenta** (`propertyId` omitido): `matchesHome` es `true` si el usuario posee alguna casa de `allowPropertyIds` (se cruza con `usePropertyStore().ownedPropertiesList`). `isBetaHome` es `false`: sin casa en scope no hay nada que condicionar.
+- **Modo por propiedad** (`propertyId` provisto, admite `null`): `matchesHome` es `true` solo si esa propiedad está en `allowPropertyIds`, **con independencia de la propiedad de la casa**. Ya no consulta `ownedPropertiesList`. Un `propertyId` a `null` (nada seleccionado) nunca hace match: fail-open a las vistas normales.
+
+El match por usuario (`matchesUser`) es **global** en ambos modos, pero **no entra en `isBetaHome`**.
+
+| Campo             | Tipo                         | Descripción                                                                                                    |
+| ----------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `isBetaTester`    | `boolean`                    | Identidad de cuenta: `true` si hay match por usuario o por casa. **No usar para gating.**                      |
+| `isBetaHome`      | `boolean`                    | La casa en scope está en `allowPropertyIds`. `false` en modo cuenta. **Única señal válida para gating.**       |
+| `matchesUser`     | `boolean`                    | Match directo por el flag `beta-tester-users` (global en ambos modos).                                         |
+| `matchesHome`     | `boolean`                    | Modo cuenta: posee alguna casa de `allowPropertyIds`. Modo por propiedad: la propiedad en scope está en él.    |
+| `match`           | `'user' \| 'home' \| 'none'` | Origen del match (prioriza `user` sobre `home`). Se emite a analytics.                                         |
+| `betaPropertyIds` | `string[]`                   | Modo cuenta: casas del usuario incluidas en el beta. Modo por propiedad: `[propertyId]` si hace match, o `[]`. |
+
+### `useBetaTesterRentAvailable` / `useBetaTesterExchangeAvailable`
+
+Ambos hooks comparten la misma forma de retorno y keyean en `isBetaHome`, **nunca** en `isBetaTester`. En una casa que no sea beta el canal está siempre habilitado y su comportamiento no se altera, sea quien sea el usuario. Ambos aceptan el mismo `propertyId?: string | null` opcional y lo reenvían a `useIsBetaTester`; omitirlo hace fail-open.
+
+```typescript
+// Por casa en scope (RentScreen / ExchangeScreen, useProperties, BookingTypeForm, StayModifyModal).
+const { isBetaHome, rentEnabled, showPlaceholder, useTestEndpoint } =
+  useBetaTesterRentAvailable(selectedPropertyId);
+const { isBetaHome, exchangeEnabled, showPlaceholder, useTestEndpoint } =
+  useBetaTesterExchangeAvailable(selectedPropertyId);
+
+// Sin argumento: no hay casa en scope ⇒ fail-open (canal habilitado, sin placeholder).
+const rent = useBetaTesterRentAvailable();
+```
+
+| Campo                             | Descripción                                                                                                  |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `isBetaHome`                      | La casa en scope es una casa beta. Reenviado de `useIsBetaTester`.                                           |
+| `rentEnabled` / `exchangeEnabled` | `true` si la casa en scope no es beta, o si el flag de disponibilidad está activo.                           |
+| `showPlaceholder`                 | `true` cuando la casa en scope es beta y el flag aún está apagado: se muestra el placeholder "Próximamente". |
+| `useTestEndpoint`                 | `true` cuando la casa en scope es beta y el flag está activo: las queries usan el endpoint de test.          |
+
+<Note>
+  `useTestEndpoint` se pasa a `useExchangePropertiesQuery` / `useRentalPropertiesQuery` en
+  `useProperties.ts` para que los beta testers consulten los datos de prueba en lugar de los de
+  producción.
+</Note>
+
+### `useAnalyticsBetaSync`
+
+```typescript
+useAnalyticsBetaSync(enabled);
+```
+
+Sincroniza las propiedades `beta_tester`, `beta_tester_match` y `beta_tester_home_ids` al perfil de analytics. Ignora a visitantes y a usuarios no autenticados, y usa una firma (`signature`) para evitar reenvíos cuando el estado no cambia.
+
+## Componentes
+
+<CardGroup cols={2}>
+  <Card title="BetaTesterWelcomeCard">
+    Tarjeta de bienvenida que solo se renderiza para beta testers (`useIsBetaTester`). Se muestra en
+    el hero de la home (`HomePropertyHero`).
+  </Card>
+  <Card title="BetaTesterListingsPlaceholder">
+    Placeholder "Próximamente" con listados falsos difuminados. Recibe `channel: 'rent' |
+    'exchange'` y se usa en `RentScreen` y `ExchangeScreen`.
+  </Card>
+  <Card title="BetaTesterBookingChoicePlaceholder">
+    Placeholder para la elección de tipo de reserva. Acepta `variant: 'card' | 'inline'` y se usa en
+    `BookingTypeForm` y en `StayModifyModal`.
+  </Card>
+</CardGroup>
+
+## Consumidores
+
+| Módulo     | Uso                                                                                                                                                                                           |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `home`     | `HomePropertyHero` muestra `BetaTesterWelcomeCard` (account-level).                                                                                                                           |
+| `booking`  | `RentScreen`, `ExchangeScreen` y `BookingTypeForm` alternan entre contenido y placeholders **según la propiedad en scope**.                                                                   |
+| `stays`    | `StayModifyModal` bloquea la modificación con `BetaTesterBookingChoicePlaceholder` **según la casa de la reserva** (`propertyId` que le pasa `StayActionsPanel` desde `booking.property.id`). |
+| `property` | `useProperties` (`useExchangeProperties` / `useRentalProperties`) usa `useTestEndpoint` de la casa seleccionada para el endpoint.                                                             |
+
+<Warning>
+  El estado de beta tester depende de datos que se hidratan de forma asíncrona en `propertyStore`.
+  En **modo cuenta**, el match por casa (`matchesHome`) devolverá `false` hasta que
+  `ownedPropertiesList` esté disponible. En **modo por propiedad**, el gating keyea en
+  `selectedPropertyId`: mientras sea `null` (nada seleccionado todavía) `isBetaHome` es `false`, es
+  decir, se hace fail-open a las vistas normales hasta que el selector de la home fije la casa.
+</Warning>
+
+<Note>
+  Al añadir un consumidor nuevo, pásale siempre la casa en scope. Un hook de gating sin `propertyId`
+  hace fail-open a propósito: es preferible dejar un canal abierto que bloquear el alquiler o el
+  intercambio de una casa real que no hemos sabido identificar.
+</Note>

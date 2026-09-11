@@ -1,0 +1,164 @@
+---
+title: 'Estructura de Modulos'
+description: 'Organizacion modular del codigo fuente'
+---
+
+# Estructura de Modulos
+
+La app sigue un **patron module-first**: cada feature tiene su propio modulo autocontenido en `src/modules/`, con una estructura interna consistente. El codigo compartido vive en `src/shared/` y la configuracion central en `src/core/`.
+
+## Convencion de Estructura Interna
+
+Cada modulo puede contener los siguientes directorios (segun necesidad):
+
+```
+src/modules/<nombre>/
+├── api/          # Endpoints y llamadas HTTP
+├── screens/      # Componentes de pantalla
+├── components/   # Componentes del modulo
+├── hooks/        # Hooks especificos del modulo
+├── services/     # Logica de negocio
+├── types/        # Tipos TypeScript
+├── constants/    # Constantes
+├── utils/        # Utilidades
+├── store/        # Zustand store del modulo (si aplica)
+└── features/     # Sub-features (ej: booking/features/exchange)
+```
+
+<Note>
+  No todos los modulos implementan todos los directorios. Cada modulo incluye solo lo que necesita,
+  manteniendo la estructura ligera.
+</Note>
+
+## Lista de Modulos
+
+| Modulo            | Directorio                   | Descripcion                                                                                   |
+| ----------------- | ---------------------------- | --------------------------------------------------------------------------------------------- |
+| **auth**          | `src/modules/auth/`          | Autenticacion, login, registro, reset de contrasena, modo visitor/guest                       |
+| **booking**       | `src/modules/booking/`       | Reservas, intercambios, creacion de bookings, wallet. Incluye sub-feature `features/exchange` |
+| **chat**          | `src/modules/chat/`          | Mensajeria en tiempo real con Stream Chat. Gestion de canales, mensajes, invitaciones         |
+| **home**          | `src/modules/home/`          | Pantalla principal, dashboard de propiedad, galeria, amenidades                               |
+| **invitations**   | `src/modules/invitations/`   | Gestion de invitaciones a propiedades por token y onboarding de invitados                     |
+| **notifications** | `src/modules/notifications/` | Gestion de notificaciones push y permisos                                                     |
+| **profile**       | `src/modules/profile/`       | Perfil de usuario, configuracion, roles (`UserRole.GUEST`, owner, etc.)                       |
+| **property**      | `src/modules/property/`      | Detalle de propiedades, seleccion de propiedad, reportes de calificacion                      |
+| **stays**         | `src/modules/stays/`         | Historial de estadias (activas, pasadas, canceladas, pendientes), reviews                     |
+
+## Codigo Compartido (`src/shared/`)
+
+<Tabs>
+  <Tab title="Componentes">
+    Ubicados en `src/shared/components/`, organizados por categoria:
+
+    | Directorio | Contenido |
+    |---|---|
+    | `ui/` | Componentes base de UI (inputs, cards, badges, etc.) |
+    | `buttons/` | Botones reutilizables (`BackButton`, etc.) |
+    | `layout/` | Componentes de layout (`Header`, etc.) |
+    | `navigation/` | Componentes de navegacion |
+    | `feedback/` | Componentes de feedback (`ProgressToastManager`, etc.) |
+    | `icons/` | Iconos SVG custom (`MyHome`, `Calendar`, `Stays`, `Profile`, `Inbox`) |
+    | `onboarding/` | Componentes del flujo de onboarding |
+
+  </Tab>
+  <Tab title="Hooks">
+    Ubicados en `src/shared/hooks/`:
+
+    | Hook | Proposito |
+    |---|---|
+    | `useAppInitialization` | Orquesta la inicializacion de la app (auth, onboarding, splash screen) |
+    | `useNavigation` | Logica de navegacion basada en estado de auth y onboarding |
+    | `useLinking` | Manejo de deep links y URL schemes |
+    | `usePropertySelection` | Logica de seleccion de propiedad y gate de navegacion |
+    | `useCombinedUnreadCount` | Contador combinado de mensajes no leidos (Stream Chat) |
+    | `useAnalyticsProfileSync` | Sincronizacion de perfil con PostHog |
+    | `useAppLoadingState` | Estado de carga global de la app |
+    | `useOnboardingStatus` | Estado del onboarding del usuario |
+    | `useKeyboardAwareScroll` | Scroll ajustado al teclado |
+    | `useScrollVisibility` | Visibilidad de elementos basada en posicion de scroll |
+    | `useStorageDiagnostics` | Diagnosticos de almacenamiento (debug) |
+
+  </Tab>
+  <Tab title="Servicios">
+    Ubicados en `src/shared/services/`:
+
+    | Servicio | Descripcion |
+    |---|---|
+    | `api/client.ts` | Cliente HTTP con Axios, interceptors, token refresh automatico |
+    | `api/errorHandler.ts` | Clasificacion y manejo de errores de red |
+    | `storage/secureStorage.ts` | Wrapper de `expo-secure-store` para datos sensibles |
+    | `queryInvalidationService.ts` | Servicio de invalidacion de cache de React Query |
+    | Linking | Manejo de deep links |
+    | Upload | Servicio de subida de archivos |
+
+  </Tab>
+  <Tab title="Stores y Contexts">
+    **Stores** (`src/shared/stores/`):
+    - `appStore` - Estado de inicializacion
+    - `onboardingStore` - Estado de onboarding
+    - `keyboardStore` - Altura del teclado
+    - `pendingDeepLinkStore` - Deep links pendientes
+
+    **Contexts** (`src/shared/contexts/`):
+    - `BottomSheetContext` - Gestion de bottom sheets con `@gorhom/bottom-sheet`
+    - `ScrollContext` - Tracking de scroll offset y viewport
+
+  </Tab>
+</Tabs>
+
+## Configuracion Central (`src/core/`)
+
+<CardGroup cols={3}>
+  <Card title="analytics/" icon="chart-line">
+    Cliente de PostHog (`client.posthog.ts`), definicion de eventos (`events.ts`) y punto de entrada
+    (`index.ts`).
+  </Card>
+  <Card title="config/" icon="gear">
+    Variables de entorno (`env/`), configuracion de Sentry (`sentry.ts`), PostHog (`posthog.ts`),
+    deep linking (`linking.ts`), navegacion (`navigation.ts`).
+  </Card>
+  <Card title="featureFlags/" icon="flag">
+    Feature flags centralizados (`flags.ts`). Ejemplo: `financialReport2025`.
+  </Card>
+</CardGroup>
+
+Adicionalmente, `src/core/i18n/` contiene la internacionalizacion con soporte para ingles (`en.ts`) y espanol (`es.ts`), ademas de localizacion de calendarios (`calendarLocalization.ts`).
+
+## Diagrama de Dependencias
+
+```
+src/
+├── core/                    # Configuracion central (sin dependencias de modules/)
+│   ├── analytics/           #   PostHog
+│   ├── config/              #   Env, Sentry, linking, navigation
+│   ├── featureFlags/        #   Feature flags
+│   └── i18n/                #   Internacionalizacion (es, en)
+│
+├── shared/                  # Codigo compartido (puede depender de core/)
+│   ├── components/          #   UI reutilizable
+│   ├── hooks/               #   Hooks globales
+│   ├── stores/              #   Zustand stores globales
+│   ├── services/            #   API client, storage, upload
+│   ├── contexts/            #   React Contexts
+│   ├── constants/           #   Constantes (queryClient, navigation)
+│   ├── styles/              #   Theme y estilos globales
+│   └── types/               #   Tipos compartidos
+│
+└── modules/                 # Features (pueden depender de core/ y shared/)
+    ├── auth/
+    ├── booking/
+    ├── chat/
+    ├── home/
+    ├── invitations/
+    ├── notifications/
+    ├── profile/
+    ├── property/
+    └── stays/
+```
+
+<Warning>
+  La regla de dependencia es unidireccional: `modules/` puede importar de `shared/` y `core/`, pero
+  `shared/` no debe importar de `modules/` y `core/` no debe importar de `shared/` ni `modules/`. La
+  excepcion es cuando se usa import dinamico (`await import(...)`) para evitar dependencias
+  circulares, como en `authStore` que importa `chatStore` de forma lazy.
+</Warning>
