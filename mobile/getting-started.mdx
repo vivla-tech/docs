@@ -1,0 +1,143 @@
+---
+title: 'Inicio Rápido'
+description: 'Guía para configurar el entorno de desarrollo de Vivla Mobile'
+---
+
+# Inicio Rápido
+
+Esta guía te ayudará a configurar el entorno de desarrollo para trabajar con la aplicación móvil de Vivla.
+
+## Prerrequisitos
+
+Asegúrate de tener instaladas las siguientes herramientas antes de comenzar:
+
+| Herramienta    | Versión mínima         | Notas                                             |
+| -------------- | ---------------------- | ------------------------------------------------- |
+| Node.js        | 20+                    | Se recomienda usar `nvm` para gestionar versiones |
+| npm            | Incluido con Node.js   | Gestor de paquetes                                |
+| EAS CLI        | >= 16.16.0             | `npm install -g eas-cli`                          |
+| Xcode          | Última versión estable | Solo para desarrollo iOS                          |
+| Android Studio | Última versión estable | Solo para desarrollo Android                      |
+
+<Warning>
+  Para compilar en iOS necesitas macOS con Xcode instalado. Android Studio es necesario para
+  compilar en Android.
+</Warning>
+
+## Instalación
+
+<Tabs>
+  <Tab title="Pasos generales">
+    **1. Clonar el repositorio**
+
+    ```bash
+    git clone <url-del-repositorio>
+    cd managua
+    ```
+
+    **2. Instalar dependencias**
+
+    ```bash
+    npm install
+    ```
+
+    **3. Configurar variables de entorno**
+
+    ```bash
+    cp .env.example .env.development
+    ```
+
+    Abre `.env.development` y completa las variables necesarias (ver sección de variables de entorno más abajo).
+
+    **4. Iniciar el servidor de desarrollo**
+
+    ```bash
+    expo start --dev-client
+    ```
+
+  </Tab>
+  <Tab title="iOS">
+    Después de completar los pasos generales:
+
+    ```bash
+    npm run ios
+    ```
+
+    <Note>
+      Requiere un dev client compilado previamente o un build de desarrollo via EAS.
+    </Note>
+
+  </Tab>
+  <Tab title="Android">
+    Después de completar los pasos generales:
+
+    ```bash
+    npm run android
+    ```
+
+    <Note>
+      Asegúrate de tener un emulador Android configurado o un dispositivo conectado via USB con depuración habilitada.
+    </Note>
+
+  </Tab>
+</Tabs>
+
+## Variables de entorno
+
+<Warning>
+  Nunca incluyas valores reales de variables de entorno en el repositorio. Usa `.env.example` como
+  referencia y completa los valores en tu archivo `.env.development` local.
+</Warning>
+
+Las siguientes variables deben estar configuradas:
+
+<Tabs>
+  <Tab title="API">
+    | Variable | Descripción | |----------|-------------| | `API_URL` | URL base de la API principal
+    de Vivla | | `CHAT_API_URL` | URL de la API de chat | | `STREAM_API_KEY` | Clave de API para
+    Stream Chat |
+  </Tab>
+  <Tab title="Monitoreo">
+    | Variable | Descripción | |----------|-------------| | `SENTRY_DSN` | DSN de Sentry para
+    reporte de errores | | `SENTRY_ORG` | Organización de Sentry | | `SENTRY_PROJECT` | Proyecto de
+    Sentry | | `SENTRY_AUTH_TOKEN` | Token de autenticación de Sentry |
+  </Tab>
+  <Tab title="Analytics">
+    | Variable | Descripción | |----------|-------------| | `POSTHOG_API_KEY` | Clave de API de
+    PostHog | | `POSTHOG_HOST` | Host de la instancia de PostHog |
+  </Tab>
+  <Tab title="EAS">
+    | Variable | Descripción | |----------|-------------| | `EAS_PROJECT_ID` | ID del proyecto en
+    Expo Application Services | | `EAS_UPDATE_URL` | URL para actualizaciones OTA via EAS Update |
+  </Tab>
+</Tabs>
+
+## Scripts principales
+
+| Script        | Comando                     | Descripción                        |
+| ------------- | --------------------------- | ---------------------------------- |
+| Start         | `npm start`                 | Inicia el servidor de desarrollo   |
+| iOS           | `npm run ios`               | Ejecuta la app en simulador iOS    |
+| Android       | `npm run android`           | Ejecuta la app en emulador Android |
+| Test          | `npm test`                  | Ejecuta lint y tests               |
+| Validate      | `npm run validate`          | Ejecuta lint, format y tests       |
+| Build Dev     | `npm run build:development` | Build de desarrollo via EAS        |
+| Build Preview | `npm run build:preview`     | Build de preview via EAS           |
+| Build Prod    | `npm run build:production`  | Build de producción via EAS        |
+
+<CodeGroup>
+```bash Desarrollo
+npm start
+```
+
+```bash Tests
+npm run validate
+```
+
+```bash Build
+npm run build:development
+npm run build:preview
+npm run build:production
+```
+
+</CodeGroup>

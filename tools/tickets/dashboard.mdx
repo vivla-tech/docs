@@ -1,0 +1,161 @@
+---
+title: "Panel de tickets"
+description: "KPIs, SLAs, aging y tipos de ticket del dashboard de soporte"
+---
+
+# Panel de tickets
+
+El **Panel de tickets** es la vista de analytics del sistema de tickets de soporte. Agrega métricas de actividad, cumplimiento de SLA, antigüedad del backlog y distribución por tipo, calculadas en tiempo real desde `chat_tickets` (sin tabla precomputada en v1).
+
+Las reglas de negocio (objetivos de SLA, mapeos de tipo, umbral de dormido) viven en `apps/backend/src/chat/tickets/config/sla.config.ts` como única fuente de verdad. Los campos derivados (`slaStatus`, `ticketType`, `daysSinceCreated`) se calculan al leer cada ticket — el frontend no reimplementa las reglas.
+
+## KPIs
+
+`GET /chat/tickets/kpis` — admite filtros por ventana de fechas (`dateFrom`/`dateTo`), equipo (`team` / `resolution_team`) y prioridad. Los tickets marcados como `invalid` no cuentan.
+
+| Métrica | Campo | Descripción |
+|---------|-------|-------------|
+| Tickets abiertos | `totalOpen` | Tickets en estado abierto ahora mismo (cualquier prioridad) |
+| Resueltos en rango | `totalResolvedInRange` | Tickets resueltos/cerrados dentro de `[dateFrom, dateTo]` |
+| Críticos sin resolver | `criticalUnresolvedNow` | Tickets abiertos con prioridad `urgent` o `high` |
+| Backlog por cohortes | `backlogOverDays` | Abiertos con antigüedad `> 1`, `> 3` y `> 7` días |
+| % backlog | `backlogPercentage` | Proporción (0-1) de abiertos con más de **3 días** sobre `totalOpen` |
+| FCR % | `fcrPercentage` | First Contact Resolution: resueltos con ≤ 1 comentario público **y** sin reaperturas |
+| Tasa de reaperturas | `reopenRate` | Proporción (0-1) de resueltos en rango que se reabrieron al menos una vez |
+| Primera acción interna | `avgFirstInternalActionMinutes` | Minutos medios de creación → primer evento de `status_history` distinto de `created` ("alguien coge el ticket"), por prioridad. Sin SLA: solo señal de _pickup_ |
+| Tiempo medio de 1ª respuesta pública | `avgFirstPublicReplyMinutes` | Minutos medios de creación → primer comentario **público** al propietario, por prioridad. Es la métrica real de respuesta |
+| Cumplimiento SLA 1ª respuesta pública | `slaFirstPublicReplyCompliance` | Proporción (0-1) que cumple el SLA de respuesta medido sobre el primer comentario público, por prioridad |
+| Tiempo medio de resolución | `avgResolutionTimeMinutes` | Minutos medios de creación → `resolved_at`, por prioridad |
+| Cumplimiento SLA resolución | `slaResolutionCompliance` | Proporción (0-1) que cumple el SLA de resolución, por prioridad |
+| Tiempo medio de respuesta ⚠️ obsoleto | `avgResponseTimeMinutes` | Minutos medios de creación → `first_response_at`. **Obsoleto**, sustituido por `avgFirstPublicReplyMinutes` |
+| Cumplimiento SLA respuesta ⚠️ obsoleto | `slaResponseCompliance` | **Obsoleto**, sustituido por `slaFirstPublicReplyCompliance` |
+
+<Note>
+  El FCR cruza `chat_tickets` con `chat_ticket_comments`: una consulta agrupada cuenta los comentarios **públicos** por ticket resuelto. Pasa el FCR quien tiene `commentCount ≤ 1` y `reopenedCount === 0`.
+</Note>
+
+<Warning>
+  **Métricas de respuesta reales (t4).** `avgResponseTimeMinutes` y `slaResponseCompliance` quedaron **obsoletas**: salían de `chat_tickets.first_response_at`, un campo custom de Zendesk cuya sincronización se desconectó en agosto de 2026 (`NULL` en todo ticket nuevo y ~92 % de deltas negativos en el histórico, que inflaban el cumplimiento). Las sustituyen `avgFirstPublicReplyMinutes` y `slaFirstPublicReplyCompliance` (primer comentario público) más `avgFirstInternalActionMinutes` (primer movimiento interno). Todas aplican la misma regla de higiene "delta estrictamente > 0": un evento en o antes de la creación se descarta (`elapsedMinutesSince` en `utils/response-metrics.util.ts`, espejada en la vista `analytics.v_tickets_clean`, migración `226`).
+</Warning>
+
+Estados considerados **abiertos**: `created`, `assigned`, `in_progress`. Estados **resueltos**: `resolved`, `closed`.
+
+<Note>
+  El estado `improvement_proposal` era un estado falso ya migrado a la dimensión propia `ticket_kind` (ver [Campos](/tickets/fields)). Sigue en el CHECK de `status` durante la transición two-phase, pero las propuestas ya cuentan como abiertas por su lifecycle real (`created`/`assigned`). Excluir las propuestas de los KPIs (si CX lo pide) es un follow-up de producto.
+</Note>
+
+## SLAs
+
+Objetivos en minutos (wall-clock 24/7), definidos en `sla.config.ts`:
+
+| Prioridad | 1ª respuesta | Resolución |
+|-----------|--------------|------------|
+| `urgent` | 30 min | 6 h (360 min) |
+| `high` | 30 min | 24 h (1440 min) |
+| `normal` | 2 h (120 min) | 7 días (10080 min) |
+| `low` | 24 h (1440 min) | 30 días (43200 min) |
+
+`computeSlaStatus(ticket)` devuelve el estado de la **etapa actual** del SLA:
+
+- Tickets resueltos → siempre `ok`.
+- Antes de la 1ª respuesta → se compara el tiempo transcurrido contra el SLA de respuesta.
+- Tras la 1ª respuesta → se compara contra el SLA de resolución.
+
+| Estado | Condición |
+|--------|-----------|
+| `ok` | Transcurrido < 80 % del objetivo |
+| `warning` | Transcurrido ≥ 80 % del objetivo |
+| `breached` | Transcurrido ≥ 100 % del objetivo |
+
+<Note>
+  Por ahora el cálculo usa tiempo de reloj 24/7. La flag `SLA_USE_BUSINESS_HOURS` está reservada para una futura utilidad de horario laboral (zona horaria + festivos españoles + fines de semana) que podrá enchufarse sin tocar los servicios.
+</Note>
+
+## Tipos de ticket
+
+`resolveTicketType(ticket)` deriva uno de cuatro tipos: **Casa**, **Experiencia**, **Administrativo** o **Dormido**. Regla híbrida, en orden:
+
+1. **Override Dormido** — si el ticket está abierto y sin actividad (`updatedAt` / `lastCommentAt`) durante ≥ **30 días** (`DORMIDO_THRESHOLD_DAYS`), el tipo es `dormido`, ignorando el resto.
+2. **Equipo primario** — `resolution_team` → `TICKET_TYPE_BY_TEAM`.
+3. **Categoría (fallback)** — `category` → `TICKET_TYPE_BY_CATEGORY`, cuando el equipo no resuelve un tipo.
+4. **Default** — `administrativo` (`TICKET_TYPE_DEFAULT`).
+
+Mapeo por equipo (`TICKET_TYPE_BY_TEAM`):
+
+| Equipo | Tipo |
+|--------|------|
+| `propiedades_y_mantenimiento`, `equipo_de_limpieza`, `manitas`, `promotora` | Casa |
+| `proveedores_externos` (histórico) | Casa |
+| `experiencia_del_cliente` (histórico) | Experiencia |
+| `seguro`, `diseño` (histórico) | Administrativo |
+
+Mapeo por categoría (`TICKET_TYPE_BY_CATEGORY`): `facturacion` / `contratos` / `documentacion` → Administrativo; `reservas` / `check_in` / `check_out` → Experiencia.
+
+## Aging
+
+`GET /chat/tickets/aging` — cuenta los tickets **abiertos** agrupados por antigüedad desde su creación. Admite filtro por `team`. Cohortes (`AGING_COHORTS`), con límite inferior inclusivo y superior exclusivo:
+
+| Cohorte | Rango |
+|---------|-------|
+| `lt1d` | < 1 día |
+| `1to3d` | 1-3 días |
+| `3to7d` | 3-7 días |
+| `gt7d` | > 7 días |
+
+## Stats
+
+`GET /chat/tickets/stats?groupBy=...` — agrega los tickets por una dimensión, aplicando la misma superficie de filtros que el listado (estado, prioridad, agente, propiedad, fechas y columnas nativas de Zendesk). Cada bucket devuelve `count`, `openCount`, `resolvedCount` y sumas/medias de coste (`totalEstimatedCost`, `totalActualCost`, `avgEstimatedCost`).
+
+Valores de `groupBy`: `status`, `priority`, `property`, `resolution_team`, `zone`, `category`, `destination`, `payer`, `repair_status`, `owner_approval`, `finance_approval`, `ticket_type`. Para `property` se adjunta el nombre como `label`; `ticket_type` es una dimensión derivada (no columna) y se calcula con `resolveTicketType`.
+
+## Paneles del dashboard
+
+La página (`TicketsDashboardPage.tsx`) abre con una rejilla de 3 columnas de **6 KPI cards**: Tickets abiertos, Críticos sin resolver (urgentes + altas abiertas), Resueltos último 30 días, FCR % (objetivo 70-80 %), Reaperturas % y Backlog > 3 días (alerta si supera el umbral del 10 %). Debajo, los paneles van en una **rejilla uniforme de 3 columnas** (`xl:grid-cols-3`) para que las cards no se agranden:
+
+| Panel | Contenido |
+|-------|-----------|
+| `SlaComplianceCard` | Cumplimiento de SLA de respuesta y resolución por prioridad |
+| `BacklogAgingChart` | Distribución del backlog por cohortes de antigüedad |
+| `TicketsByTeamChart` | Tickets por equipo de resolución (donut) |
+| `TicketsByCategoryChart` | Tickets por categoría (barras horizontales) |
+| `TicketsByPayerChart` | Tickets por pagador (donut) |
+| `ResponseTimeBarChart` / `ResolutionTimeBarChart` | Tiempos por prioridad: el de respuesta pinta dos series (primera actuación interna + primera respuesta pública) con la línea de SLA sobre la respuesta pública; el de resolución, el tiempo medio de resolución |
+| `WeeklyTicketsChart` | Volumen semanal de tickets (últimos 90 días) |
+| `TicketsByPropertyTable` | Métricas por casa — desglose por prioridad (ancho completo) |
+| `DormantTicketsPanel` | Tickets dormidos (abiertos sin actividad ≥ 30 días, ancho completo) |
+
+<Note>
+  Se retiraron dos paneles que perdieron valor con el modelo nuevo de equipos: `TicketTypeDistributionChart` (con los equipos actuales casi todo cae en "Casa") y `TicketsByPropertyChart` (el gráfico era redundante con la tabla `TicketsByPropertyTable`, que se mantiene).
+</Note>
+
+## Filtros de la lista
+
+El listado de tickets (`GET /chat/tickets`) admite, además de los filtros por columna (estado, prioridad, agente, propiedad, fechas y campos nativos de Zendesk), filtros sobre los campos **derivados**:
+
+| Filtro | Efecto |
+|--------|--------|
+| `ticketType` | Filtra por tipo derivado (`casa` / `experiencia` / `administrativo` / `dormido`) |
+| `slaStatus` | Filtra por estado de SLA (`ok` / `warning` / `breached`) |
+| `ageCohort` | Filtra por cohorte de antigüedad (`lt1d` / `1to3d` / `3to7d` / `gt7d`) |
+| `isDormant` | Filtra por la condición de dormido (true/false) |
+| `pendingCost` | Muestra solo los tickets **pendientes de coste** (`cost_pending = true`: cerrados sin importe, a la espera de factura) |
+| `onlyInvalid` | Muestra solo los tickets marcados como inválidos (soft-delete) |
+
+<Note>
+  Los filtros derivados dependen de funciones puras (`resolveTicketType`, `computeSlaStatus`, `isDormant`) que no se pueden traducir a SQL sin duplicar las reglas. En v1 el listado trae el conjunto filtrado por columnas, deriva en memoria y pagina localmente — barato para el working set de CX (miles, no decenas de miles). Cuando **no** hay filtros derivados, la paginación se hace en Postgres (`.range`). `pendingCost` es la excepción: al ser una columna booleana es SQL-pushable, así que se aplica en la query (`.eq('cost_pending', true)`), compone por AND con el resto y conserva la paginación en servidor.
+</Note>
+
+### Búsqueda de texto libre
+
+El parámetro `search` hace una **búsqueda server-side** sobre el título y la descripción del ticket, y también por **número de ticket de Zendesk**:
+
+- `title ILIKE %term%` **OR** `description ILIKE %term%` (case-insensitive).
+- Si el término (quitando un `#` inicial opcional) es un número, se añade una rama de igualdad exacta `zendesk_ticket_id = N`, de modo que pegar `#12345` o `12345` encuentra el ticket por su id de Zendesk.
+
+La entrada se sanea antes de interpolarse: los caracteres con significado en el filtro `.or(...)` de PostgREST (`, ( ) " \`) y los comodines de `LIKE` (`% _ *`) se colapsan a espacios, así una coma o un porcentaje suelto ni rompen la sintaxis ni provocan un comodín accidental. La búsqueda se combina con **AND** con el resto de filtros.
+
+### Intersección de filtros independientes
+
+Los filtros `channelId`, `propertyId` y `clientUserId` se combinan con **AND** por defecto: son filtros independientes, así que Casa + Cliente devuelve los tickets que cumplen **ambos**, no la unión. Un único filtro (p. ej. el `channelId` del sidebar de chat) se comporta igual que antes.
+
+Con `matchAny=true` esos tres pasan a combinarse con **OR** (unión): un ticket coincide si comparte el canal **o** la propiedad **o** el cliente. Lo usa el sidebar de **tickets relacionados** (`useRelatedTicketsQuery`), donde cualquiera de esas dimensiones hace que un ticket sea "relacionado" con la conversación actual.

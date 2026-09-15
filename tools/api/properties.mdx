@@ -1,0 +1,369 @@
+---
+title: "Web — Properties (público)"
+description: "Endpoint v1 bajo /api/v1/web/properties que expone el feed de casas listadas en vivla.com a servicios backend (vivla-api, vivla-mobile, Windmill). Reemplaza la lectura directa desde Webflow."
+---
+
+# Web — Properties (público)
+
+Feed plano de casas publicadas en la web de marketing. Pensado para que otros servicios backend (vivla-api, vivla-mobile, Windmill) lean este endpoint en vez de consultar Webflow.
+
+Vive bajo `/api/v1/web/` para mantenerse coherente con el resto del módulo web (CMS, locations, amenities) — misma fuente de datos, distinta superficie. La diferencia con `/web/properties` (sin v1) es que ésa es la cara CMS y devuelve la shape interna `PropertyForWeb`; esta es la cara pública con shape v1 plano (`PropertyPublicDto`).
+
+
+
+Por defecto la lista devuelve sólo filas con `property_web_data.status_web = 'listed'` — el mismo conjunto que renderiza vivla.com en `/listings` — pero acepta un filtro `?status=` para traer también `coming_soon` / `sold_out` (ver [Query params](#query-params)). `hidden` (el estado CMS "no está en web") nunca es seleccionable ni sale al wire. Los campos editoriales internos (SEO, drafts, audit metadata) se descartan en el wire.
+
+## Base path y auth
+
+```
+GET /api/v1/web/properties
+GET /api/v1/web/properties/:slug-o-id
+```
+
+Base URLs (el backend vive en su propio subdominio; `tools.vivla.com` a secas es el frontend SPA y no sirve la API):
+
+| Entorno | Base URL |
+|---|---|
+| Producción | `https://api.tools.vivla.com/api` |
+| Desarrollo | `https://api.tools.vivla.dev/api` |
+
+Referencia interactiva OpenAPI/Swagger en `<base>/docs` (p.ej. [api.tools.vivla.com/api/docs](https://api.tools.vivla.com/api/docs), tag **Web — Properties (public)**), con los schemas exactos de request/response.
+
+Auth via el global `Auth0OrApiKeyGuard`:
+
+| Header | Quién |
+|---|---|
+| `x-api-key: $API_KEY` | Servicios backend (M2M). El api-key sintetiza permisos `tool-web` admin internamente. |
+| `Authorization: Bearer <jwt>` | Usuarios humanos con permiso `tool-web` ≥ viewer. |
+
+Sin credenciales válidas → `401 authentication_required` / `authentication_invalid`. El valor de `$API_KEY` lo comparte el equipo de tools por canal seguro — no está en ningún repo.
+
+## Query params
+
+| Param | Tipo | Default | Notas |
+|---|---|---|---|
+| `type` | enum | — | `beach` o `ski`. Filtra por `properties.type`. |
+| `status` | CSV | `listed` | Lista separada por comas de `listed`, `coming_soon`, `sold_out` (ej. `status=listed,coming_soon`). Filtra por `property_web_data.status_web`. Omitirlo mantiene el comportamiento original (sólo `listed`). Un valor inválido o `hidden` → `400 validation_error`. |
+| `location_id` | UUID | — | Filtra por `property_web_data.location_id`. |
+| `limit` | integer | 25 | Máx 100. Valores fuera de rango son `400 validation_error`. |
+| `cursor` | string | — | Opaco. Pasar verbatim el `next_cursor` recibido. |
+
+## Shape de la lista
+
+Sigue la convención v1 (`docs/wiki/api/conventions.mdx`):
+
+```json
+{
+  "object": "list",
+  "data": [
+    { "object": "property", "id": "...", "slug": "...", ... }
+  ],
+  "has_more": true,
+  "next_cursor": "eyJpZCI6IjEyMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTA1LTE0VDA5OjAwOjAwLjAwMFoifQ"
+}
+```
+
+Ver [Paginación cursor](./pagination) para el patrón general.
+
+## Shape del item — `PropertyPublicDto`
+
+```ts
+{
+  object: 'property',
+  id: string,                     // UUID de properties.id
+  hid: string | null,             // properties.hid — home id de Firebase/vivla-api
+  slug: string,                   // property_web_data.slug — clave pública estable
+  name: string,                   // properties.name (interno, no localizado)
+  status: 'listed' | 'coming_soon' | 'sold_out', // property_web_data.status_web (nunca 'hidden')
+  title: { en?, es?, fr? },       // property_web_data.web_title
+  type: 'beach' | 'ski' | null,
+
+  description: { en?, es?, fr? }, // Lexical rich-text serializado a texto plano
+  unique_features: Array<{
+    icon_slug: string,
+    label: { en?, es?, fr? }
+  }>,
+
+  bedrooms: number | null,
+  beds: number | null,
+  bathrooms: number | null,
+  bathtubs: number | null,
+  capacity: number | null,
+  size: number | null,            // m²
+
+  address: string | null,
+  city: string | null,
+  latitude: number | null,
+  longitude: number | null,
+
+  price_from: number | null,
+  fraction_from: string | null,   // ej. "1/8"
+  weeks_per_year: number | null,
+  financial_analysis_url: string | null,
+
+  hero_image: {
+    url: string,
+    alt: { en?, es?, fr? }
+  } | null,
+  gallery: Array<{
+    url: string,
+    alt: { en?, es?, fr? },
+    section: 'hero' | 'gallery' | 'studio' | 'location' | 'what_to_do' | 'other',
+    sort_order: number
+  }>,
+  video_url: string | null,       // vídeo web principal (hero, si no el de menor sort_order)
+
+  location: {
+    id: string,
+    slug: string | null,
+    name: { en?, es?, fr? }
+  } | null,
+  location_text: { en?, es?, fr? }, // property_web_data.location_text (blurb libre)
+  amenities: Array<{
+    slug: string,
+    label: { en?, es?, fr? }
+  }>,
+
+  url: string,                    // canonical: https://www.vivla.com/listings/<slug>
+  display_order: number,          // orden curatorial (asc); útil si querés re-ordenar client-side
+  is_early_access: boolean
+}
+```
+
+### Notas de campos
+
+- **`description`** se almacena en `property_web_data.description` como árbol Lexical i18n. Este endpoint lo serializa a texto plano por locale; los párrafos se separan con `\n\n`. Si necesitás formato rich-text, abrí ticket — podemos exponer también `description_html` en una versión futura sin breaking change.
+- **`hero_image`** resuelve `property_web_data.hero_photo_id`. Si no hay heroPhotoId set, cae a la primera foto con `web_section='hero'` (`web_sort_order` ascendente). Devuelve `null` cuando no hay ninguna candidata.
+- **`gallery`** trae todas las fotos con `is_visible_on_web=true`, ordenadas por `sort_order`. El `section` permite agrupar client-side ("hero", "studio", etc.).
+- **`status`** es el `property_web_data.status_web`: `listed`, `coming_soon` o `sold_out`. `hidden` nunca sale (ni en lista ni en detalle). En el detalle por id/slug sirve cualquiera de los tres — usa este campo para decidir (una casa referenciada en un lead de MyInvestor puede haber pasado a `sold_out`).
+- **`hid`** es el `properties.hid` (home id de Firebase/vivla-api). Permite mapear el feed contra los homes del consumidor. `null` cuando la casa no está sincronizada desde v1.
+- **`video_url`** resuelve `property_videos` visibles en web (`is_visible_on_web=true`): prefiere el de `type='hero'`, si no hay usa el de menor `sort_order`. `null` cuando no hay ninguno.
+- **`location_text`** es el `property_web_data.location_text` (blurb libre de ubicación por locale). Objeto vacío `{}` cuando no está seteado.
+- **`type`** es el del `properties.type` real (beach/ski). No se hardcodea como en Webflow.
+- **`url`** se construye desde el `slug` (`https://www.vivla.com/listings/<slug>`). Cambialo en consumidores si el dominio público se mueve.
+- **`amenities`** sale de la tabla `amenities` vía la junction `property_web_amenities`. El **`slug` es el identificador estable** — es lo que hay que usar si tratás las amenities como enum. El `label` es i18n editable desde el CMS y **no es un identificador**: puede cambiar sin aviso, y hoy 24 de las 42 entradas todavía traen el inglés en `es`/`fr` (vienen del import de Airtable, quedan pendientes de traducir). Ver el vocabulario completo abajo.
+
+### Vocabulario de amenities
+
+Éste es el catálogo completo, **idéntico en producción y en dev/staging** — si tu consumidor mapea slugs a un enum cerrado, ésta es la lista a cubrir. Ojo con los pares casi-duplicados (`sea_view`/`sea_views`, `fireplace`/`chimney`, `air_conditioning`/`air_conditioner`): son entradas distintas del catálogo y las dos del par pueden aparecer en el feed. Un slug nuevo se añade desde el CMS sin desplegar, así que **tratá un valor desconocido como no fatal** (default genérico) en vez de romper.
+
+```text
+pool                        # Pool
+garden                      # Garden
+sea_view                    # Sea view
+fireplace                   # Fireplace
+air_conditioning            # Air conditioning
+heating                     # Heating
+wifi                        # Wi-Fi
+parking                     # Parking
+bbq                         # BBQ
+gym                         # Gym
+sauna                       # Sauna
+jacuzzi                     # Jacuzzi
+air_conditioner             # Air Conditioner
+alfresco_shower             # Alfresco shower
+bbq_area                    # BBQ area
+beach_front                 # Beach-Front
+built_in_wardrobes          # Built-in wardrobes
+chill_out_area              # Chill out area
+chimney                     # Chimney
+co_working                  # Co-Working
+country_views               # Country views
+elevator                    # Elevator
+garage                      # Garage
+golf                        # Golf
+motorized_water_activities  # Motorized water activities
+open_concept_kitchen        # Open concept kitchen
+paddle_tennis               # Paddle tennis
+patio                       # Patio
+private_balcony             # Private balcony
+private_garden              # Private Garden
+private_nautical_club       # Private Nautical Club
+private_parking             # Private parking
+private_pool                # Private Pool
+sea_views                   # Sea views
+security                    # Security
+ski_lockers                 # Ski lockers
+solarium                    # Solarium
+spa                         # Spa
+storage                     # Storage
+terrace                     # Terrace
+touristic_licence           # Touristic licence
+walking_to_the_ski_cable    # Walking to the ski cable
+```
+
+## Ejemplos
+
+### Primera página
+
+```bash
+curl 'https://api.tools.vivla.com/api/v1/web/properties?limit=25' \
+  -H 'x-api-key: <API_KEY>'
+```
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "object": "property",
+      "id": "fa01...",
+      "hid": "58108143",
+      "slug": "casa-formentera",
+      "name": "Casa Formentera",
+      "status": "listed",
+      "title": { "en": "Casa Formentera", "es": "Casa Formentera" },
+      "type": "beach",
+      "description": {
+        "en": "A peaceful retreat on the southern coast...",
+        "es": "Un retiro en la costa sur..."
+      },
+      "bedrooms": 5,
+      "bathrooms": 4,
+      "size": 220,
+      "city": "Formentera",
+      "latitude": 38.6896,
+      "longitude": 1.4322,
+      "price_from": 215000,
+      "fraction_from": "1/8",
+      "weeks_per_year": 6,
+      "hero_image": {
+        "url": "https://res.cloudinary.com/dhipy6ycb/image/upload/v1/...webp",
+        "alt": { "en": "Formentera villa with pool" }
+      },
+      "gallery": [
+        { "url": "...", "section": "gallery", "sort_order": 0, "alt": {} }
+      ],
+      "video_url": "https://res.cloudinary.com/dhipy6ycb/video/upload/v1/...mp4",
+      "location": {
+        "id": "loc_uuid",
+        "slug": "formentera",
+        "name": { "en": "Formentera" }
+      },
+      "location_text": { "en": "On the southern tip of the island" },
+      "amenities": [
+        { "slug": "pool", "label": { "en": "Pool", "es": "Piscina" } }
+      ],
+      "unique_features": [],
+      "url": "https://www.vivla.com/listings/casa-formentera",
+      "display_order": 10,
+      "is_early_access": false
+    }
+  ],
+  "has_more": true,
+  "next_cursor": "eyJpZCI6IjEyMyIsImNyZWF0ZWRfYXQiOiIyMDI2LTA1LTE0VDA5OjAwOjAwLjAwMFoifQ"
+}
+```
+
+### Siguiente página
+
+```bash
+curl 'https://api.tools.vivla.com/api/v1/web/properties?limit=25&cursor=eyJpZCI6...' \
+  -H 'x-api-key: <API_KEY>'
+```
+
+Repetir mientras `has_more: true`. Cuando `has_more: false` el `next_cursor` es `null`.
+
+### Detalle por slug o id
+
+```bash
+# por slug
+curl 'https://api.tools.vivla.com/api/v1/web/properties/casa-formentera' \
+  -H 'x-api-key: <API_KEY>'
+
+# por UUID (properties.id)
+curl 'https://api.tools.vivla.com/api/v1/web/properties/fa01a2b3-...' \
+  -H 'x-api-key: <API_KEY>'
+```
+
+Devuelve un único `PropertyPublicDto` (sin envelope `object: list`). El path param se matchea como `properties.id` cuando es un UUID, si no como `property_web_data.slug`. Sirve **cualquier** `status_web` **excepto** `hidden` — para saber el estado real mirá el campo `status`. `404 resource_missing` si no existe ninguna casa con ese slug/id o si está `hidden`.
+
+Es la vía recomendada para resolver el nombre (u otros datos) de la casa de un lead de MyInvestor a partir de su id: `GET /api/v1/web/properties/:id`.
+
+### Filtrar por tipo
+
+```bash
+curl 'https://api.tools.vivla.com/api/v1/web/properties?type=ski&limit=10' \
+  -H 'x-api-key: <API_KEY>'
+```
+
+### Filtrar por estado
+
+```bash
+# incluir coming_soon además de las listadas
+curl 'https://api.tools.vivla.com/api/v1/web/properties?status=listed,coming_soon' \
+  -H 'x-api-key: <API_KEY>'
+```
+
+## Errores
+
+| HTTP | `error.code` | Causa |
+|---|---|---|
+| 400 | `validation_error` | `limit` fuera de rango, `location_id` no es UUID, `type` no es `beach`/`ski`, `status` con un valor no permitido (o `hidden`). |
+| 400 | `invalid_cursor` | El cursor está corrupto. Reiniciar paginación desde la primera página. |
+| 401 | `authentication_required` | Sin header `Authorization` ni `x-api-key`. |
+| 401 | `authentication_invalid` | Credenciales enviadas pero inválidas. |
+| 404 | `resource_missing` | `/properties/:slug-o-id` cuando no matchea ninguna casa, o la casa está `hidden`. |
+| 429 | `rate_limit_exceeded` | Excedido el límite global (100 req/min por IP por default). Respetar `Retry-After`. |
+| 500 | `internal_error` | Falla inesperada del servidor. Reintentar con backoff. |
+
+Catálogo completo en [Códigos de error](./errors).
+
+## Patrón de cliente recomendado
+
+```ts
+async function* listAllProperties(): AsyncGenerator<PropertyPublicDto> {
+  let cursor: string | null = null
+  while (true) {
+    const url = new URL('https://api.tools.vivla.com/api/v1/web/properties')
+    url.searchParams.set('limit', '50')
+    if (cursor) url.searchParams.set('cursor', cursor)
+    const res = await fetch(url, { headers: { 'x-api-key': API_KEY } })
+    if (!res.ok) throw new Error(`tools-api ${res.status}`)
+    const page = await res.json()
+    for (const item of page.data) yield item
+    if (!page.has_more || !page.next_cursor) return
+    cursor = page.next_cursor
+  }
+}
+```
+
+## Migración desde Webflow
+
+Este endpoint reemplaza la lectura directa de `vivla-api` contra Webflow (`WEBFLOW_URL` + Bearer token). Equivalencias para el adaptador del lado consumidor:
+
+| Webflow item (vivla-api hoy) | `PropertyPublicDto` | Notas |
+|---|---|---|
+| `fieldData.name` | `name` | — |
+| `fieldData.slug` | `slug` | — |
+| `fieldData['main-image'].url` | `hero_image.url` | objeto con `alt` |
+| `fieldData.description` (HTML plano) | `description.en` (o el locale que el consumidor prefiera) | i18n; texto plano |
+| `fieldData.bedrooms` / `bathrooms` | `bedrooms` / `bathrooms` | — |
+| `fieldData.sqm` | `size` | rename |
+| `fieldData['fraction-price']` | `price_from` (+ `fraction_from`, `weeks_per_year`) | shape más rica |
+| `fieldData.gallery[].url` | `gallery[].url` | + `alt`, `section`, `sort_order` |
+| `fieldData.address` | `address` + `city` | desglosado |
+| `fieldData.coordinates` (`"lat,lon"`) | `latitude` + `longitude` (numbers) | mejor tipado |
+| `HomeType.BEACH` (hardcoded en vivla-api) | `type: 'beach' \| 'ski'` | real |
+| `issold` / `iscomingsoon` | `status` | enum único (`listed`/`coming_soon`/`sold_out`) en vez de dos booleanos. Ojo: el slug real del switch en Webflow es `iscomingsoon` (sin guiones) — el DTO v2 de vivla-api lee `is-coming-soon` y nunca lo detecta. |
+| `fieldData.video.url` | `video_url` | vídeo web principal (hero) |
+| `fieldData['location-text']` | `location_text` | i18n |
+| `fieldData.amenities` (ids → resueltos contra la colección Amenities) | `amenities[].slug` | ya resueltos; además traen `label` i18n |
+| `fieldData['destination-data'].fieldData.name` | `location.name` | destino resuelto (id + slug + nombre i18n) |
+
+<Note>
+El **`id`** de cada item deja de ser el id de Webflow y pasa a ser el **UUID de tools** (`properties.id`). Hay que avisar a MyInvestor: los ids que guarden/referencien cambian. Para resolver el nombre (u otros datos) de la casa de un lead a partir de su id, `GET /api/v1/web/properties/:id` (sirve cualquier estado salvo `hidden`).
+</Note>
+
+<Note>
+**Transición Webflow → tools.** Mientras dure la migración, un sync diario de Windmill (`f/vivla_tools/sync/sync_web_webflow`, 07:00 Madrid) mantiene `status` / precio / coordenadas de tools en paridad con Webflow, de modo que ambas fuentes coinciden hasta que MyInvestor corte del todo con Webflow.
+</Note>
+
+## Implementación
+
+- Controller: `apps/backend/src/web/controllers/public-properties.controller.ts` (la ruta de detalle detecta UUID vs slug con `isUUID`)
+- Servicio: `WebPropertiesService.listPublic()` + `getPublicBySlug()` + `getPublicById()` en `apps/backend/src/web/services/web-properties.service.ts`
+- Serializer: `apps/backend/src/web/serializers/property-public.serializer.ts`
+- DTOs: `apps/backend/src/web/dto/property-public.dto.ts`
+
+Hidratación interna reusa `WebPropertiesService.hydrateOne()` — el mismo que usa el CMS — y luego aplica `toPropertyPublicDto()` para producir la shape pública. El detalle por slug/id comparte el gate `toPublicDetail()` que rechaza `hidden` con 404.

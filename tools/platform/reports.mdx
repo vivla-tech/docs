@@ -1,0 +1,88 @@
+---
+title: "Reports (analytics)"
+description: "Herramienta de Reports: reports declarativos servidos desde la capa semántica analytics, con SQL curado de solo lectura"
+---
+
+# Reports
+
+La herramienta de **Reports** (SIMON-T8) publica un catálogo de reports de negocio construidos sobre la **capa semántica `analytics`** (esquema `analytics`, migraciones 166/167). Cada report es una **lista declarativa de secciones tipadas**: el backend corre SQL curado de solo lectura y devuelve el payload; el frontend renderiza cada sección de forma genérica según `section.type`. **Nunca se recalculan métricas en el cliente** — toda cifra viene del backend.
+
+Superficie in-app: la ruta **`/app/reports`** muestra la parrilla del catálogo y `/app/reports/:reportId` el detalle. Es también la superficie donde vive **Simón**, el asistente de IA sobre analytics.
+
+<Note>
+  Añadir un report = **un builder** registrado en el módulo + su entrada de catálogo.
+  Cero cambios de frontend: el renderer ya conoce todos los tipos de sección.
+</Note>
+
+## Endpoints (`/api/analytics/reports`)
+
+El prefijo es `analytics/reports` porque `reports` ya lo ocupa el módulo daily-health. Auth: `Auth0OrApiKeyGuard` global + `ToolAccessGuard`; cada ruta exige el tool `tool-reports` con rol `viewer`.
+
+| Endpoint | Descripción |
+|---|---|
+| `GET /api/analytics/reports` | Catálogo para la parrilla: metadata + `headline` barato + `dataAvailable` por report |
+| `GET /api/analytics/reports/:reportId` | Payload declarativo completo de un report (`404` si el `reportId` no existe) |
+
+## Catálogo de reports
+
+| `id` | Título | Categoría | Descripción |
+|---|---|---|---|
+| `pulso-semanal` | Pulso semanal | `negocio` | El pulso del negocio del último corte diario: usuarios, casas, reservas, tickets, notificaciones, encuestas y chat, con su veredicto agregado |
+| `uso-historico-casas` | Uso histórico de casas | `negocio` | Cómo se viven las casas: estancias y noches, crecimiento por año, estacionalidad, ocupación y la vida en red (intercambios, alquileres, adopción por familia) |
+| `voz-del-cliente` | Voz del cliente | `clientes` | Los 5 NPS oficiales frente a sus objetivos (estancia, experiencia CX, llegada, onboarding y global) y las casas mejor y peor valoradas |
+| `salud-clientes` | Salud de clientes | `clientes` | Foto CRM v2 de cada cliente: distribución por banda de salud, riesgo de mala salida, próxima mejor acción y etapa de ciclo de vida |
+| `soporte-sla` | Soporte y SLA | `soporte` | Salud del soporte: tickets abiertos y críticos, backlog envejecido, tiempos de resolución y respuesta, con los KPIs oficiales de los últimos 30 días |
+
+Las categorías posibles son `negocio | clientes | soporte | operacion` (`ReportCategory`). Cada report declara además un `icon` (nombre de icono Lucide que el frontend mapea a un componente).
+
+## Payload declarativo
+
+`ReportPayload` (en `packages/common/src/types/analytics-reports.ts`) trae la metadata del report, su `freshness`, `dataAvailable` y un array de `sections`. Cada sección es una unión discriminada por `type`:
+
+| `type` | Para qué |
+|---|---|
+| `kpiGroup` | Grupo de KPIs (número grande, unidad, `target`, `delta`, `tone`) |
+| `barChart` | Gráfico de barras (vertical/horizontal, apilable) |
+| `lineChart` | Gráfico de líneas con `referenceLines` opcionales (p. ej. objetivos NPS) |
+| `heatmap` | Mapa de calor año×mes (p. ej. estacionalidad) |
+| `progressList` | Lista de barras de progreso (0-100) |
+| `table` | Tabla con columnas tipadas (`text|number|pct|nights|days|bar`) |
+| `note` | Texto muted (metodología / caveats) |
+
+Las unidades (`ReportUnit`) cubren `count | nights | pct | days | minutes | hours | ratio | nps | eur`.
+
+### Freshness
+
+Cada report reporta la frescura de sus datos desde `analytics.v_data_freshness`: `AnalyticsReadService.getFreshness(jobType)` traduce el `last_success_at` del job de sync relevante (`sync_bookings`, `sync_tickets`, …) a una etiqueta humana + horas transcurridas.
+
+## Acceso a datos — `AnalyticsReadService`
+
+Lectura **de solo lectura** sobre el esquema `analytics` mediante una conexión **directa de Postgres** (`pg.Pool`), no supabase-js, porque PostgREST no expone el esquema `analytics`.
+
+- **Configuración por `ANALYTICS_DATABASE_URL`.** Si falta, el servicio degrada con gracia: `isConfigured()` devuelve `false`, el catálogo marca `dataAvailable:false` y el detalle responde un estado vacío con `unavailableReason` (nunca lanza).
+- **Modelo de roles fail-closed** (alineado con las tools SQL de Simón). El DSN apunta al rol LOGIN dedicado `simon_analytics`, que es **`NOINHERIT`** y solo MEMBER de `analytics_reader`. Una conexión desnuda no tiene privilegios de tabla: cada query corre dentro de una transacción que hace `SET LOCAL ROLE analytics_reader`, `SET LOCAL transaction_read_only = on`, un `statement_timeout` de 15 s y `SET LOCAL search_path = analytics`. Sin el SET ROLE la SQL curada recibiría "permission denied", así que el camino de lectura queda incapaz de escribir.
+
+<Warning>
+  Sin `ANALYTICS_DATABASE_URL` la herramienta no se rompe: todos los reports
+  aparecen con `dataAvailable:false` y un estado vacío explicativo.
+</Warning>
+
+## Estructura de código
+
+```
+apps/backend/src/analytics-reports/
+  analytics-reports.controller.ts   # GET /analytics/reports (+ /:reportId)
+  analytics-reports.service.ts      # registry de builders + dispatch + degradación
+  analytics-read.service.ts         # conexión pg de solo lectura al esquema analytics
+  report-builder.interface.ts       # ReportBuilder { meta, headline(), build() }
+  builders/
+    pulso-semanal.builder.ts
+    uso-historico-casas.builder.ts
+    voz-del-cliente.builder.ts
+    salud-clientes.builder.ts
+    soporte-sla.builder.ts
+
+packages/common/src/types/analytics-reports.ts   # ReportPayload / ReportSection / ReportSummary
+apps/frontend/app/routes/app.reports/            # parrilla + detalle (/app/reports)
+apps/frontend/app/components/reports/            # ReportsToolLayout + ReportDetailPage
+```

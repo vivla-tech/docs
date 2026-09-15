@@ -53,6 +53,94 @@
             "pages": [
               "tools/index"
             ]
+          },
+          {
+            "group": "Chat",
+            "pages": [
+              "tools/chat/index",
+              "tools/chat/frontend",
+              "tools/chat/inbox",
+              "tools/chat/mobile-integration",
+              "tools/chat/copilot",
+              "tools/chat/copilot-reglas"
+            ]
+          },
+          {
+            "group": "Tickets",
+            "pages": [
+              "tools/tickets/index",
+              "tools/tickets/fields",
+              "tools/tickets/attachments",
+              "tools/tickets/dashboard",
+              "tools/tickets/activity",
+              "tools/tickets/sync"
+            ]
+          },
+          {
+            "group": "Encuestas",
+            "pages": [
+              "tools/surveys/index",
+              "tools/surveys/weekly-nps-report"
+            ]
+          },
+          {
+            "group": "Community",
+            "pages": [
+              "tools/community/index",
+              "tools/community/portal",
+              "tools/community/home-excellence"
+            ]
+          },
+          {
+            "group": "Guías de mantenimiento",
+            "pages": [
+              "tools/maintenance/index"
+            ]
+          },
+          {
+            "group": "Notificaciones",
+            "pages": [
+              "tools/notifications/index",
+              "tools/notifications/automations",
+              "tools/notifications/events-api",
+              "tools/notifications/email",
+              "tools/notifications/preferences"
+            ]
+          },
+          {
+            "group": "Tools API",
+            "pages": [
+              "tools/api/index",
+              "tools/api/conventions",
+              "tools/api/errors",
+              "tools/api/pagination",
+              "tools/api/idempotency",
+              "tools/api/endpoints",
+              "tools/api/properties",
+              "tools/api/database",
+              "tools/api/auth"
+            ]
+          },
+          {
+            "group": "Plataforma",
+            "pages": [
+              "tools/platform/permissions",
+              "tools/platform/teams",
+              "tools/platform/admin",
+              "tools/platform/windmill",
+              "tools/platform/reports",
+              "tools/platform/releases"
+            ]
+          },
+          {
+            "group": "Integraciones",
+            "pages": [
+              "tools/integrations/ai",
+              "tools/integrations/posthog",
+              "tools/integrations/sentry",
+              "tools/integrations/cloudinary",
+              "tools/integrations/health"
+            ]
           }
         ]
       },
@@ -62,7 +150,63 @@
           {
             "group": "Overview",
             "pages": [
-              "mobile/index"
+              "mobile/index",
+              "mobile/getting-started"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "mobile/architecture/navigation",
+              "mobile/architecture/state-management",
+              "mobile/architecture/modules",
+              "mobile/architecture/authentication"
+            ]
+          },
+          {
+            "group": "Modules",
+            "pages": [
+              "mobile/modules/auth",
+              "mobile/modules/beta-tester",
+              "mobile/modules/booking",
+              "mobile/modules/chat",
+              "mobile/modules/home",
+              "mobile/modules/invitations",
+              "mobile/modules/notifications",
+              "mobile/modules/profile",
+              "mobile/modules/property",
+              "mobile/modules/stays",
+              "mobile/modules/surveys",
+              "mobile/modules/surveys/home-nps-events"
+            ]
+          },
+          {
+            "group": "Shared",
+            "pages": [
+              "mobile/shared/hooks",
+              "mobile/shared/services",
+              "mobile/shared/components",
+              "mobile/shared/constants"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "mobile/integrations/analytics",
+              "mobile/integrations/chat",
+              "mobile/integrations/error-tracking",
+              "mobile/integrations/push-notifications"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "mobile/guides/getting-started-dev",
+              "mobile/guides/builds",
+              "mobile/guides/deployment",
+              "mobile/guides/deep-linking",
+              "mobile/guides/i18n",
+              "mobile/guides/testing"
             ]
           }
         ]
@@ -118,6 +262,20 @@
         ]
       },
       {
+        "tab": "Infra",
+        "groups": [
+          {
+            "group": "Infrastructure",
+            "pages": [
+              "infra/index",
+              "infra/railway",
+              "infra/cloudflare",
+              "infra/slack-notifications"
+            ]
+          }
+        ]
+      },
+      {
         "tab": "Operativa",
         "groups": [
           {
@@ -133,20 +291,6 @@
               "operativa/reservas-ultima-hora",
               "operativa/intercambio-keys",
               "operativa/alquiler"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Infra",
-        "groups": [
-          {
-            "group": "Infrastructure",
-            "pages": [
-              "infra/index",
-              "infra/railway",
-              "infra/cloudflare",
-              "infra/slack-notifications"
             ]
           }
         ]

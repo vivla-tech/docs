@@ -1,0 +1,389 @@
+---
+title: "Integración mobile"
+description: "Cómo vivla-mobile consume los endpoints de chat de este backend"
+---
+
+# Integración con vivla-mobile
+
+La app mobile de Vivla (**vivla-mobile**) consume endpoints específicos de este backend. El chat de soporte vive bajo `/api/chat/mobile/` (autenticación, tokens de Stream Chat y perfil), y la app crece más allá del chat: también consume encuestas (`/api/surveys/mobile/`), el inbox de notificaciones (`/api/notifications/mobile/`) y el registro de tokens de push (`/api/mobile/`).
+
+<Warning>
+  El chat en vivla-mobile **no** usa el backend principal de Vivla. Todos los endpoints de chat se sirven desde este backend (Tools API).
+</Warning>
+
+## Flujo de autenticación
+
+```
+┌─────────────┐     ┌───────────────┐     ┌──────────────┐
+│ vivla-mobile │────▶│  Tools API    │────▶│  Stream Chat │
+│              │     │  /chat/mobile │     │              │
+└─────────────┘     └───────────────┘     └──────────────┘
+       │                    │
+       │  authToken +       │  Genera
+       │  userId            │  streamToken
+       │                    │  (1h expiry)
+       ▼                    ▼
+┌─────────────┐     ┌───────────────┐
+│vivla-backend│     │   Supabase    │
+│ (auth orig.)│     │  (users DB)   │
+└─────────────┘     └───────────────┘
+```
+
+1. La app mobile obtiene un `authToken` del backend principal de Vivla
+2. Envía `authToken` + `userId` al endpoint de login de Tools API
+3. Tools API valida el usuario y verifica que tenga acceso al chat (`chat_enabled`)
+4. Si tiene acceso, genera un token de Stream Chat con expiración de **1 hora**
+5. La app usa el `streamToken` para conectarse directamente a Stream Chat
+
+## Endpoints
+
+### Login
+
+```
+POST /api/chat/mobile/auth/login
+```
+
+Autentica al usuario mobile y retorna un token de Stream Chat.
+
+**Request:**
+```json
+{
+  "authToken": "token-del-backend-principal",
+  "userId": "vivla-user-id"
+}
+```
+
+**Respuestas posibles:**
+
+<Tabs>
+  <Tab title="Acceso completo">
+    ```json
+    {
+      "hasAccess": true,
+      "streamUserId": "stream-user-id",
+      "streamToken": "eyJ...",
+      "expiresAt": "2025-01-15T12:00:00Z",
+      "user": {
+        "id": "uuid",
+        "firstName": "Juan",
+        "lastName": "Pérez",
+        "email": "juan@example.com"
+      }
+    }
+    ```
+  </Tab>
+  <Tab title="Sin acceso">
+    ```json
+    {
+      "hasAccess": false,
+      "reason": "NOT_ENABLED"
+    }
+    ```
+  </Tab>
+  <Tab title="Usuario no encontrado">
+    ```json
+    {
+      "hasAccess": false,
+      "reason": "NOT_FOUND"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Refresh token
+
+```
+POST /api/chat/mobile/auth/refresh
+```
+
+Renueva el token de Stream Chat. Debe llamarse antes de que expire (1 hora).
+
+**Request:**
+```json
+{
+  "authToken": "token-del-backend-principal",
+  "userId": "vivla-user-id"
+}
+```
+
+**Response:**
+```json
+{
+  "streamToken": "eyJ...",
+  "expiresAt": "2025-01-15T13:00:00Z",
+  "streamUserId": "stream-user-id"
+}
+```
+
+### Actualizar perfil
+
+```
+PATCH /api/chat/mobile/profile
+```
+
+Actualiza el perfil del usuario y sincroniza los cambios con Stream Chat (nombre y avatar).
+
+**Request:**
+```json
+{
+  "authToken": "token-del-backend-principal",
+  "userId": "vivla-user-id",
+  "firstName": "Juan",
+  "lastName": "Pérez"
+}
+```
+
+### Crear invitación
+
+```
+POST /api/chat/mobile/invitations
+```
+
+Crea una invitación a un canal de chat con un deep link para compartir.
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "streamChannelId": "channel-id",
+  "status": "pending",
+  "expiresAt": "2025-01-20T00:00:00Z",
+  "deepLink": "vivla://chat/invitation/token-uuid"
+}
+```
+
+### Obtener información de invitación
+
+```
+GET /api/chat/mobile/invitations/:token
+```
+
+Endpoint público (sin autenticación). Permite previsualizar un canal antes de aceptar la invitación.
+
+**Response:**
+```json
+{
+  "channel": {
+    "id": "uuid",
+    "name": "Canal de soporte",
+    "type": "support"
+  },
+  "inviter": {
+    "name": "Agente Vivla",
+    "avatar": "https://..."
+  }
+}
+```
+
+## Endpoints de Surveys (Mobile)
+
+La app mobile también consume endpoints de encuestas bajo `/api/surveys/mobile/`. Estos endpoints usan el mismo `MobileAuthGuard` para POST y son públicos para GET.
+
+### Obtener encuesta activa
+
+```
+GET /api/surveys/mobile/:slug
+```
+
+Retorna la definición completa de la encuesta activa para el slug dado (ej: `home-review`). Público, sin autenticación. Soporta `?lang=es` para resolución de i18n.
+
+### Guardar respuesta parcial
+
+```
+POST /api/surveys/mobile/:slug/responses
+```
+
+Guarda o actualiza una respuesta parcial. La app guarda localmente (MMKV) y sincroniza al backend por step y al salir.
+
+**Request:**
+```json
+{
+  "authToken": "token-del-backend-principal",
+  "userId": "vivla-user-id",
+  "survey_id": "uuid-de-la-version",
+  "scope_id": "home-id-o-booking-id",
+  "status": "in_progress",
+  "current_step": "step_2",
+  "current_question": "kitchen_rating",
+  "answers": {
+    "general_rating": { "value": 4 },
+    "kitchen_rating": { "value": 2 }
+  }
+}
+```
+
+### Completar encuesta
+
+```
+POST /api/surveys/mobile/:slug/responses/complete
+```
+
+Marca la encuesta como completada y otorga automáticamente reward points. Una vez completada, la respuesta es inmutable.
+
+### Reanudar respuesta
+
+```
+POST /api/surveys/mobile/:slug/responses/resume
+```
+
+Retorna la respuesta parcial existente. Es POST (no GET) porque el `MobileAuthGuard` necesita leer `authToken` y `userId` del body.
+
+**Response:**
+```json
+{
+  "id": "uuid",
+  "survey_id": "uuid",
+  "status": "in_progress",
+  "current_step": "step_2",
+  "current_question": "kitchen_rating",
+  "answers": { "...": "..." },
+  "updated_at": "2026-03-15T10:00:00Z"
+}
+```
+
+### Estado de encuestas por entidad
+
+```
+POST /api/surveys/mobile/:slug/status
+```
+
+Retorna el estado de completado de la encuesta para una o varias entidades del scope (propiedades o bookings), de modo que la app pueda separar las estancias "pendientes de evaluar" de las ya evaluadas. Usa `MobileAuthGuard`.
+
+El scope acepta varias formas por retrocompatibilidad: `scope.id` (lo que envía la app hoy), `scope.ids`, el legacy `scopeIds`, y el query param con la clave del tipo de scope (`?property=…` / `?booking=…`).
+
+**Request:**
+```json
+{
+  "authToken": "token-del-backend-principal",
+  "userId": "vivla-user-id",
+  "scope": { "type": "booking", "id": "booking-hid-o-uuid" }
+}
+```
+
+**Response:**
+```json
+{
+  "survey_id": "uuid",
+  "survey_type_slug": "stay-review",
+  "version": 3,
+  "accepting_responses": true,
+  "scopes": [
+    {
+      "scope_id": "uuid",
+      "scope_type": "booking",
+      "status": "completed",
+      "current_step": null,
+      "current_question": null,
+      "completed_at": "2026-03-15T10:00:00Z",
+      "results_ready": false,
+      "results_url": null,
+      "homeId": 1234
+    }
+  ]
+}
+```
+
+<Note>
+  Las bookings cedidas (semanas ofrecidas que nadie ocupó) se reportan como `completed` para que los clientes ya desplegados las oculten de la pestaña de pendientes. `results_url` solo se rellena cuando `status: completed` y la encuesta ya no acepta respuestas.
+</Note>
+
+## Push notifications (device tokens)
+
+La app registra su token de Expo para recibir notificaciones push. A diferencia del resto de endpoints mobile, estos usan el prefijo neutro `/api/mobile/` (la app crece más allá del chat) y se autentican con **Auth0 Bearer**, no con `MobileAuthGuard`: el usuario se resuelve del token, nunca del body.
+
+### Registrar token
+
+```
+POST /api/mobile/device-tokens
+```
+
+Hace upsert del token por su valor: registrar un token existente lo reasigna al usuario que llama y lo reactiva. Responde `201`.
+
+**Request:**
+```json
+{
+  "expoPushToken": "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]",
+  "platform": "ios",
+  "deviceName": "iPhone de Ana",
+  "appEnv": "development"
+}
+```
+
+`platform` es `ios` o `android`; `deviceName` y `appEnv` son opcionales.
+
+### Desactivar token
+
+```
+DELETE /api/mobile/device-tokens
+```
+
+Soft-delete del token (`is_active = false`) al hacer logout. Solo afecta a un token que pertenezca al usuario que llama. Responde `204` sin cuerpo.
+
+**Request:**
+```json
+{
+  "expoPushToken": "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]"
+}
+```
+
+## Inbox de notificaciones (Mobile)
+
+La app consume un inbox de notificaciones in-app respaldado por la tabla `app_inbox_messages`. Sigue la convención de `/chat/mobile/*`: `@Public()` + `MobileAuthGuard`, todo por `POST` (el guard necesita leer `{ authToken, userId }` del body). El usuario se toma de `request.mobileAuth.userId`, nunca de la ruta.
+
+<Warning>
+  Estos endpoints devuelven el payload **sin** envoltorio `{ data: ... }`, igual que los controladores de chat mobile. El backend de Tools no tiene interceptor de respuesta global.
+</Warning>
+
+### Listar inbox
+
+```
+POST /api/notifications/mobile/inbox
+```
+
+Retorna las notificaciones no eliminadas del usuario, más recientes primero, en la forma camelCase que espera la app.
+
+**Response (array):**
+```json
+[
+  {
+    "id": "uuid",
+    "title": "Nueva reserva confirmada",
+    "description": "…",
+    "content": "…",
+    "createdAt": "2026-03-15T10:00:00Z",
+    "readAt": null,
+    "navigation": "…",
+    "imageUrl": null,
+    "videoUrl": null
+  }
+]
+```
+
+`readAt` es `null` cuando el mensaje está sin leer.
+
+### Marcar como leída
+
+```
+POST /api/notifications/mobile/inbox/:id/read
+```
+
+Pone `read_at = NOW()` en la notificación indicada (si pertenece al usuario). Responde `{ "id": "uuid", "readAt": "..." }`.
+
+### Eliminar (soft-delete)
+
+```
+POST /api/notifications/mobile/inbox/:id/delete
+```
+
+Pone `deleted_at = NOW()` en la notificación indicada (si pertenece al usuario). Responde `{ "id": "uuid" }`.
+
+## Consideraciones técnicas
+
+- Los tokens de Stream Chat expiran en **1 hora**. La app debe implementar auto-refresh.
+- Conviven **dos modelos de auth**: los endpoints de chat, surveys e inbox de notificaciones usan `MobileAuthGuard` (`{ authToken, userId }` en el body, todo por POST); los device tokens de push usan **Auth0 Bearer** bajo el prefijo neutro `/api/mobile/`.
+- El `MobileAuthGuard` valida `authToken` y `userId` en el body de cada request POST. Los endpoints GET de surveys mobile son públicos.
+- Las actualizaciones de perfil se sincronizan bidireccionalmente con Stream Chat.
+- Los deep links usan el formato `vivla://chat/invitation/{token}` para abrir invitaciones directamente en la app.
+- El endpoint de invitaciones (`GET /invitations/:token`) es público para permitir previsualización sin autenticación.
+- Las encuestas se envían como deep links generados desde el panel de administración.
+- La persistencia parcial de respuestas sigue un flujo local-first: guarda en MMKV, sincroniza al backend por step, y al reabrir compara timestamps local vs backend (usa el más reciente).

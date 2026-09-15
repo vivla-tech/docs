@@ -1,0 +1,95 @@
+---
+title: "Paginación cursor"
+description: "Cómo paginar listas en la API usando cursores opacos"
+---
+
+# Paginación cursor
+
+Las rutas `/v1/...` que devuelven listas usan paginación **cursor-based**, no `page` + `offset`. Es estable ante inserts concurrentes y eficiente sobre tablas grandes.
+
+## Shape de respuesta
+
+```json
+{
+  "object": "list",
+  "data": [
+    { "object": "event", "id": "ev_1", "type": "booking.created", ... },
+    { "object": "event", "id": "ev_2", "type": "booking.rent_approved", ... }
+  ],
+  "has_more": true,
+  "next_cursor": "eyJpZCI6ImV2XzIiLCJjcmVhdGVkX2F0IjoiMjAyNi0wNS0wNVQxMDowMDowMC4wMDBaIn0"
+}
+```
+
+| Campo | Descripción |
+|---|---|
+| `object` | Siempre `"list"`. |
+| `data` | Array de items. Cada item tiene su propio `object`. |
+| `has_more` | `true` si hay más páginas tras esta. |
+| `next_cursor` | String opaco. Pasarlo como `?cursor=...` en la próxima llamada. `null` cuando `has_more = false`. |
+
+## Query params
+
+| Param | Tipo | Default | Notas |
+|---|---|---|---|
+| `limit` | integer | 25 (o el default del endpoint) | Máx 100 — valores mayores se truncan. |
+| `cursor` | string | — | Opaco. Sólo el server lo decodifica. No interpretar ni concatenar. |
+
+Filtros adicionales (ej. `status`, `event_type`) son específicos de cada endpoint.
+
+## Ejemplo de paginar
+
+```bash
+# Primera página
+curl 'https://tools.vivla.com/api/v1/events?limit=25' \
+  -H 'Authorization: Bearer <token>'
+
+# Respuesta:
+# {
+#   "object": "list",
+#   "data": [...25 items...],
+#   "has_more": true,
+#   "next_cursor": "eyJpZCI6...."
+# }
+
+# Siguiente página
+curl 'https://tools.vivla.com/api/v1/events?limit=25&cursor=eyJpZCI6....' \
+  -H 'Authorization: Bearer <token>'
+```
+
+Repetir hasta que `has_more` sea `false` y `next_cursor` sea `null`.
+
+## Patrón de cliente
+
+```ts
+async function* iterate<T>(url: string, headers: HeadersInit): AsyncGenerator<T> {
+  let cursor: string | null = null
+  while (true) {
+    const u = new URL(url)
+    u.searchParams.set('limit', '50')
+    if (cursor) u.searchParams.set('cursor', cursor)
+    const res = await fetch(u, { headers })
+    const page = await res.json()
+    for (const item of page.data) yield item as T
+    if (!page.has_more || !page.next_cursor) return
+    cursor = page.next_cursor
+  }
+}
+```
+
+## Por qué cursor y no page+offset
+
+- **Estabilidad**: si insertas un evento nuevo entre la página 2 y la 3, el cursor sigue apuntando al "después del último que viste". Un `?page=3&offset=50` se desplaza y muestra duplicados o saltos.
+- **Performance**: con cursor el server hace `WHERE created_at < <cursor>` (usa índice). Con offset hace `OFFSET 1000` (escanea y descarta).
+- **Predictibilidad**: `next_cursor` es siempre seguro de seguir; no hay que adivinar si pediste demasiado.
+
+## Errores
+
+- `?cursor=basura` → `400 invalid_cursor`. Reiniciar paginación desde la primera página.
+- `?limit=0` o negativo → `400 validation_error`.
+- `?limit=99999` → se trunca silenciosamente al máximo del endpoint.
+
+## Cuándo NO usar cursor
+
+- Para mostrar "página 5 de 47" en una UI clásica → no es posible con cursor (no hay total). Si lo necesitas, considera un endpoint específico de count, o pasa a un modelo `page+offset` con un trade-off documentado.
+- Para ranking/top-N → ordena en server, devuelve N items, sin paginar.
