@@ -24,6 +24,13 @@ El alquiler efectivo lo gestiona un admin (`src/bookings/v1/bookings.service.ts:
 
 ## Precio
 
+El precio no solo se fija al alquilar: un admin puede **editarlo después** desde `PUT /v2/admin/stay/:id/edit` (`editStay`, permiso `edit:bookings`), pasando `price` en la estancia (`src/bookings/v2/admin/bookings.admin.service.ts:1425`). Reglas del código:
+
+- Solo se admite en reservas de tipo **alquiler** (`RENT`); en cualquier otro tipo se rechaza con `UPDATE_NOT_ALLOWED`.
+- El precio debe ser **numérico y > 0**, con **dos decimales como máximo** (representable en céntimos); si no, se rechaza con el error de validación `INVALID_NUMBER` sobre el campo `rentPrice` (`parseRentPrice`, `bookings.admin.service.ts:2222`).
+- Internamente se guarda en **céntimos** (`price × 100`) y el `final_price` se sincroniza al documento contraparte `rentBooks` en Firestore (`src/bookings/v2/bookings.common.repository.ts:2094`).
+- Editar el precio **no** cambia el estado de aprobación de la reserva ni emite el evento `BOOKING_RENT_APPROVED`.
+
 <Warning>
   **Comisión de alquiler (p. ej. 15% / 20-25%): PENDIENTE confirmar por CX/negocio.** El código **no** contiene ninguna fórmula ni porcentaje de comisión. El `price` del alquiler es un número que introduce el admin a mano. Cualquier cálculo de comisión ocurre fuera del sistema.
 </Warning>
