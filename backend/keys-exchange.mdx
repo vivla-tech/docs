@@ -90,6 +90,8 @@ Si la casa **no tiene coste en llaves configurado** para esa temporada, `calcula
 
 Al **cambiar el tipo** de una reserva a intercambio desde el panel, la reserva debe tener una **temporada asociada** en su slot; si no la tiene no se puede convertir (se necesita para calcular las llaves) (`bookings.common.repository.ts:2270`).
 
+En sentido contrario, al **cambiar el tipo de una reserva que ya es un intercambio con las llaves cobradas** (`keysPaid`), la conversión revierte el cobro y **retira** al propietario las llaves de ese intercambio. Antes de aplicarlo, el servicio comprueba que el propietario tenga **saldo disponible ≥ las llaves de la reserva**; si no llega, el cambio se rechaza con el error `NO_AVAILABLE_EXCHANGES` ("No hay suficientes llaves de intercambio disponibles") (`src/bookings/v2/admin/bookings.admin.service.ts:1354`). Es una validación de negocio previa: si no existiera, el movimiento negativo lo abortaría `ExchangeKeySubscriber` con una excepción interna. La comprobación solo se hace si el tipo actual es intercambio, las llaves están cobradas, hay importe de llaves y hay propietario.
+
 ## ThirdHome
 
 ThirdHome es la red externa de intercambio de casas. En `vivla-api` **no hay integración por API**: no se hace ninguna llamada saliente a ThirdHome. Todo el flujo son transiciones de estado **manuales** que gestiona un admin desde el panel (`src/bookings/v1/bookings.service.ts:1952`; endpoints en `bookings-admin.controller.ts:183`).

@@ -53,6 +53,9 @@ Solo se listan los **nombres**; sus valores son secretos de despliegue y no se d
 | `APP_MODE` | Con `debug` se omiten los crons de transferencia. |
 | `PORT` | Puerto del servicio (por defecto 3000). |
 | `VIVLA_USER` | Usuario técnico "Vivla" usado en intercambios de última hora. |
+| `DB_POOL_MAX` | Máximo de conexiones del pool de Postgres/TypeORM (por defecto **20**). |
+| `DB_POOL_CONNECTION_TIMEOUT_MS` | Tiempo máximo de espera para obtener una conexión del pool, en ms (por defecto **10000**). |
+| `DB_POOL_IDLE_TIMEOUT_MS` | Tiempo que una conexión inactiva permanece abierta antes de cerrarse, en ms (por defecto **30000**). |
 
 <Warning>
   **Valores de `DEFAULT_KEYS` y del resto de variables: PENDIENTE confirmar.** Son configuración de entorno; sus valores no están en el código.
