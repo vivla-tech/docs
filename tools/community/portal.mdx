@@ -1,0 +1,130 @@
+---
+title: "Portal público"
+description: "Portal de acceso para huéspedes y personal de limpieza (community-frontend)"
+---
+
+# Portal público
+
+El **community-frontend** (`apps/community-frontend`) es una aplicación Next.js 14 que sirve como portal público para huéspedes y personal de limpieza. Permite acceder a guías de propiedad, inventario, planos y sesiones de limpieza sin necesidad de autenticarse con usuario/contraseña.
+
+## Acceso por token
+
+El acceso se gestiona mediante **tokens en la URL**. Cada propiedad tiene un token único que se comparte vía QR code o link directo generado desde el panel de Community.
+
+```
+https://community.vivla.com/{token}/
+```
+
+<Warning>
+  Los tokens son la única forma de autenticación. Quien tenga el token puede acceder a la información de la propiedad. Se generan y gestionan desde el panel interno.
+</Warning>
+
+## Rutas del portal
+
+### Landing de propiedad
+
+```
+/{token}/
+```
+
+Página principal de la propiedad que muestra:
+- Nombre y ubicación de la propiedad
+- Imagen principal
+- Navegación a las secciones disponibles (guías, inventario, limpieza, planos)
+
+### Guías de uso
+
+```
+/{token}/guias
+```
+
+Guías de uso organizadas por categoría de equipamiento:
+- Secciones expandibles (acordeón) ordenadas por categoría
+- Primera sección expandida por defecto
+- Instrucciones de uso de electrodomésticos y equipamiento
+- Iconos por categoría
+
+### Inventario
+
+```
+/{token}/inventario
+```
+
+Inventario interactivo organizado por estancia con las siguientes categorías:
+- Electrodomésticos
+- Menaje de cocina
+- Ropa de cama
+- Decoración
+- Mobiliario
+- Iluminación
+
+### Limpieza
+
+```
+/{token}/limpieza
+```
+
+Guías de limpieza organizadas por tipo de estancia:
+- Checklist pre-limpieza
+- Cocina (limpieza y styling)
+- Salón (limpieza y styling)
+- Dormitorios (limpieza y styling)
+- Baños (limpieza y styling)
+- Exterior (limpieza y styling)
+
+Cada sección es expandible con instrucciones detalladas por estancia.
+
+### Planos
+
+```
+/{token}/planos
+```
+
+Planos de planta en formato grid responsive (1-3 columnas según pantalla). Soporta imágenes y PDFs (visualización con react-pdf).
+
+## Sesiones de limpieza
+
+Flujo separado para el personal de limpieza:
+
+### Inicio de sesión de limpieza
+
+```
+/cleaning/{token}/
+```
+
+Formulario de entrada con:
+- Nombre del/la limpiador/a (obligatorio)
+- Email (opcional, con validación de formato)
+- Validación del token de propiedad
+- Muestra nombre y ubicación de la propiedad
+
+### Ejecución de sesión
+
+```
+/cleaning/{token}/session/{sessionId}
+```
+
+Vista de sesión individual con checklist de tareas por estancia.
+
+### Completar sesión
+
+```
+/cleaning/{token}/complete
+```
+
+Confirmación y cierre de la sesión de limpieza.
+
+## Configuración técnica
+
+| Parámetro | Valor |
+|-----------|-------|
+| Framework | Next.js 14 (App Router) |
+| Puerto | 3002 |
+| API Base | Variable `NEXT_PUBLIC_API_URL` |
+| Timeout | 30 segundos |
+| Retry | 3 intentos para errores 5xx (backoff exponencial) |
+| Upload | Soporte con tracking de progreso |
+
+<Note>
+  Los QR codes y links de acceso se generan desde el panel interno de Community en la sección de Dashboard de cada propiedad.
+</Note>

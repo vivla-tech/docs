@@ -1,0 +1,99 @@
+---
+title: "Inventario"
+description: "Setup de casas: shopping list por apartados, plantillas con reglas de cantidad y catálogo que nace de las listas"
+---
+
+# Inventario
+
+Herramienta del equipo de Homes para el setup de una casa: la shopping list
+por apartados, con presupuesto controlado, plantillas repetibles y un
+catálogo que se llena solo desde las listas. Es el primer hito del circuito
+de inventario (setup → compras → revisión → reposiciones).
+
+## Rutas
+
+| Ruta | Qué hay |
+|------|---------|
+| `/app/homes` | Casas con foto, tipo y destino, y filtros por destino, tipo, estado y situación de la lista (vienen del panel vía sync; aquí no se crean) |
+| `/app/homes/houses/$propertyId` | La shopping list de la casa |
+| `/app/homes/templates` | Plantillas de setup, en tabla |
+| `/app/homes/templates/$templateId` | Edición de una plantilla: datos e ítems |
+| `/app/homes/catalog` | Catálogo: se llena desde las listas y admite alta y edición manual |
+
+## El modelo en tres reglas
+
+1. **Las líneas llevan copia congelada.** Editar el catálogo o una plantilla
+   nunca reescribe decisiones ya tomadas en una lista. Los punteros
+   (`item_id`, `template_id`, `template_item_id`) son procedencia, no joins
+   vivos.
+2. **Sin columnas de estado.** «Por definir» y «por revisar» se derivan de
+   los datos de la línea (sin datos comerciales; con `check_note` y sin
+   `checked_at`).
+3. **El catálogo nace de las listas.** Una línea con proveedor, referencia o
+   enlace se engancha a su producto (identidad: proveedor + referencia
+   normalizados, o nombre sin contradicciones) o lo crea en `items` — la
+   misma tabla de la que cuelgan las guías de electrodomésticos. También se
+   puede dar de alta un producto a mano desde la vista de catálogo: repetir
+   proveedor + referencia se rechaza con un 409 que nombra al producto
+   existente. No hay deduplicación por nombre ni fusión a mano — limpiar
+   duplicados será automático cuando toque, no una tarea de nadie.
+
+## Qué comparte con el resto de la suite
+
+- **Casas** = `properties` (las sincroniza el panel; la herramienta solo las
+  lee).
+- **Apartados** = `rooms` (los dormitorios se reconocen por
+  `room_type = 'bedroom'` o por nombre; la expansión de plantillas los
+  resuelve por posición, no por nombre).
+- **Catálogo** = `items`, ampliada con `supplier` y `unit_price_estimate`
+  (migración 282) y con `category` de texto libre (285), el mismo campo que
+  llevan líneas y plantillas; la subcategoría va en `model`. Community sigue
+  usando su `category_id`.
+- Dominio propio (migración 280): `shopping_lists`,
+  `shopping_list_items`, `setup_templates`, `setup_template_items` y
+  `shopping_list_template_applications`.
+
+## Fotos de producto
+
+La foto es del **producto del catálogo** (`items.main_image_url`, columna que
+`items` ya tenía), no de la línea: a diferencia del resto de datos de
+producto no se congela, porque sirve para reconocer el ítem y no es una
+decisión de compra. La línea la lee en vivo de su producto.
+
+- Se sube con `POST /homes/catalog/images` (multipart, campo `file`, hasta
+  8 MB). El backend la reencoda a WebP de 1600 px como máximo y la sube a
+  Cloudinary en la carpeta `homes/catalog`, con el mismo servicio compartido
+  que usan el resto de herramientas. Devuelve la URL.
+- La URL se guarda al guardar el producto (`imageUrl` en el alta o la
+  edición del catálogo) o desde el diálogo de una línea, que la escribe en
+  su producto. Una línea sin producto ni datos comerciales no ofrece foto:
+  no tendría dónde guardarla.
+- Las miniaturas se piden a Cloudinary ya recortadas a su tamaño.
+- No hace falta migración: la columna existía.
+
+## Plantillas
+
+Cada ítem de plantilla lleva su **destino** (un apartado con nombre, o cada
+dormitorio) y su **regla de cantidad** (por casa, por habitación, por
+persona, por baño). Al aplicarla sobre una casa, la expansión usa los datos
+reales de la casa (dormitorios, capacidad, baños), crea los apartados que
+falten y deja registro de la aplicación. Aplicar una plantilla nunca toca
+listas ya hechas; los ítems con aviso (`check_note`) entran marcados como
+pendientes de revisión.
+
+## Paridad con el prototipo
+
+La herramienta replica el prototipo validado. Lo que aún NO está, y se
+decide más adelante: elegir apartados y plantillas al dar de alta la casa
+(aquí las casas vienen del panel), corregir habitaciones/ocupación/baños
+desde la herramienta cuando el panel los trae vacíos (mientras, el diálogo
+de aplicar avisa de qué valores se están suponiendo), y el drawer de alta
+con buscador primero y multi-añadido sin cerrar.
+
+## API
+
+Endpoints bajo `/homes`, gateados por `tool-homes` (viewer para leer,
+**editor para toda mutación**). Detalle en
+`apps/backend/src/homes/`; la lógica de expansión y de identidad de catálogo
+está en funciones puras con specs (`templates/expand.ts`,
+`shopping-lists/apply-plan.ts`, `catalog/catalog-match.ts`).

@@ -1,0 +1,141 @@
+---
+title: 'Notifications'
+description: 'Módulo del centro de notificaciones in-app'
+---
+
+## Descripción
+
+Ubicación: `src/modules/notifications/`
+
+Gestiona las notificaciones dentro de la app (distintas de las push notifications del sistema). Incluye listado, lectura y eliminación de notificaciones almacenadas en backend.
+
+<Note>
+  Este módulo gestiona notificaciones in-app (almacenadas en backend). Para push notifications del
+  sistema, ver [Push Notifications](/mobile/integrations/push-notifications).
+</Note>
+
+## Screens
+
+| Screen                | Ruta | Descripción                     |
+| --------------------- | ---- | ------------------------------- |
+| `NotificationsScreen` | —    | Centro de notificaciones in-app |
+
+## API Endpoints
+
+El inbox se sirve desde el backend de **vivla-tools** (las llamadas usan `useToolsBackend: true`). Todas las peticiones son `POST` y envían las credenciales (`authToken`, `userId`) en el body.
+
+| Método | Path                                      | Descripción                                  |
+| ------ | ----------------------------------------- | -------------------------------------------- |
+| `POST` | `/notifications/mobile/inbox`             | Obtener todas las notificaciones del usuario |
+| `POST` | `/notifications/mobile/inbox/{id}/delete` | Eliminar una notificación                    |
+| `POST` | `/notifications/mobile/inbox/{id}/read`   | Marcar una notificación como leída           |
+
+## Hooks
+
+| Hook                 | Descripción                                                                                   |
+| -------------------- | --------------------------------------------------------------------------------------------- |
+| `useNotifications()` | Hook principal del módulo. Expone fetch, eliminación y marcado de notificaciones como leídas. |
+
+<Tabs>
+  <Tab title="Uso básico">
+    ```typescript
+    const {
+      notifications,
+      readNotifications,
+      unreadNotifications,
+      unreadCount,
+      isLoading,
+      markAsRead,
+      deleteNotification,
+      refetch,
+      isDeleting,
+      isMarkingAsRead,
+    } = useNotifications();
+    ```
+
+    El hook separa las notificaciones en `readNotifications` / `unreadNotifications` y expone `unreadCount` para el badge del inbox.
+
+  </Tab>
+  <Tab title="Marcar como leída">
+    ```typescript
+    const { markAsRead } = useNotifications();
+
+    // Marca la notificación como leída y actualiza el estado local
+    await markAsRead(notificationId);
+    ```
+
+  </Tab>
+  <Tab title="Eliminar">
+    ```typescript
+    const { deleteNotification } = useNotifications();
+
+    // Elimina la notificación del backend y del estado local
+    await deleteNotification(notificationId);
+    ```
+
+  </Tab>
+</Tabs>
+
+## Tipos principales
+
+```typescript
+interface Notification {
+  id: string;
+  title: string;
+  description: string;
+  content?: string;
+  createdAt: string;
+  readAt?: string;
+  navigation?: string;
+  imageUrl?: string;
+  videoUrl?: string;
+  user?: string;
+  message?: string;
+  home?: string;
+  linkTo?: string;
+}
+```
+
+<CardGroup cols={2}>
+  <Card title="navigation">
+    Ruta de destino como string (por ejemplo `/property/{id}`, `/booking/{id}` o formatos legacy
+    como `stay-detail:...`). `validateAndTransformNavigation` la valida y normaliza antes de
+    navegar; si no es válida, se muestra el contenido de la notificación en su lugar.
+  </Card>
+  <Card title="readAt">
+    Ausente (`undefined`) indica que la notificación no ha sido leída. Se actualiza automáticamente
+    al llamar a `markAsRead`.
+  </Card>
+  <Card title="user / message / home">
+    Identificadores opcionales (string) de las entidades relacionadas con la notificación.
+  </Card>
+  <Card title="linkTo">
+    URL de destino alternativa. Se usa cuando la navegación no es a una pantalla interna sino a un
+    recurso externo.
+  </Card>
+</CardGroup>
+
+## Componentes destacados
+
+<CardGroup cols={2}>
+  <Card title="NotificationsList">
+    Lista principal de notificaciones con soporte para pull-to-refresh y estados vacíos. Renderiza
+    cada notificación según su tipo.
+  </Card>
+  <Card title="NotificationCard">
+    Tarjeta individual de notificación. Muestra título, descripción, timestamp y estado de lectura.
+    Soporta swipe para eliminar.
+  </Card>
+  <Card title="NotificationBottomSheet">
+    Bottom sheet que muestra el contenido completo de la notificación (texto, imagen y vídeo) cuando
+    no hay una ruta de navegación válida.
+  </Card>
+  <Card title="NotificationEmptyState / NotificationSkeleton">
+    Estados vacío y de carga (skeleton) del centro de notificaciones.
+  </Card>
+</CardGroup>
+
+<Warning>
+  Las notificaciones eliminadas no se pueden recuperar. La operación de eliminación es permanente
+  tanto en el cliente como en el backend.
+</Warning>

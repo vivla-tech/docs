@@ -1,0 +1,128 @@
+---
+title: "Actividad del ticket"
+description: "Audit log de cambios, soft-delete de tickets inválidos y planes de mejora con IA"
+---
+
+# Actividad del ticket
+
+Cada ticket de soporte registra su propia línea de tiempo de cambios (audit log), puede marcarse como **inválido** sin perderse (soft-delete) y admite la generación de un **plan de mejora con IA** a partir de su contenido. Estas tres capacidades viven sobre `chat_tickets` y su tabla de historial `chat_ticket_status_history`.
+
+## Audit log / actividad
+
+Toda la actividad del ticket se guarda en `chat_ticket_status_history`, una tabla **append-only** (migración 107). Cada fila describe un único cambio: qué campo cambió, su valor anterior y nuevo, cuándo, quién lo hizo y de qué fuente proviene.
+
+```sql
+chat_ticket_status_history (
+  id, ticket_id, zendesk_ticket_id,
+  field, previous_value, new_value,
+  changed_at, changed_by_user_id,
+  source, zendesk_audit_id, metadata
+)
+```
+
+| Columna | Descripción |
+|---------|-------------|
+| `field` | Campo o evento que cambió (ver abajo) |
+| `previous_value` / `new_value` | Valores antes y después del cambio |
+| `changed_by_user_id` | Actor del cambio (FK a `users`), si se conoce |
+| `source` | Origen: `webhook` \| `import` \| `backfill` \| `manual` |
+| `zendesk_audit_id` | ID del audit de Zendesk, **único** para que el backfill sea idempotente |
+
+### Qué se registra
+
+- **Creación del ticket** — al crear un ticket se escribe una entrada con `field = 'created'`.
+- **Cambios de campo** — el `update()` del ticket compara contra `AUDITABLE_FIELDS` y escribe una entrada por cada campo que cambió, junto con el actor. Campos auditados: `title`, `status`, `priority`, `assignee`, `resolution_team`, `zone`, `category`, `destination`, `payer`, `repair_status`, `estimated_cost_range`, `actual_cost`, `expected_resolution_at` e `internal_notes`.
+- **Transiciones desde Zendesk** — el webhook, la importación y el backfill escriben las transiciones venidas de Zendesk con su `source` correspondiente (`webhook` / `import` / `backfill`).
+- **Alta/baja de solicitantes adicionales** — sumar o quitar un solicitante adicional (t2) escribe una entrada con `field = 'requester_added'` \| `'requester_removed'`. Ver [Tickets → Varios solicitantes](/tickets#varios-solicitantes-por-ticket-t2).
+
+<Note>
+  **`status`, `priority` y `assignee` se editan desde el detalle** (sección **Gestión**, guardado inmediato). Ya estaban en `AUDITABLE_FIELDS`, así que estos cambios manuales quedan registrados con `source = 'manual'` y el actor que los hizo.
+</Note>
+
+<Note>
+  La escritura del historial es best-effort: si falla `recordFieldChanges` el `update()` del ticket no se rompe, solo se loguea el error.
+</Note>
+
+### Endpoint
+
+```
+GET /chat/tickets/:id/history
+```
+
+Devuelve `{ entries: [...] }` ordenado por `changed_at`. Solo accesible para Admin/Moderator. El servicio resuelve el **nombre del actor** (`changedByName`) con un join contra `users` (usa `display_name`, nombre completo o email); este campo no es una columna, se calcula en la respuesta.
+
+### Frontend
+
+`TicketHistoryTimeline` muestra la actividad como un feed estilo WhatsApp, ordenado del más reciente al más antiguo:
+
+- `"X creó el ticket"` (evento `created`).
+- `"X dio la primera respuesta"` (evento `first_response`).
+- `"X cambió <Campo>: valor anterior → valor nuevo"` para cambios de campo.
+
+Las entradas se colorean por tipo (creación, primera respuesta, apertura, cierre) y marcan las **reaperturas** (transición de estado cerrado → abierto) con una etiqueta. Cuando no hay actor conocido, se muestra un fallback según la fuente (`Zendesk`, `Sincronización`).
+
+<Note>
+  La métrica automática de primera respuesta y los dashboards de actividad por equipo/persona son follow-up.
+</Note>
+
+## Notificaciones al creador y al asignado
+
+Cada cambio auditable emite además un evento `ticket.*` al **motor de notificaciones**, para que el **creador** y el **asignado** se enteren de todo lo que le pasa a "su" ticket por **buzón interno de Tools** + **email** (VIV-2080 emite los eventos; VIV-2081 siembra flows + plantillas).
+
+- El choke point `writeStatusHistory` emite `ticket.updated` / `ticket.assigned` (solo `source ∈ {manual, webhook}`), `create()` emite `ticket.created`, y los comentarios (Tools + webhook de Zendesk) emiten `ticket.comment_added`.
+- **`ticket.resolved`** tiene identidad propia: cuando una transición de `status` entra en un estado resuelto (`resolved`/`closed`), `writeStatusHistory` emite `ticket.resolved` **en lugar de** `ticket.updated` para esa transición (nunca ambos). Usa la misma definición de "resuelto" que las columnas derivadas (`resolved_at`/`reopened_count`). Un **reopen** (resuelto → abierto) sigue saliendo como `ticket.updated` normal. Plantillas + flow: migración `178_seed_ticket_resolved_notification_flow.sql`.
+- Los flows suprimen la auto-notificación (no te avisan de tu propio cambio) y deduplican cuando creador == asignado. Detalle del mecanismo en [Automatizaciones → Avisos de tickets](/notifications/automations#avisos-de-tickets-creador--asignado).
+- Los avisos ad-hoc del buzón que existían antes (self-ack al crear, aviso al asignado al crear y al reasignar) **se retiraron**: ahora los cubren estos flows, con email añadido.
+- El buzón interno (`/app/notifications` y el sidebar de Tools) pinta estos mensajes con una card enriquecida (`TicketMessageCard`) leyendo `metadata.ticket` sin hacer fetch al ticket — ver [Inbox → Tickets via Automation Engine](/chat/inbox#tickets-via-automation-engine-ticket-).
+
+<Note>
+  Best-effort: la emisión de eventos nunca rompe ni frena la mutación del ticket. La entrega corre por el cron de Windmill (30s), así que el aviso puede llegar con unos segundos de latencia respecto al cambio.
+</Note>
+
+## Soft-delete de tickets inválidos
+
+En Zendesk los tickets no se pueden eliminar. Para que CX pueda "borrar" tickets de basura, pruebas o duplicados, se implementa un **soft-delete** sobre `chat_tickets` (migración 135): se marcan inválidos, se ocultan de listas y KPIs, pero quedan recuperables. **No toca Zendesk.**
+
+| Columna | Descripción |
+|---------|-------------|
+| `invalid` | `boolean`, default `false`. `true` = oculto de listas y KPIs |
+| `invalid_reason` | Motivo opcional |
+| `invalidated_at` | Timestamp de la invalidación (`NULL` si `invalid = false`) |
+| `invalidated_by` | Usuario que lo marcó inválido (FK a `users`) |
+
+### Endpoints
+
+```
+PATCH /chat/tickets/:id/invalidate   { reason?: string }
+PATCH /chat/tickets/:id/restore
+```
+
+- `invalidate` setea `invalid = true` con el motivo, el timestamp y el usuario actual.
+- `restore` revierte los cuatro campos a su estado inicial (vuelve a mostrar el ticket).
+
+Las listas y KPIs filtran por `invalid = false` por defecto. Para revisar los inválidos se usa el filtro `onlyInvalid`. Un índice parcial sobre `invalid = true` mantiene esas consultas baratas.
+
+### UI
+
+Acción **"Marcar inválido"** (con motivo opcional), banner en el detalle del ticket inválido con opción de **restaurar**, y filtro **"Solo inválidos"** en la lista.
+
+## Planes de mejora con IA
+
+CX puede pedir que la IA genere un **plan de mejora** por ticket a partir de su contenido. Se persiste el último plan generado sobre `chat_tickets` (migración 136), de uso libre y sin tabla de cuotas.
+
+| Columna | Descripción |
+|---------|-------------|
+| `improvement_plan` | Último plan generado (texto en español) |
+| `improvement_plan_at` | Timestamp de la última generación |
+
+### Endpoint
+
+```
+POST /chat/tickets/:id/improvement-plan
+```
+
+Reúne el contexto del ticket (título, descripción, categoría, equipo, zona) más sus comentarios y lo envía al `AiService` (Claude). El prompt pide 3-5 viñetas accionables **en español**: causa raíz probable, acción correctiva y cómo prevenir que se repita. Devuelve `{ plan, generatedAt }` y guarda ambos valores en el ticket. Cada llamada **reemplaza** el plan anterior.
+
+### UI
+
+`TicketImprovementPlanCard` muestra el último plan persistido con un botón **Generar** / **Regenerar**. Tras generar, el plan recién creado se muestra de inmediato (antes del refetch) y se indica la fecha de generación.

@@ -1,0 +1,201 @@
+---
+title: 'Property'
+description: 'Módulo de propiedades y reseñas'
+---
+
+## Descripción
+
+El módulo **Property** gestiona el detalle completo de propiedades y su disponibilidad. Cubre las casas del usuario autenticado y las del escaparate público que ven los usuarios sin cuenta.
+
+- **Ubicación:** `src/modules/property/`
+
+## Screens
+
+| Screen                  | Ruta                       | Descripción                                                        |
+| ----------------------- | -------------------------- | ------------------------------------------------------------------ |
+| `PropertyDetailsScreen` | `/property/[id]`           | Detalle completo de la propiedad con galería, amenidades y accesos |
+| `ArrivalReviewScreen`   | `/property/arrival-review` | Revision de llegada (usa `SurveyScreen slug="arrival-review"`)     |
+
+<Note>
+  La ruta `/property/arrival-review` usa el motor genérico de encuestas del módulo **Surveys** con
+  `slug="arrival-review"` y `scopeType="booking"`. La implementación custom anterior
+  (`ArrivalReviewForm`) fue eliminada. Ver [Surveys](/modules/surveys) para detalles del motor.
+</Note>
+
+## API Endpoints
+
+| Método | Path                          | Descripción                                        |
+| ------ | ----------------------------- | -------------------------------------------------- |
+| `GET`  | `/v2/properties/mine`         | Casas del usuario autenticado                      |
+| `GET`  | `/v2/properties/{id}`         | Detalle de propiedad (autenticado)                 |
+| `GET`  | `/v2/properties/all`          | Listado público del escaparate (sin autenticación) |
+| `GET`  | `/v2/properties/public/{id}`  | Detalle público del escaparate (sin autenticación) |
+| `GET`  | `/v2/calendars/property/{id}` | Disponibilidad y calendario de la propiedad        |
+| `GET`  | `/v2/bookings/to-exchange`    | Propiedades disponibles para intercambio           |
+| `GET`  | `/v2/bookings/to-rent`        | Propiedades disponibles para alquiler              |
+
+<Note>
+  El módulo `homes` de `vivla-api` pasó a llamarse `properties`, con un `PropertyDto` estricto. La
+  app absorbe el cambio de forma en `src/modules/property/utils/propertyMapper.ts`, que mapea el
+  modelo v2 al dominio interno `Property`, de modo que queries, hooks y componentes siguen
+  consumiendo el modelo antiguo. Ya no queda ninguna llamada a `/v1/homes/*`: los tres endpoints que
+  no entraron en el renombrado (`register-issue`, `{id}/issues` y `{id}/nps-results`) se retiraron
+  junto con el informe de valoración.
+</Note>
+
+<Note>
+  Los endpoints de arrival-review y stay-review fueron migrados al módulo **Surveys**
+  (`/surveys/mobile/arrival-review`, `/surveys/mobile/stay-review`). Ver
+  [Surveys](/modules/surveys).
+</Note>
+
+## Hooks
+
+| Hook                      | Descripción                                               |
+| ------------------------- | --------------------------------------------------------- |
+| `useProperties()`         | Gestión de selección y listado de propiedades del usuario |
+| `useProperty(propertyId)` | Obtiene el detalle de una propiedad individual            |
+
+## Tipos principales
+
+<CodeGroup>
+```typescript Property
+type Property = {
+  id: string;
+  name: string;
+  type: string;
+  coverImage?: string;
+  description?: string;
+  gallery: { path: string }[];
+  addressInfo: {
+    address: string;
+    city: string;
+    country?: string;
+    postalCode?: string;
+    latitude: number;
+    longitude: number;
+    location: { id: string; name: string; picture: string };
+  };
+  guestManager?: GuestManager;
+  characteristics: {
+    bedrooms: number;
+    bathrooms: number;
+    beds: number;
+    size?: number | null;
+    capacity?: number;
+    bathtubs?: number;
+    price?: number;
+  };
+  amenities?: { slug: string; room: string }[];
+  accessInfo?: { /* códigos de acceso, WiFi */ };
+  parkings?: { /* dirección, spot, código */ }[];
+  bookings?: Booking[];
+  documents?: { slug: string; url: string }[];
+  externalUrl?: string;
+  userRole?: UserRoleType;
+  matched?: boolean;
+  keys?: { peak: number; high: number; mid: number; low: number };
+};
+```
+
+```typescript Tipos derivados
+type PropertyDisplay = Pick<Property,
+  'id' | 'name' | 'type' | 'coverImage' | 'userRole'
+> & { addressInfo: Pick<...>; guestManager?: GuestManager };
+
+type PropertyList = Pick<Property,
+  'id' | 'name' | 'type' | 'coverImage' | 'userRole'
+> & { addressInfo: Pick<Property['addressInfo'], 'city'> };
+
+type PropertyCalendar = Stay[];
+```
+
+```typescript Reseñas
+type PropertyReview = {
+  id?: string;
+  propertyId: string;
+  userId?: string;
+  message: string;
+};
+```
+
+```typescript Season
+type Season = {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  startSlotDay: string;
+  endSlotDay: string;
+  allowsTwoConsecutiveWeeks: boolean;
+};
+```
+
+</CodeGroup>
+
+<Warning>
+  No documentar valores reales de precios ni códigos de acceso. Solo documentar la estructura de los
+  tipos. El campo `accessInfo` contiene datos sensibles (códigos, contraseñas WiFi) que se muestran
+  únicamente al usuario autenticado con el rol correspondiente.
+</Warning>
+
+## Store
+
+El módulo utiliza `usePropertyStore` en **Zustand** para gestionar el estado de propiedades:
+
+| Estado                 | Tipo                   | Descripción                                   |
+| ---------------------- | ---------------------- | --------------------------------------------- |
+| `selectedProperty`     | `Property \| null`     | Propiedad actualmente seleccionada            |
+| `selectedPropertyId`   | `string \| null`       | ID de la propiedad seleccionada               |
+| `selectedPropertyType` | `string \| null`       | Tipo de la propiedad seleccionada             |
+| `selectedPropertyRole` | `UserRoleType \| null` | Rol del usuario en la propiedad seleccionada  |
+| `ownedPropertiesList`  | `PropertyList[]`       | Lista de propiedades propias del usuario      |
+| `properties`           | `Property[]`           | Propiedades generales (para booking/exchange) |
+
+Ver [State Management](/mobile/architecture/state-management) para detalles de la arquitectura de estado.
+
+<Note>
+  La feature `arrival-review` fue migrada al módulo **Surveys**. La ruta `/property/arrival-review`
+  ahora renderiza `SurveyScreen slug="arrival-review"`. El directorio `features/arrival-review/` y
+  sus componentes custom (`ArrivalReviewForm`, `ArrivalReviewCard`, `CommentInput`, `ProgressBar`)
+  fueron eliminados.
+</Note>
+
+## Componentes destacados
+
+<CardGroup cols={2}>
+  <Card title="PropertyDetails" icon="house">
+    Vista completa de la propiedad con todas sus secciones: héroe, galería, características,
+    amenidades y accesos.
+  </Card>
+  <Card title="PropertyHero" icon="image">
+    Imagen principal de la propiedad con overlay de información básica.
+  </Card>
+  <Card title="PropertyGalleryModal" icon="images">
+    Modal de galería de imágenes a pantalla completa con navegación.
+  </Card>
+  <Card title="PropertyCard" icon="id-card">
+    Tarjeta resumen de propiedad para listados, con imagen, nombre y ubicación.
+  </Card>
+  <Card title="PropertiesFilter" icon="filter">
+    Componente de filtrado de propiedades en listados.
+  </Card>
+  <Card title="PropertyLabels" icon="tag">
+    Etiquetas visuales de la propiedad (tipo, estado, temporada).
+  </Card>
+</CardGroup>
+
+<Tabs>
+  <Tab title="Propiedad autenticada">
+    El endpoint `GET /v2/properties/{id}` requiere autenticación y devuelve información completa
+    incluyendo `accessInfo`, `parkings`, `documents` y el agente de CX. El nivel de detalle depende
+    del rol del usuario sobre la casa: `detailed` para propietario, `low` para invitado y `basic`
+    sin rol, así que los grupos de campos sensibles pueden no venir.
+  </Tab>
+  <Tab title="Propiedad pública">
+    El endpoint `GET /v2/properties/public/{id}` no requiere autenticación y sirve la casa como
+    **producto en venta**, con datos de la Web Properties API de Tools: precio de fracción, m²,
+    características únicas y estado comercial. Alimenta el escaparate que ve un usuario sin cuenta
+    (`HomeGuestScreen`), no las vistas de intercambio y alquiler, que leen de `/v2/bookings/*`.
+  </Tab>
+</Tabs>

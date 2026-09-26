@@ -1,0 +1,222 @@
+---
+title: "Tickets"
+description: "Gestión de tickets de soporte en Vivla Tools, ya desconectado de Zendesk"
+---
+
+# Tickets
+
+El módulo de **Tickets** es el sistema de gestión de incidencias de soporte de Vivla (propiedades, experiencia del cliente, administrativo). Nació como un **espejo de Zendesk**, pero desde **agosto de 2026 Vivla Tools está desconectado de Zendesk por completo** y es la única fuente de verdad.
+
+<Note>
+  Operativamente lo usa el equipo de **CX**. Ya no hay write-back: los cambios de
+  campo, adjunto o comentario hechos en Vivla Tools **no** viajan a Zendesk. Todo
+  ticket nuevo nace nativo (`zendesk_ticket_id` queda `null`); el histórico
+  conserva el suyo. Ver [Sincronización](/tickets/sync).
+</Note>
+
+## Arquitectura
+
+```
+┌──────────────┐     ┌──────────────┐      ┌──────────────┐
+│   Frontend   │────▶│   Backend    │  ⋯   │    Zendesk   │
+│ (TanStack)   │◀────│  (NestJS)    │      │(desconectado)│
+└──────────────┘     └──────┬───────┘      └──────────────┘
+                            │
+              ┌─────────────┼─────────────┐
+              ▼             ▼             ▼
+       ┌───────────┐ ┌───────────┐ ┌───────────┐
+       │ Supabase  │ │ Cloudinary│ │ Claude AI │
+       │ (tickets) │ │ (adjuntos)│ │ (mejoras) │
+       └───────────┘ └───────────┘ └───────────┘
+```
+
+- **Fuente de verdad**: Vivla Tools gobierna las opciones de los desplegables (config en código) y aloja los adjuntos en su propio Cloudinary. Desde agosto de 2026 **Zendesk está desconectado por completo**: ni escritura, ni lectura en vivo, ni disparadores de entrada.
+- **Sin sincronización en vivo**: se retiraron el import diario (cron de Windmill), el webhook y el write-back. El código del proveedor solo queda para el proxy de adjuntos legacy y CLIs manuales. Ver [Sincronización](/tickets/sync).
+
+## Superficies
+
+El módulo se expone en dos lugares:
+
+| Superficie | Ruta | Uso |
+|------------|------|-----|
+| **Tool dedicada** | `/app/tickets` | Herramienta top-level: dashboard + lista + detalle |
+| **Chat-embed** | `/app/chat/tickets` | Tickets embebidos dentro del módulo de Chat |
+
+Cada una tiene su layout (`TicketsToolLayout` / `EmbeddedTicketsLayout`) con sub-navegación a **Panel** (dashboard) y **Tickets** (lista), y el **detalle** del ticket (`/.../list/$ticketId`).
+
+<Note>
+  El ticket se gestiona **por completo desde el detalle**: la sección
+  **Gestión** permite cambiar **estado** (incluido darlo por finalizado),
+  **prioridad**, **tipo** (incidencia \| propuesta de mejora) y **asignación**
+  con guardado inmediato al seleccionar, y también se editan título,
+  descripción, routing, reparación, notas y fechas.
+</Note>
+
+## Tipo de ticket (`ticket_kind`)
+
+Cada ticket tiene una **naturaleza** persistida en la columna `ticket_kind`:
+
+- **Incidencia** (`incident`, default): el ticket de soporte estándar.
+- **Propuesta de mejora** (`improvement_proposal`): una idea de mejora para la
+  casa, no una incidencia.
+
+Es una dimensión propia, separada del **estado** (lifecycle) y del **Segmento**
+derivado de SLA (casa/experiencia/administrativo/dormido). Desde Tools se puede
+**crear** un ticket eligiendo el tipo (CX puede levantar propuestas) y
+**filtrar** la lista por tipo. Las **propuestas de mejora son Tools-native**: se
+crean también desde el portal de Home Excellence y **nunca se envían a Zendesk**.
+
+<Note>
+  "Propuesta de mejora" fue en su día un **estado falso** del `status`; ahora es
+  su propia dimensión (`ticket_kind`). Ver la [transición two-phase](/tickets/fields).
+</Note>
+
+## Varios solicitantes por ticket (t2)
+
+Un mismo fallo en una casa lo pueden reportar **varios propietarios**. El ticket admite ahora un **solicitante principal** más **solicitantes adicionales**, de forma que todos reciben las actualizaciones en su propio canal.
+
+- El **principal** sigue viviendo, sin cambios, en `chat_tickets.client_user_id`: es la **única** fuente de verdad para "quién abrió el ticket".
+- Los **adicionales** se guardan en la tabla `chat_ticket_requesters` (nunca el principal, que se trata como no-op si se intenta añadir). El alta y la baja quedan registradas en `chat_ticket_status_history` (`field = requester_added` \| `requester_removed`).
+
+### Fan-out de la tarjeta de ticket
+
+Toda tarjeta `ticket_update` se reparte al canal `issues` **de cada solicitante**: primero el del principal, luego el de cada adicional (`ComponentSenderService.resolveChannelsForTicket` + `sendOrUpdateTicketCard`). Cada canal coalesce su propia tarjeta de forma aislada, así que un fallo en uno no frena los demás. Compartir titularidad de la casa **no** basta: hace falta que alguien (CX u otro flujo) sume al solicitante explícitamente.
+
+<Note>
+  El fan-out por canal necesitó ampliar la unicidad de `chat_component_messages` para incluir `channel_db_id` (migración `224`): antes la clave `(entity_kind, entity_id, component_type)` hacía que el segundo canal pisara la fila del primero.
+</Note>
+
+### Endpoints y UI
+
+| Endpoint | Qué hace |
+|----------|----------|
+| `GET /chat/tickets/:id/requesters` | Lista los solicitantes (principal primero, `isPrimary:true`) |
+| `POST /chat/tickets/:id/requesters` | Suma un solicitante adicional (idempotente; no-op si ya es el principal) |
+| `DELETE /chat/tickets/:id/requesters/:userId` | Quita un solicitante adicional (el principal no se puede quitar por esta vía) |
+
+Desde la UI, el detalle del ticket tiene el campo **Solicitantes** (chips removibles + selector "Añadir solicitante"), y las filas de ticket de un canal muestran **"Sumar a este propietario"** cuando el dueño del canal aún no es solicitante.
+
+## Funcionalidades
+
+<CardGroup cols={2}>
+  <Card title="Campos y formulario" href="/tickets/fields">
+    Campos nativos, desplegables (fuente de verdad en Tools), mapeo con Zendesk
+    y automatizaciones (casa→destino, pagador auto, estado de reparación).
+  </Card>
+  <Card title="Adjuntos" href="/tickets/attachments">
+    Archivos a nivel ticket (fotos + PDFs) en Cloudinary y re-alojado de
+    imágenes de chat.
+  </Card>
+  <Card title="Dashboard y SLAs" href="/tickets/dashboard">
+    KPIs, cumplimiento de SLA por prioridad, cohortes de antigüedad, tipos de
+    ticket (Casa/Experiencia/Administrativo/Dormido) y FCR.
+  </Card>
+  <Card title="Actividad e IA" href="/tickets/activity">
+    Audit log (quién creó/cambió qué), soft-delete de inválidos y planes de
+    mejora generados con IA.
+  </Card>
+  <Card title="Sincronización Zendesk" href="/tickets/sync">
+    Zendesk desconectado: qué se retiró (import, webhook, write-back) y los CLIs
+    manuales de backfill que quedan mientras exista la cuenta.
+  </Card>
+</CardGroup>
+
+## Modelo de datos
+
+| Tabla | Descripción |
+|-------|-------------|
+| `chat_tickets` | Ticket: campos nativos (incl. `ticket_kind`) + columnas derivadas (resolved_at, reopened_count) + soft-delete (invalid) + rango de coste + plan de mejora IA |
+| `chat_ticket_comments` | Comentarios (importados de Zendesk + creados en Tools, siempre nativos — ver abajo) |
+| `chat_ticket_attachments` | Adjuntos a nivel ticket alojados en Cloudinary (Fase I) |
+| `chat_ticket_status_history` | Historial/actividad append-only: transiciones y cambios de campo con actor |
+| `chat_ticket_messages` | Mensajes de chat asociados al ticket |
+| `chat_ticket_requesters` | Solicitantes **adicionales** del ticket (t2). El principal sigue en `chat_tickets.client_user_id` — ver [Varios solicitantes](#varios-solicitantes-por-ticket-t2) |
+
+## Backend
+
+```
+apps/backend/src/chat/tickets/
+├── tickets.controller.ts          # endpoints REST
+├── tickets.service.ts             # lógica principal
+├── ticket-comments.{service,controller}.ts
+├── ticket-attachments.{service,controller}.ts
+├── ticket-boilerplate.ts          # saneado del bloque de IDs internos (ver abajo)
+├── config/
+│   ├── sla.config.ts              # SLAs, tipos de ticket, dormido
+│   ├── ticket-options.config.ts   # opciones de desplegables (fuente de verdad)
+│   ├── payer-rules.config.ts      # pagador automático por equipo
+│   └── location-destination.config.ts  # casa→destino
+└── entities/                      # entidades + mapeos
+```
+
+La integración con Zendesk vive en `apps/backend/src/chat/integrations/ticketing/`.
+
+### Saneado del bloque de IDs internos
+
+`buildTicketDescription` (en `tickets.service.ts`) añade a la descripción un
+bloque `--- / Internal Ticket ID / Channel ID / Property ID / Booking ID` antes
+de empujarla a Zendesk, y ese texto **vuelve verbatim** en el siguiente sync.
+`ticket-boilerplate.ts` lo quita **al leer**, no al escribir: así se arreglan
+también los tickets ya sincronizados y no se toca el sync mientras Zendesk siga
+vivo. Quitar la escritura pertenece al apagado de Zendesk.
+
+Dos variantes, y la diferencia importa:
+
+| Helper | Qué hace | Dónde se usa |
+|--------|----------|--------------|
+| `cutInternalBoilerplate` | Corta el bloque de IDs, **conserva** el énfasis markdown | `description` en `mapDatabaseTicketToEntity` — es un campo **editable**, y quitarle el énfasis al leer descartaría el `**urgente**` del propio agente en el siguiente guardado |
+| `stripInternalBoilerplate` | Corta el bloque **y** elimina el énfasis markdown | Superficies de solo lectura: `body` de los comentarios (`mapTicketCommentRowToEntity`), `lastComment`, y las páginas de Home Excellence |
+
+`html_body` se deja en crudo a propósito: cortar por el índice de un marcador
+de texto plano partiría una etiqueta a medias. Hoy no se renderiza en ninguna
+superficie viva, y Home Excellence lo excluye del DTO del propietario por el
+mismo motivo.
+
+### Comentarios: siempre nativos de Tools
+
+`TicketCommentsService.create()` escribe **siempre** nativo: inserta directo en `chat_ticket_comments` con id y `created_at` propios, sin viaje a Zendesk, exista o no `zendesk_ticket_id` en el ticket. La rama que publicaba en Zendesk (`createViaZendesk`) se eliminó junto con la inyección de `TicketingService`, así que el servicio ya no puede escribir hacia fuera ni queriendo — la garantía es **estructural**, no de comportamiento. `ZendeskProvider` sigue inyectado solo para la **entrada** (`upsertFromZendesk` resuelve el autor de los comentarios importados).
+
+Hasta este cambio `create()` bifurcaba por `zendesk_ticket_id` y la rama de Zendesk publicaba allí PRIMERO, relanzando el error si fallaba. Como casi todos los tickets tienen ese campo relleno, apagar Zendesk habría roto comentar y cerrar tickets (incluido el mensaje de cierre al propietario). La **migración 188** relajó el esquema para admitir comentarios sin `zendesk_comment_id`, pero dejó la lógica a medias (solo cubría tickets que nunca estuvieron en Zendesk); ahora Tools es la única fuente de verdad del hilo —la UI lee de `chat_ticket_comments`, no de Zendesk—, así que la escritura es 100% nativa. Esto desbloquea el apagado de Zendesk y permite comentar en las **propuestas de mejora** (Tools-native por diseño).
+
+Columnas de fecha, que no son lo mismo:
+
+- **`created_at`** — cuándo se escribió el comentario. Presente siempre y **columna de orden del hilo**. Es la que hay que renderizar.
+- **`zendesk_created_at`** — cuándo lo creó Zendesk. **`NULL` en comentarios nativos**: inventarle una fecha mentiría en una columna cuyo nombre promete procedencia. La migración la rellenó en las filas existentes hacia `created_at`, así que ningún hilo ya sincronizado cambió de orden.
+
+`zendesk_comment_id` sigue siendo la clave de conflicto del upsert del import y **no hizo falta tocarla**: en Postgres un UNIQUE admite varios NULL y `ON CONFLICT` no matchea filas con NULL, así que los nativos simplemente insertan.
+
+El comentario emite `ticket.comment_added` con el id **local**, así que un comentario **público** llega al canal `issues` del propietario por el canal `chat` del motor de notificaciones. El guard `isPublicTicketComment` del motor resuelve el id por UUID local **o** por id de Zendesk, así que un comentario nativo también pasa el filtro.
+
+Los `attachmentTokens` (tokens de subida de Zendesk) se ignoran con un warning — no tienen sentido sin un ticket de Zendesk al que adjuntarlos. Los adjuntos a nivel ticket tienen su propia superficie en Cloudinary: ver [Adjuntos](/tickets/attachments).
+
+### Cierre con mensaje al propietario
+
+Resolver o descartar un ticket era un cambio de desplegable que **no le decía nada al propietario**: `ticket.resolved` solo avisa a creador y asignado (migración 178) y no tiene flow de chat. Quien reportó la incidencia no se enteraba nunca.
+
+Ahora las dos transiciones terminales **manuales** pasan por un modal. `closed` queda fuera a propósito: lo pone en exclusiva el barrido de auto-cierre, donde no hay nadie delante para escribir nada.
+
+| Endpoint | Qué hace |
+|----------|----------|
+| `POST /chat/tickets/:id/closing-message` | Redacta el borrador con IA. **No persiste ni envía nada.** |
+| `POST /chat/tickets/:id/close` | Aplica la transición y publica el mensaje (o el escape con motivo interno). |
+
+**El textarea es a la vez prompt y borrador.** Lo que escribe el agente es la entrada de la IA; al pulsar Generar se sustituye por el texto redactado, que sigue siendo editable. Generar es opcional: quien ya sabe qué escribir, escribe y confirma.
+
+**El escape exige motivo.** El checkbox "cerrar sin mensaje" revela un campo obligatorio que se publica como **nota interna**. Sin ese requisito el escape sería el camino más cómodo y todo se cerraría en silencio, que es justo lo que este flujo existe para cambiar.
+
+**Al RESOLVER, el coste real es obligatorio.** El modal pide `actualCost` (en euros, con tope de cordura de 1.000.000 €) y no deja confirmar sin él ni siquiera por el escape. Para dejarlo en 0 hay que marcar explícitamente **"sin coste"** (`noCost: true`): así un 0 significa "comprobado, sin coste" y no "le di a guardar sin mirar", y `noCost` gana sobre cualquier importe que quedara en el formulario. **Descartar no pide coste**: si no se actuó, no hay coste que informar y pedirlo solo empujaría a teclear ceros de relleno, así que la columna `actual_cost` ni se toca.
+
+**Cerrar con el coste PENDIENTE.** Cuando la intervención sí tuvo coste pero aún no se conoce el importe (la factura suele llegar a fin de mes), el modal ofrece marcar **"coste pendiente"** (`costPending: true`): el ticket se resuelve igual —cuenta como cerrado a efectos de SLA— pero `actual_cost` se deja intacto (`NULL`) y la fila queda marcada con `cost_pending = true` para completarla luego. Es **distinto de "sin coste"** (que confirma un 0) y de dejar el ticket abierto (que falsearía el tiempo de resolución). El flag se limpia solo en cuanto se escribe un `actual_cost` real. Ver [Campos](/tickets/fields) y el filtro **pendientes de coste** en el [Panel](/tickets/dashboard).
+
+**Orden de escritura: estado primero, comentario después.** No hay transacción entre las dos (cliente Supabase, sin ORM), así que una puede fallar sola:
+
+- estado ok / comentario falla → el ticket queda cerrado y el propietario no se enteró. Es el comportamiento de siempre, el estado del ticket es veraz, y el agente recibe un error explícito para publicar el mensaje a mano.
+- comentario ok / estado falla → se le ha dicho al propietario que su asunto está cerrado mientras el ticket sigue abierto. **Un mensaje enviado no se puede retirar.**
+
+El segundo es estrictamente peor, así que la escritura arriesgada va última.
+
+**Cómo llega al propietario.** El servicio **no** envía a Stream. El mensaje confirmado se escribe como comentario **público**, y el canal `chat` del motor de notificaciones recoge `ticket.comment_added`, verifica que el comentario es público (`isPublicTicketComment`, falla cerrado) y enruta una `ticket_update` card al canal `issues` del propietario. Una escritura, repartida — ver migración 186. **Ese flow viene con `is_active = false`**: hasta que alguien lo active desde el editor de flows, el mensaje se guarda en el ticket pero no sale a Tools.
+
+**Guardarraíles del prompt** (heredados de `surveys/suggested-message`, la superficie hermana): sin importes, plazos ni compromisos de reparación; sin inventar qué se hizo; sin tecnicismos internos; sin nombres propios de nadie; máximo 3 frases; y el mensaje se escribe en el idioma detectado del ticket. Al prompt solo entran los **comentarios públicos** — las notas internas llevan costes y nombres de proveedores, y filtrarlas en el servicio en vez de confiar en que el modelo no las repita es la diferencia entre una regla y una garantía.
+
+Nada se cachea: el borrador es transitorio y el texto confirmado vive en `chat_ticket_comments` como cualquier comentario. Modelo por defecto `claude-haiku-4-5`, sobreescribible con `AI_CLOSING_MESSAGE_MODEL`.
