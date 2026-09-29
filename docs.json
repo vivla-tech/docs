@@ -112,7 +112,7 @@
           {
             "group": "Guides",
             "pages": [
-              "panel/guides/account-setup"
+              "panel/account-setup"
             ]
           }
         ]
@@ -162,6 +162,24 @@
       ]
     }
   },
+  "redirects": [
+    {
+      "source": "/panel/guides/account-setup",
+      "destination": "/panel/account-setup"
+    },
+    {
+      "source": "/panel/guides/create-booking",
+      "destination": "/panel/bookings/create-booking"
+    },
+    {
+      "source": "/panel/guides/assign-keys",
+      "destination": "/panel/keys/assign-keys"
+    },
+    {
+      "source": "/panel/guides/create-user",
+      "destination": "/panel/users/create-user"
+    }
+  ],
   "navbar": {
     "links": [
       {
