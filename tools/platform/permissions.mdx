@@ -1,0 +1,101 @@
+---
+title: "Permisos"
+description: "Sistema de control de acceso granular por módulo con 4 niveles de permiso"
+---
+
+# Permisos
+
+El sistema de permisos controla el acceso a cada herramienta/módulo de la plataforma con 4 niveles de granularidad. Los permisos se asignan por usuario o por equipo, y se combinan con los roles globales.
+
+## Niveles de permiso
+
+```
+none → view → edit → admin
+```
+
+| Nivel | Descripción |
+|-------|-------------|
+| `none` | Sin acceso al módulo |
+| `view` | Solo lectura |
+| `edit` | Lectura y escritura |
+| `admin` | Control total (incluye gestión de usuarios y configuración) |
+
+La jerarquía es acumulativa: un usuario con nivel `admin` tiene automáticamente acceso `edit` y `view`.
+
+## Resolución de permisos
+
+El permiso efectivo de un usuario para un módulo se resuelve con la siguiente prioridad:
+
+1. **Permiso de usuario** — Asignación directa al usuario para ese módulo
+2. **Permiso de equipo** — Si no hay permiso individual, se usa el del equipo
+3. **Default por rol** — Si no hay permiso de equipo, se aplica el default del rol global
+
+## Módulos y grupos
+
+Los módulos (herramientas) se organizan en **grupos** para la vista del home:
+
+- Cada módulo tiene un `app_type`: `tool` (herramienta nativa) o `link` (enlace externo)
+- Los grupos definen el orden de visualización en el dashboard
+- La **visibilidad** se controla por equipo: un grupo o módulo puede ser visible solo para ciertos equipos
+
+### Layout personalizado
+
+Cada usuario puede personalizar su layout del home:
+- Reordenar módulos y grupos
+- El layout se guarda en la base de datos
+- Se puede resetear al layout por defecto
+
+## API
+
+### Módulos para el usuario
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| GET | `/permissions/modules/home` | Módulos visibles para el usuario actual |
+| GET | `/permissions/modules/home-layout` | Layout con grupos y módulos |
+| GET/PUT/DELETE | `/permissions/modules/my-layout` | Layout personalizado |
+
+### Administración de módulos (Admin)
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| GET | `/permissions/modules/admin` | Todos los módulos con info de visibilidad |
+| POST | `/permissions/modules` | Crear módulo |
+| PATCH | `/permissions/modules/:id` | Actualizar módulo |
+| DELETE | `/permissions/modules/:id` | Eliminar módulo |
+| POST | `/permissions/modules/:id/upload-icon` | Subir ícono (máx 2MB, solo imagen) |
+
+### Grupos (Admin)
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| GET | `/permissions/modules/groups` | Listar grupos |
+| POST | `/permissions/modules/groups` | Crear grupo |
+| PATCH | `/permissions/modules/groups/:id` | Actualizar grupo |
+| DELETE | `/permissions/modules/groups/:id` | Eliminar grupo |
+| GET/PUT | `/permissions/modules/groups/:id/visibility` | Visibilidad por equipo |
+| GET/PUT | `/permissions/modules/:id/visibility` | Visibilidad de módulo por equipo |
+
+### Asignación de permisos (Admin)
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| GET | `/permissions/user/:userId` | Permisos del usuario |
+| POST | `/permissions/user/:userId` | Asignar permiso a usuario |
+| GET | `/permissions/team/:teamId` | Permisos del equipo |
+| POST | `/permissions/team/:teamId` | Asignar permiso al equipo |
+| GET | `/permissions/user/:userId/module/:slug` | Verificar permiso específico |
+| GET | `/permissions/user/:userId/access` | Acceso completo del usuario a módulos |
+
+## Filtrado de módulos visibles
+
+El método `getHomeModules` filtra los módulos usando estas reglas:
+
+1. **Auth0 tools**: módulos asignados en los claims del JWT
+2. **Módulos personales**: módulos creados por el propio usuario
+3. **Visibilidad por equipo**: módulos visibles para los equipos del usuario
+4. **Módulos globales**: módulos marcados como visibles para todos
+
+<Note>
+  El sistema de permisos se aplica tanto en el frontend (renderizado condicional de módulos) como en el backend (guards de acceso en cada endpoint).
+</Note>

@@ -1,0 +1,226 @@
+---
+title: "Entornos y despliegue"
+description: "Entornos del panel, flujo de ramas hasta producción, configuración de Vercel, workflows de GitHub y recarga automática tras cada deploy"
+---
+
+# Entornos y despliegue
+
+El panel es una SPA de Vite desplegada en Vercel, más una función serverless para los [reportes](/panel/platform/feedback). El código entra por `staging` y llega a producción con una PR de `staging` a `main`.
+
+Esta página cubre los tres entornos, cómo se construye cada uno, qué hacen los workflows de GitHub y cómo el panel recoge un deploy nuevo sin romper las sesiones abiertas.
+
+## Entornos
+
+El entorno lo decide `VITE_APP_ENV`. `src/config/env.ts` lo valida con Zod al arrancar y solo acepta tres valores:
+
+| `VITE_APP_ENV` | Uso | Sentry | PostHog |
+|---|---|---|---|
+| `localdev` | Tu máquina, normalmente contra `vivla-api` en local | Desactivado | Desactivado (proveedor vacío) |
+| `staging` | Entorno de pruebas | Activo, entorno `staging`, 100 % de trazas | Activo, con `debug` |
+| `prod` | Producción | Activo, entorno `production`, 20 % de trazas | Activo |
+
+<Warning>
+`EnvSchema.parse` lanza una excepción si una variable obligatoria falta o no es válida. Por ejemplo, si `VITE_APP_ENV` no es uno de los tres valores o `VITE_API_BASE_URL` no es una URL. La app no llega a montarse y verás una página en blanco.
+</Warning>
+
+Los detalles de Sentry y PostHog por entorno están en [Observabilidad](/panel/platform/observability).
+
+## Scripts
+
+| Script | Comando | Para qué |
+|---|---|---|
+| `yarn dev` | `vite --mode localdev` | Servidor de desarrollo |
+| `yarn build:local` | `tsc -b && vite build --mode localdev` | Build local |
+| `yarn build:staging` | `tsc -b && vite build --mode staging` | Build de staging en tu máquina |
+| `yarn build:prod` | `tsc -b && vite build --mode prod` | Build de producción en tu máquina |
+| `yarn lint` | `eslint .` | Lint |
+| `yarn preview` | `vite preview` | Sirve el último build |
+
+Cada modo de Vite carga su `.env.<modo>` (`.env.localdev`, `.env.staging`, `.env.prod`). Todos los `.env*` están en `.gitignore`. Para montar el tuyo, sigue el [inicio rápido](/panel/quick-start).
+
+<Warning>
+**Vercel no usa los scripts `build:*`.** Ejecuta un `vite build` genérico, con modo `production`, y no pasa por `tsc`. Por eso el entorno de un deploy lo decide la variable `VITE_APP_ENV` configurada en Vercel, no el modo de Vite. `vite.config.ts` activa el plugin de Sentry según `VITE_APP_ENV` por el mismo motivo. Antes se decidía por el modo, y en Vercel nunca se activaba.
+</Warning>
+
+## Variables de entorno
+
+Nunca pongas valores en la wiki ni en el repo. Estos son solo los nombres:
+
+| Variable | Dónde se usa | Obligatoria |
+|---|---|---|
+| `VITE_APP_ENV` | App y `vite.config.ts` | Sí |
+| `VITE_API_BASE_URL` | App: base de `apiClient` y destino de las trazas de Sentry | Sí |
+| `VITE_AUTH0_DOMAIN` | App y función de reportes | Sí |
+| `VITE_AUTH0_CLIENT_ID` | App | Sí |
+| `VITE_AUTH0_AUDIENCE` | App y función de reportes | Sí |
+| `VITE_SENTRY_DSN` | App | No. Sin él, Sentry no arranca. |
+| `VITE_PUBLIC_POSTHOG_TOKEN` | App | No. Sin él, se usa el proveedor vacío. |
+| `VITE_PUBLIC_POSTHOG_HOST` | App | No |
+| `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` | Build: subida de source maps | Solo en builds de `staging` y `prod` |
+| `VERCEL_GIT_COMMIT_SHA` | Build: nombre de la release | La pone Vercel |
+| `SLACK_BOT_TOKEN`, `SLACK_CHANNEL_ID` | Función de reportes | Para que funcionen los reportes |
+
+<Note>
+`env.template` no incluye las variables de PostHog ni las de Slack. Las de PostHog aparecen en `src/config/env.ts`. Las de Slack solo existen en el entorno de Vercel.
+</Note>
+
+## Flujo de ramas
+
+```
+feat/<área>/<tema> ──PR──▶ staging ──PR "staging → main"──▶ main ──▶ producción
+fix/...                       │                              │
+chore/...                     ▼                              ▼
+refactor/...             CI (ci.yml)             CI + deploy-notify.yml
+```
+
+1. Crea tu rama desde `staging`. En el historial verás prefijos como `feat/`, `fix/`, `chore/` y `refactor/`, normalmente con el área del panel (`feat/feedback/report-images`). También hay ramas generadas desde Linear (`<usuario>/viv-XXXX-...`).
+2. Abre la PR contra `staging`. El título sigue Conventional Commits y lleva el ID de Linear: `feat(feedback): attach screenshots to panel reports (VIV-2787)`.
+3. Para publicar, abre una PR de `staging` a `main`. Cada merge a `main` es un deploy de producción.
+
+<Tip>
+El título de tu PR es lo que aparece en la notificación de deploy. GitHub guarda el título en el cuerpo del merge commit, y `deploy-notify.yml` lo lee de ahí. Escríbelo para que se entienda sin abrir la PR.
+</Tip>
+
+## Vercel
+
+`vercel.json` define dos cosas.
+
+**Rewrite SPA.** Cualquier ruta que no empiece por `api/` y no contenga un punto se sirve con `/index.html`. Así React Router resuelve las rutas del panel. Los archivos estáticos (`/version.json`, `/assets/...`) se sirven tal cual. La exclusión de `api/` deja pasar las peticiones a la función de reportes.
+
+**Redirects temporales** (`permanent: false`) para enlaces profundos del panel antiguo:
+
+| Origen | Destino |
+|---|---|
+| `/home-detail` | `/homes` |
+| `/nps-onboarding/:path*` | `/` |
+
+### Función serverless
+
+`api/reports.ts` se despliega como función de Vercel junto a la SPA. La documentación completa está en [Reportes](/panel/platform/feedback). Dos detalles de build:
+
+- `tsconfig.api.json` typechea `api/` y `src/core/feedback/`. Está referenciado desde `tsconfig.json`, así que `tsc -b` lo incluye.
+- Los imports de `api/` llevan la extensión `.js` explícita (`./_lib/auth.js`). El runtime de la función lo necesita. Si añades un import sin extensión, la función falla en Vercel aunque el typecheck pase.
+
+### Nombre de la release
+
+`vite.config.ts` calcula el nombre de la release como `panel-front@<sha>`. El SHA sale de `VERCEL_GIT_COMMIT_SHA`. Si no existe, usa `git rev-parse HEAD`, y si eso falla, `unknown`. Ese nombre se usa en tres sitios:
+
+- Se inyecta en la app como la constante global `__APP_RELEASE__`.
+- Se escribe en `version.json` en la raíz del build.
+- Se usa como release de Sentry al subir los source maps.
+
+## Workflows de GitHub
+
+### CI (`ci.yml`)
+
+Corre en cada PR y en cada push a `staging` y `main`. Un push nuevo a la misma rama cancela la ejecución anterior.
+
+Pasos, con Node 20:
+
+1. `yarn install --frozen-lockfile`
+2. `npx tsc -b`
+3. `npx eslint .`
+4. `npx vite build`, el mismo build genérico que ejecuta Vercel
+
+Es la única verificación de tipos antes de producción, porque Vercel no ejecuta `tsc`.
+
+### Notificación de deploy (`deploy-notify.yml`)
+
+Corre en cada push a `main` y avisa en Slack cuando producción sirve el commit nuevo.
+
+<Steps>
+  <Step title="Esperar a producción">
+    Consulta `/version.json` en los dos dominios de producción (`panel.vivla.com` y `panel.vivla.dev`) cada 10 segundos, hasta 60 veces. Termina cuando alguno devuelve `panel-front@<sha del push>`.
+  </Step>
+  <Step title="Montar la lista de cambios">
+    Lee con `git log --merges` los cuerpos de los merge commits entre el `main` anterior y el nuevo, es decir, los títulos de las PRs. Si hay más de uno, descarta el primero, que es la propia PR de `staging` a `main`. Se queda con un máximo de 10. Si no puede calcular el rango, usa la primera línea del mensaje del commit.
+  </Step>
+  <Step title="Publicar">
+    Envía el mensaje con el webhook del secret `SLACK_WEBHOOK_URL`. Si el secret no existe, se salta el paso sin fallar.
+  </Step>
+</Steps>
+
+El mensaje sigue el formato estándar de [notificaciones de Slack](/infra/slack-notifications):
+
+- **Verde** si producción sirvió el commit. **Rojo** si no lo hizo en 10 minutos.
+- Campos **Commit**, **Author** e **Incluye**.
+- Enlaces al panel, a la release en Sentry y a la ejecución del workflow.
+
+<Note>
+El workflow consulta los dos dominios porque el panel está en transición hacia `panel.vivla.com`. Si ninguno sirve el commit, el enlace **Panel** apunta al último dominio que respondió, o a `panel.vivla.com` si no respondió ninguno.
+</Note>
+
+### CX Assistant (`cx-assistant.yml`)
+
+Permite que alguien del equipo de CX pida un cambio pequeño en el panel y reciba una PR generada por Claude Code. Solo se lanza a mano con `workflow_dispatch`. No reacciona a pushes ni a PRs.
+
+Recibe cuatro entradas: `issue_number` (issue de GitHub de la solicitud), `prompt` (el cambio pedido), `requester` (email de quien lo pide) y `base_branch` (por defecto `main`).
+
+<Steps>
+  <Step title="Marcar el issue">
+    Quita la etiqueta `cx-request` del issue y pone `cx-processing`.
+  </Step>
+  <Step title="Crear el issue en Linear">
+    Crea un issue en Linear con el prompt y un enlace al issue de GitHub. Deja un comentario de "procesando". Si Linear falla, solo emite un aviso y sigue.
+  </Step>
+  <Step title="Generar el cambio">
+    Crea la rama `cx-assistant/<issue>` desde `base_branch` y ejecuta `anthropics/claude-code-action`. Las herramientas están limitadas: editar, escribir, leer y buscar archivos, más `git diff`, `git status` y `git log`. El prompt pide cambios mínimos y que se respeten las convenciones del repo.
+  </Step>
+  <Step title="Abrir la PR o avisar">
+    Si hay cambios, hace commit, abre la PR `[CX Assistant] #<issue>` contra `base_branch` y etiqueta el issue con `cx-pr-created`. Si no hay cambios, etiqueta con `cx-no-changes`. Si algo falla, con `cx-failed`. En los tres casos comenta en el issue de GitHub y en el de Linear.
+  </Step>
+</Steps>
+
+Usa los secrets `ANTHROPIC_API_KEY` y `LINEAR_API_KEY`. Las PRs siempre necesitan revisión de un desarrollador antes del merge.
+
+<Warning>
+`base_branch` vale `main` por defecto. Si quien lanza el workflow no lo cambia, la PR se abre directamente contra `main` y se salta `staging`. Revisa la rama base antes de mergear.
+</Warning>
+
+## Recarga tras un deploy
+
+Los chunks de la SPA llevan hash. Cada deploy borra los anteriores, y una pestaña abierta con la versión vieja rompe al navegar a una ruta que aún no había cargado. El panel lo resuelve con dos mecanismos. Ninguno muestra un aviso: los dos recargan la página en silencio.
+
+### Recarga en la siguiente navegación (`useVersionCheck`)
+
+`PortalRoot` monta `useVersionCheck`, que consulta `/version.json` con `cache: "no-store"`:
+
+- al volver a la pestaña (`focus` y `visibilitychange`),
+- cada 5 minutos.
+
+Si la release publicada no coincide con `__APP_RELEASE__`, marca que hay una versión nueva. En el siguiente cambio de ruta hace `window.location.reload()`. Nunca recarga en mitad de lo que estás haciendo: espera a que navegues.
+
+<Note>
+El chequeo solo corre dentro del área autenticada, donde está `PortalRoot`. Solo reacciona a cambios de `pathname`, no de query string. En `yarn dev` no hay `version.json` (se genera solo en el build), así que no hace nada.
+</Note>
+
+### Recuperación de chunks (`lazyWithReload`)
+
+Todas las páginas del router se cargan con `lazyWithReload` en vez de `React.lazy`. Si el `import()` de un chunk falla:
+
+1. La primera vez guarda una marca en `sessionStorage` y recarga la página.
+2. Si tras recargar el chunk carga bien, borra la marca y envía a Sentry el mensaje informativo "Recovered from stale chunk after deploy".
+3. Si vuelve a fallar con la marca puesta, la borra y relanza el error. Lo recoge el `RouteErrorBoundary`.
+
+La marca evita bucles de recarga cuando el problema no es un deploy.
+
+## Anuncio del release
+
+La skill de Claude Code `.claude/skills/product-release` no despliega nada. Te ayuda a redactar el anuncio en Slack de lo que acabas de publicar: qué cambia, a quién afecta y si hay que hacer algo. Parte de la plantilla del handbook de producto y devuelve el mensaje listo para pegar, con un checklist previo a la publicación.
+
+## Código
+
+| Pieza | Ruta |
+|---|---|
+| Validación de variables | `src/config/env.ts` |
+| Plantilla de variables | `env.template` |
+| Build, release, `version.json` y plugin de Sentry | `vite.config.ts` |
+| Rewrites y redirects | `vercel.json` |
+| Typecheck de la función | `tsconfig.api.json` |
+| CI | `.github/workflows/ci.yml` |
+| Notificación de deploy | `.github/workflows/deploy-notify.yml` |
+| CX Assistant | `.github/workflows/cx-assistant.yml` |
+| Chequeo de versión | `src/hooks/useVersionCheck.ts` |
+| Recuperación de chunks | `src/lib/lazyWithReload.ts` |
+| Rutas lazy | `src/router/index.tsx` |
+| Skill de anuncio | `.claude/skills/product-release/SKILL.md` |

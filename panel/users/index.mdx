@@ -1,0 +1,165 @@
+---
+title: "Usuarios"
+description: "Listado de propietarios y visitantes, ficha de usuario, alta, edición, borrado y bloqueo de calendario por casa"
+---
+
+# Usuarios
+
+El módulo de **Usuarios** gestiona a los usuarios de VIVLA: propietarios y visitantes de la app. Lo usa el equipo de CX para consultar sus datos, darlos de alta, asignarles casas y fracciones, y saltar a sus reservas.
+
+<Note>
+  Aquí no se gestionan las cuentas del panel. El equipo interno entra con Auth0: ver [Primer acceso](/panel/account-setup). Un usuario de este módulo es un cliente o propietario que usa la app.
+</Note>
+
+## Rutas
+
+| Ruta | Qué hay | Permiso |
+|------|---------|---------|
+| `/users` | Listado con pestañas **Propietarios** / **Visitantes**, filtros y paginación | `read:users` |
+| `/users?userId=:id` | El listado con la ficha del usuario abierta en un panel lateral | `read:users` |
+| `/users/create` | Formulario **Añadir usuario** | `edit:users` |
+| `/users/:id/edit` | Formulario **Editar usuario** | `edit:users` |
+
+Sin `read:users` no ves **Usuarios** en la barra lateral. Sin `edit:users` no ves **Añadir usuario**, **Editar**, **Eliminar usuario** ni el interruptor de calendario de la ficha. Más detalle en [Permisos](/panel/platform/permissions).
+
+## Listado
+
+### Propietarios y visitantes
+
+El interruptor de la cabecera (`UserTypeSwitch`) cambia entre **Propietarios** y **Visitantes**. Cada pestaña pide la lista a vivla-api con un `role` distinto (`owner` o `visitor`).
+
+- Un **propietario** tiene al menos una fracción en una casa.
+- Un **visitante** es un usuario sin casas.
+
+La tabla muestra tres columnas: **Propietario** (foto, nombre y email), **Teléfono** y **Propiedades**. Cada casa de **Propiedades** enlaza a su ficha en [Propiedades](/panel/homes). Pulsa cualquier otra parte de la fila para abrir la ficha del usuario.
+
+### Búsqueda y filtros
+
+Junto a **Filtrar por** tienes:
+
+| Control | Qué hace | Pestaña |
+|---------|----------|---------|
+| **Todos los usuarios** | Buscador por nombre o email. Al elegir un usuario abre directamente su ficha | Ambas |
+| **Todas las casas** | Filtra por una o varias casas | Solo **Propietarios** |
+| **Todos los destinos** | Filtra por destino | Solo **Propietarios** |
+| **Agente CX** | Filtra por el agente de CX asignado | Solo **Propietarios** |
+
+Con algún filtro activo aparece **Limpiar filtros**. Abajo eliges el tamaño de página (10 por defecto) y navegas entre páginas.
+
+<Tip>
+  Los filtros viven en la URL (`userType`, `page`, `pageSize`, `home`, `location`, `cx` y `userId`). Copia la URL para compartir una vista filtrada o la ficha de un usuario concreto.
+</Tip>
+
+<Note>
+  El buscador **Todos los usuarios** no depende de la pestaña. Carga la lista completa de usuarios (`/v2/admin/users/list`) y abre la ficha aunque el usuario sea de la otra pestaña.
+</Note>
+
+## Ficha de usuario
+
+La ficha (`UserDetailsSheet`) se abre como panel lateral (abajo en móvil) al añadir `userId` a la URL. Si el usuario no carga, verás **Error al cargar los datos del usuario** y la ficha se cierra.
+
+| Sección | Qué muestra |
+|---------|-------------|
+| Cabecera | Foto, nombre completo y email. Con `edit:users`, los botones **Editar** y **Eliminar usuario** |
+| **Informacion** | **Nombre**, **Direccion email**, **N. de telefono** e **ID**. Email, teléfono e ID tienen botón para copiar |
+| **Llaves de intercambio** | Llaves disponibles en su monedero. Ver [Sistema de llaves](/panel/keys) |
+| **Propiedades** | Sus casas (3 por página), con enlace a la ficha de la casa, sus fracciones y el estado del calendario |
+| **Historial de reservas** | Sus reservas (3 por página) con casa, estado, fechas y tipo |
+
+### Historial de reservas
+
+Pulsa una reserva para abrirla en `/bookings?bookingId=:id`. Pulsa **Ir a reservas** para ver todas sus reservas en `/bookings?user=:id`. Más detalle en [Reservas](/panel/bookings).
+
+### Bloquear el calendario de una casa
+
+Cada casa de **Propiedades** muestra **Calendario activo** o **Calendario inactivo**. Con `edit:users` tienes un interruptor para cambiarlo.
+
+1. Pulsa el interruptor de la casa.
+2. Confirma en **¿Desactivar calendario?** o **¿Activar calendario?** con **Confirmar**.
+
+Al desactivarlo, el aviso dice: «No podrá gestionar reservas mientras esté inactivo». El bloqueo es por propietario y casa.
+
+<Note>
+  Este interruptor no tiene nada que ver con el módulo [Calendarios](/panel/calendars). Allí se editan los slots y temporadas compartidos por varias casas. Aquí solo bloqueas a un propietario concreto en una casa concreta.
+</Note>
+
+## Alta de usuario
+
+Pulsa **Añadir usuario** en el listado para ir a `/users/create`. El paso a paso está en la guía [Dar de alta un propietario o visitante](/panel/users/create-user).
+
+El formulario (`UserForm`) tiene dos secciones:
+
+- **Información**: foto opcional (**Subir imagen (Opcional)**, PNG o JPG de hasta 10 MB), **Nombre del usuario**, **Apellido/s (opcional)**, **Dirección email** y **Nº teléfono**.
+- **Casas**: las casas del usuario con sus fracciones. Añádelas con **Añadir casa…** y ajusta las fracciones con **−** y **+**.
+
+Al guardar, el panel sube la foto (si hay) y crea el usuario. Después abre su ficha en `/users?userId=:id`.
+
+<Note>
+  Según vivla-api, el alta registra al usuario en la autenticación de la app (Firebase Auth) y le envía un email de verificación y otro de bienvenida con sus datos de acceso. El panel nunca muestra la contraseña. En entornos de depuración de vivla-api el email de bienvenida no se envía.
+</Note>
+
+<Warning>
+  vivla-api da de alta las fracciones en segundo plano. Si ese paso falla, el usuario se crea igual pero sin casas, y el panel no muestra error. Tras el alta, revisa **Propiedades** en su ficha.
+</Warning>
+
+## Edición
+
+Pulsa **Editar** en la ficha para ir a `/users/:id/edit`. Es el mismo formulario, con estas diferencias:
+
+- La **Dirección email** no se puede cambiar: el campo sale deshabilitado.
+- Al retirar una casa que ya tenía, no desaparece al momento. Queda marcada como **Se retira al guardar** y puedes pulsar **Deshacer**.
+- Una casa marcada para retirar muestra un aviso y el enlace **Ver sus reservas en** seguido del nombre de la casa (`/bookings?user=:id&home=:homeId`).
+
+Pulsa **Guardar cambios** para aplicar. Si todo va bien, vuelves a su ficha con el aviso **Usuario actualizado correctamente**.
+
+<Warning>
+  Retirar una casa no cancela sus reservas. El propio formulario avisa: «Si tiene reservas próximas, revísalas antes porque seguirán a su nombre».
+</Warning>
+
+<Note>
+  El endpoint de edición de vivla-api no toca las casas que no le mandas. Por eso `EditUser` envía las casas retiradas con `fractions: 0` en vez de omitirlas.
+</Note>
+
+## Borrado
+
+Pulsa **Eliminar usuario** en la ficha y confirma con **Eliminar** en **¿Eliminar usuario?**. El diálogo avisa: «Se le retirarán todos sus deals y se le revocará el acceso».
+
+En vivla-api el borrado es una baja: elimina al usuario de Firebase Auth y lo deshabilita en base de datos. Si todo va bien, verás **Usuario eliminado correctamente** y la ficha se cierra.
+
+## Endpoints de vivla-api
+
+| Método | Endpoint | Para qué |
+|--------|----------|----------|
+| `GET` | `/v2/admin/users` | Listado paginado. Parámetros: `page`, `limit`, `role` (`owner` / `visitor`), `homes`, `location`, `cxAgent` |
+| `GET` | `/v2/admin/users/list` | Lista completa (id, nombre, email) para el buscador **Todos los usuarios** |
+| `GET` | `/v2/admin/users/:id` | Detalle del usuario con sus casas, fracciones y bloqueo de calendario |
+| `POST` | `/v2/admin/users/create` | Alta. Cuerpo: `email`, `name`, `lastName`, `phone`, `photoUrl`, `fractions[]` (`property`, `fractions`) |
+| `PUT` | `/v2/admin/users/:id/update` | Edición. Mismo cuerpo sin `email` |
+| `DELETE` | `/v2/admin/users/:id/delete` | Baja del usuario |
+| `PUT` | `/v2/admin/users/owners/:id/lock-calendar/:homeId?locked=` | Bloquea o desbloquea el calendario de un propietario en una casa |
+
+La ficha también usa endpoints de otros módulos:
+
+| Método | Endpoint | Para qué |
+|--------|----------|----------|
+| `GET` | `/v2/admin/bookings/keys/wallets?user=:id` | Llaves disponibles del usuario |
+| `GET` | `/v2/admin/bookings` | **Historial de reservas**, filtrado por usuario |
+| `GET` | `/v1/upload-url` | URL firmada para subir la foto de perfil |
+
+## Código
+
+| Qué | Dónde |
+|-----|-------|
+| Página de listado | `src/pages/Users` |
+| Páginas de alta y edición | `src/pages/CreateUser`, `src/pages/EditUser` |
+| Requests y DTOs | `src/features/users/api/requests`, `src/features/users/api/dtos` |
+| Queries (TanStack Query) | `src/features/users/queries` (claves `owners-list`, `visitors-list`, `user-list`, `user-detail`) |
+| Filtros en la URL | `src/features/users/hooks/useUsersUrlFilters.ts` |
+| Tabla | `src/features/users/components/UsersTable` |
+| Interruptor de tipo | `src/features/users/components/UserTypeSwitch` |
+| Buscador | `src/features/users/components/UsersListSelector` |
+| Ficha | `src/features/users/components/UserDetailsSheet` |
+| Formulario y validación | `src/features/users/components/forms/UserForm` (`schema.ts`, `UserHomesFieldArray`) |
+| Modelo | `src/core/users/models/User.ts` |
+| Textos de UI | `src/assets/locales/es/users.json` |
+| Rutas y permisos | `src/router/index.tsx`, `src/config/paths.ts`, `src/features/auth/constants/index.ts` |

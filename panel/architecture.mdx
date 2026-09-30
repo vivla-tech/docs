@@ -1,0 +1,161 @@
+---
+title: "Arquitectura"
+description: "Cómo se organiza el código del Panel: features, páginas, modelos de dominio, router, autenticación y convenciones"
+---
+
+# Arquitectura
+
+El Panel es una SPA de React construida con Vite. El código se organiza **por feature**: cada dominio (llaves, propiedades, reservas, usuarios…) agrupa sus peticiones, contratos, queries y componentes. Las páginas solo componen features.
+
+Las convenciones completas están en el `CLAUDE.md` del repo. Esta página resume la estructura y el flujo para que sepas dónde tocar.
+
+## Estructura de carpetas
+
+```
+api/                    Funciones serverless de Vercel (reportes de feedback)
+src/
+  main.tsx              Providers globales + router
+  router/               Rutas, guards de sesión y de permisos
+  pages/{Page}/         Una carpeta por ruta; compone features
+  features/{feature}/   Lógica por dominio
+    api/requests/       Funciones HTTP contra vivla-api
+    api/dtos/           Schemas Zod + mappers a modelos de dominio
+    queries/            Hooks de TanStack Query (lectura y mutaciones)
+    components/         Componentes del dominio
+    hooks/ constants/ utils/ state/
+  core/{domain}/models/ Modelos de dominio, independientes de la API
+  components/           UI compartida (Table, Sheet, Dialog, DatePicker…)
+  components/layouts/   PortalRoot, Sidebar, Header
+  config/               env, paths, routes, theme, i18n, queryClient, sentry, analytics
+  lib/                  apiClient, toast, CSV, subida de documentos, utilidades
+  hooks/                Hooks transversales (móvil, debounce, versión)
+  assets/locales/es/    Traducciones, un namespace por feature
+```
+
+| Feature | Qué contiene | Wiki |
+|---------|--------------|------|
+| `auth` | Login, refresh de tokens, permisos, `PermissionGuard` | [Permisos](/panel/platform/permissions) |
+| `keys` | Métricas, movimientos, valoración y asignación de llaves | [Sistema de llaves](/panel/keys) |
+| `homes` | Listado, ficha y alta de propiedades, selector global de casa | [Propiedades](/panel/homes) |
+| `checkinDocs` | Documento de check-in de cada casa | [Documento de check-in](/panel/homes/checkin-doc) |
+| `bookings` | Reservas, estancias, huéspedes y Calendar Manager | [Reservas](/panel/bookings), [Calendarios](/panel/calendars) |
+| `users` | Propietarios y visitantes | [Usuarios](/panel/users) |
+| `feedback` | Botón y diálogo de reporte | [Feedback](/panel/platform/feedback) |
+| `shared` | DTOs compartidos (p. ej. provincias) | — |
+
+## Flujo de una petición
+
+Todas las llamadas a la API siguen la misma cadena. Tomando el alta de usuario como ejemplo:
+
+```
+pages/CreateUser
+  └─ useCreateUser()                   features/users/queries/createUser.ts
+       └─ createUser(payload)          features/users/api/requests/createUser.ts
+            └─ apiClient.post("/v2/admin/users/create", …)
+                 └─ UserSummaryApiDto.mapper.parseMap(response.data.data)
+                      └─ User                    core/users/models/User.ts
+```
+
+1. **Request**: una función por endpoint en `api/requests/`. Traduce del payload del panel al formato de la API.
+2. **DTO**: el schema Zod valida la respuesta y el mapper la convierte en un modelo de `core/`. Se crea con `Mapper.create(schema, mapping)` (`src/core/shared/Mapper.ts`). Si la API cambia su contrato, falla aquí y Sentry lo etiqueta como `contract_violation`.
+3. **Query**: el hook de TanStack Query envuelve la request. Las mutaciones invalidan las queries relacionadas y muestran un toast en español. Muchas registran también un evento de analytics.
+4. **Página**: usa el hook y pinta skeletons mientras carga.
+
+### El cliente HTTP
+
+`src/lib/apiClient.ts` es una instancia de Axios con `baseURL` = `VITE_API_BASE_URL` y timeout de 30 s.
+
+- `vivla-api` responde con un sobre `{ code, msg, data }`. `code: 20` es éxito. Cualquier otro código se convierte en un `ApiError`.
+- Si la API devuelve `code: 41` (token inválido) o un HTTP `401`, el cliente fuerza un refresh del token y reintenta la petición **una sola vez**.
+- Los códigos esperados (`41`, `43`, `44`, `49`) no se envían a Sentry. El resto sí. Ver [Observabilidad](/panel/platform/observability).
+
+## Router y guards
+
+El router está en `src/router/index.tsx` (`createBrowserRouter` envuelto por Sentry). Todas las páginas se cargan en lazy con `lazyWithReload`. Si un chunk falla (típico justo después de un despliegue), recarga la página una vez.
+
+```
+/login, /forgot-password         UnprotectedRoute
+/  (PortalRoot: Sidebar + Header) ProtectedRoute → si no hay sesión, /login?redirect=…
+  ├─ index            PermissionGuard(read:exchanges)
+  ├─ homes…           PermissionGuard(read:homes / edit:homes)
+  ├─ bookings…        PermissionGuard(read:bookings / edit:bookings)
+  ├─ users…           PermissionGuard(read:users / edit:users)
+  ├─ calendars…       PermissionGuard(read:calendar-manager)
+  └─ unauthorized     Sin permisos para ninguna sección
+*                                 Redirige a /login
+```
+
+- Si no tienes el permiso de una ruta, `PermissionBasedRedirect` te lleva a la primera sección del menú a la que sí tienes acceso. Si no tienes ninguna, acabas en `/unauthorized`.
+- Las rutas se construyen siempre con `src/config/paths.ts` (`paths.bookings.getHref({ user })`), nunca con strings sueltos.
+- `src/config/routes.ts` (`navigableRoutes`) define las entradas del menú lateral y el permiso de cada una. Las etiquetas salen de `locales/es/sidebar.json`.
+
+### Estado en la URL
+
+Los filtros y el modo de vista viven en query params, así que un enlace a una pantalla filtrada se puede compartir. Los detalles se abren en un panel lateral también controlado por la URL (`?bookingId=`, `?userId=`, `?homeId=`).
+
+Al cambiar de sección desde el menú, `src/lib/sectionSearchMemory.ts` recuerda los filtros de cada sección y los restaura al volver. Los parámetros de detalle son efímeros y no se recuerdan.
+
+## Providers globales
+
+`src/main.tsx` monta, en este orden:
+
+| Provider | Para qué |
+|----------|----------|
+| `Sentry.ErrorBoundary` | Pantalla de error si algo revienta en render |
+| `ThemeProvider` | Tema de styled-components (`src/config/theme.ts`) |
+| `AuthContextProvider` | Sesión, tokens y permisos (`useAuth`) |
+| `QueryClientProvider` | Caché de TanStack Query (`src/config/queryClient.ts`) |
+| `HomeCollectionContextProvider` | Casa seleccionada en el selector del menú lateral (`useHomeCollection`) |
+| `Toaster` | Toasts de `sonner` |
+
+## Autenticación
+
+El login no usa el SDK de Auth0. El panel llama directamente a los endpoints de Auth0:
+
+| Acción | Endpoint de Auth0 | Código |
+|--------|-------------------|--------|
+| Login | `POST /oauth/token` (`grant_type: password`) | `features/auth/api/request/loginUser.ts` |
+| Refresh | `POST /oauth/token` (`grant_type: refresh_token`) | `features/auth/api/request/refreshToken.ts` |
+| Olvidé mi contraseña | `POST /dbconnections/change_password` | `features/auth/api/request/forgotPassword.ts` |
+
+- **Dominios permitidos**: el login y la recuperación de contraseña solo aceptan correos de los dominios de `allowedEmailDomains` (`features/auth/constants`).
+- **Almacenamiento**: el access token y el refresh token se guardan en `localStorage` con Zustand `persist`. Las pestañas se sincronizan entre sí con el evento `storage`.
+- **Refresh proactivo**: se refresca 2 minutos antes de caducar, o si el token tiene más de 10 minutos. También se comprueba cada minuto y al volver el foco a la pestaña. Un lock de `navigator.locks` evita que dos pestañas refresquen a la vez.
+- **Sesión caducada**: si Auth0 rechaza el refresh con un 4xx, se borra la sesión y aparece el toast **Tu sesión ha caducado. Vuelve a iniciar sesión.**
+- **Permisos**: salen del claim `permissions` del access token. Ver [Permisos](/panel/platform/permissions).
+
+## Convenciones de código
+
+Resumen de las reglas del `CLAUDE.md`:
+
+- **TypeScript estricto**: sin `any`. `type` antes que `interface`, salvo para props (`interface ComponentNameProps`).
+- **Estilos**: styled-components en un `Styles.ts` junto al componente. Todo en `rem`. Sufijo `Wrapper`, nunca `Container`. Props transitorias con `$` (`$isOpen`). Colores desde el tema.
+- **Imports**: primero los estilos con imports nombrados desde `./Styles` (nunca `import * as S`). Después librerías, tipos, assets e imports locales.
+- **React Query**: query keys en kebab-case (`["booking-details", id]`) y `throwOnError: false`. Las mutaciones invalidan lo relacionado y muestran un toast en español.
+- **Formularios**: React Hook Form + Zod, con el schema en `schema.ts` y mensajes en español.
+- **Textos**: nada hardcodeado. Todo pasa por i18next, con un namespace por feature en `src/assets/locales/es/`.
+- **Carga**: siempre skeletons (`react-loading-skeleton`) con la misma forma que el componente final.
+
+<Tip>
+  El repo trae skills de Claude Code para generar la estructura base: `/create-feature`, `/create-component`, `/create-api-request`, `/create-query`, `/create-form` y `/create-table`. Úsalas para que el código nuevo nazca con las convenciones.
+</Tip>
+
+## Añadir un módulo nuevo
+
+<Steps>
+  <Step title="Crea la feature">
+    Genera `src/features/{feature}/` con `/create-feature`. Añade requests, DTOs y queries con sus skills.
+  </Step>
+  <Step title="Define el permiso">
+    Añade las constantes `read:` y `edit:` en `PERMISSIONS` (`src/features/auth/constants/index.ts`). El permiso tiene que existir también en la API de Auth0.
+  </Step>
+  <Step title="Crea la página y la ruta">
+    Crea `src/pages/{Page}/`, añade su href en `src/config/paths.ts` y registra la ruta en `src/router/index.tsx` dentro de un `PermissionGuard`.
+  </Step>
+  <Step title="Añádela al menú">
+    Añade la entrada en `navigableRoutes` (`src/config/routes.ts`) y su etiqueta en `locales/es/sidebar.json`.
+  </Step>
+  <Step title="Documenta el módulo">
+    Crea su página en `docs/wiki/`, añádela a `docs/wiki/docs.json` y a la tabla de módulos del `CLAUDE.md`.
+  </Step>
+</Steps>

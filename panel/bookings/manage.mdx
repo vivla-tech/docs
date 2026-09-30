@@ -1,0 +1,233 @@
+---
+title: "Gestión de una reserva"
+description: "Qué puedes cambiar desde la hoja de detalle: tipo, notas, cancelación, estancias, fechas, viajeros y huéspedes"
+---
+
+# Gestión de una reserva
+
+Una reserva ya creada se gestiona desde su hoja de detalle, en `/bookings?bookingId=:id`. Ábrela haciendo clic en una fila de la tabla o en una reserva del calendario. La estructura de la hoja está en [Reservas](/panel/bookings#hoja-de-detalle).
+
+Para editar necesitas `edit:bookings`. Sin él, la hoja es de solo lectura. Una reserva cancelada también es de solo lectura, salvo los campos que se indican abajo.
+
+<Note>
+  El panel desactiva las acciones que no tocan, pero la API tiene la última palabra. Las reglas están en [El ciclo de reserva](/operativa/reservas), [Alquiler](/operativa/alquiler), [Llaves e intercambio](/operativa/intercambio-keys) y [Reglas de reserva](/backend/reglas-de-reserva).
+</Note>
+
+## Qué puedes hacer y cuándo
+
+| Acción | El panel la permite si… |
+|--------|------------------------|
+| Cambiar el tipo | La reserva está activa y no es un alquiler aprobado, un intercambio aprobado ni un Thirdhome intercambiado |
+| Cancelar | La reserva no está pasada ni cancelada, y no es un alquiler aprobado, un intercambio aprobado ni un Thirdhome intercambiado |
+| Añadir estancia | La reserva está activa, no tiene estancia, es de alquiler, intercambio o Thirdhome, y está libre |
+| Editar fechas, viajeros y servicios de la estancia | Hay estancia y la reserva no está cancelada |
+| Eliminar estancia | La reserva está activa, tiene estancia y no es de disfrute |
+| Añadir huésped | La reserva está activa y tiene estancia |
+| Editar o quitar huésped | Hay estancia y la reserva no está cancelada. Nunca sobre el huésped principal |
+
+Estas condiciones salen de `src/core/bookings/rules/booking.rules.ts` y de cada componente de la hoja.
+
+<Warning>
+  Las **Notas de la reserva**, las **Notas de la estancia**, los flags de **Comunicación** y **Ha disfrutado de su estancia** solo dependen del permiso. El panel deja editarlos incluso en una reserva cancelada.
+</Warning>
+
+## Editar la reserva
+
+### Tipo de reserva
+
+El selector **Tipo de reserva** del resumen muestra los cuatro tipos. Al cambiarlo, la hoja se actualiza al momento y sale **Se ha actualizado el tipo de reserva**. Si la API falla, vuelve al tipo anterior.
+
+Cuando el cambio está bloqueado, un aviso explica por qué. Por ejemplo: "Esta reserva está alquilada. Elimina la estancia para poder cambiar el tipo de reserva."
+
+<Tip>
+  Para cambiar el tipo de una reserva ya alquilada o intercambiada, primero usa **Eliminar estancia**. Después cambia el tipo.
+</Tip>
+
+### Notas de la reserva
+
+Escribe en **Notas de la reserva**. Se guarda al salir del campo o al pulsar Enter. Usa Shift+Enter para un salto de línea.
+
+### Avisos del resumen
+
+El resumen puede mostrar dos avisos. Son informativos y no bloquean nada:
+
+- "Quedan menos de 30 días para la llegada. No se recomienda modificar las fechas de la estancia."
+- En alquileres sin estancia: "Quedan menos de 30 días para la llegada. Esta estancia no se ha alquilado. Se recomienda avisar al propietario."
+
+## Cancelar una reserva
+
+Pulsa **Cancelar reserva**, al final del resumen. Si el botón está desactivado, pasa el ratón por el icono de ayuda para ver el motivo:
+
+- "Esta reserva ya está cancelada."
+- "No se puede cancelar una reserva que ya ha finalizado."
+- Alquiler confirmado, intercambio reclamado o intercambio en Thirdhome: el aviso te pide eliminar primero la estancia.
+
+El diálogo **Cancelar reserva** pide confirmación y avisa de que es irreversible. En un intercambio con llaves ya abonadas, el diálogo avisa además del descuento de llaves al propietario. Al confirmar sale **Reserva cancelada correctamente**.
+
+## Estancias
+
+### Añadir una estancia
+
+Las reservas de alquiler, intercambio y Thirdhome pueden estar publicadas sin estancia. La estancia aparece cuando alguien ocupa la reserva. Si tienes que registrarla a mano, tienes dos accesos que abren el mismo diálogo:
+
+- En el resumen, bajo **Tipo de reserva**: **Marcar como alquilada**, **Marcar como intercambiada** o **Marcar como intercambiada en Thirdhome**.
+- En el bloque **Todavía no hay estancia**: el botón **Añadir estancia**.
+
+Solo aparecen si la reserva está libre. Las reservas de disfrute no tienen esta acción.
+
+<AccordionGroup>
+  <Accordion title="Alquiler: Alquilar reserva (3 pasos)">
+  1. **Huésped**. Pulsa **Seleccionar huésped** y elige un **Usuario de Vivla** o un **Huésped externo**. Necesitas al menos uno, y uno marcado como **Principal** (**Marcar principal**). En externos, nombre y email son obligatorios y el teléfono opcional.
+  2. **Estado** y **Precio del alquiler**. **Aprobado** deja el alquiler confirmado. **Pendiente** lo deja a la espera de aprobación. El precio es obligatorio, numérico y mayor que 0.
+  3. Detalles de la estancia (ver abajo).
+
+  Al confirmar sale **Se ha alquilado la reserva**.
+  </Accordion>
+  <Accordion title="Intercambio: Añadir estancia de intercambio (2 pasos)">
+  1. **Huésped principal**. Pulsa **Seleccionar propietario**. Solo puedes elegir usuarios de Vivla. Verás **Coste en llaves** y **Saldo del propietario** con **Suficiente** o **Insuficiente**. Con saldo insuficiente no puedes avanzar.
+  2. Detalles de la estancia (ver abajo).
+
+  Al confirmar sale **Se ha añadido la estancia de intercambio**.
+  </Accordion>
+  <Accordion title="Thirdhome: Añadir estancia de Thirdhome (2 pasos)">
+  1. **Asistente principal**. Pulsa **Añadir asistente** y rellena el diálogo **Asistente de Thirdhome**: nombre y email obligatorios, teléfono opcional.
+  2. Detalles de la estancia (ver abajo).
+
+  Al confirmar sale **Se ha añadido la estancia de Thirdhome**.
+  </Accordion>
+</AccordionGroup>
+
+El paso de detalles es común a los tres:
+
+- **Fecha y hora de entrada** y **Fecha y hora de salida**. Por defecto, el inicio y el fin de la reserva a las 16:00 y 10:00. Si pones una fecha, tienes que poner la otra. La salida debe ser posterior a la entrada.
+- **Ocupación**: **Adultos**, **Niños** y **Mascotas**. Números enteros mayores o iguales a 0.
+- **Notas de la estancia**.
+- **Servicios**: **Limpieza**, **Cuna**, **Alquiler de equipo** y **Reservas de servicios**, más un campo de **Peticiones**.
+
+Los tres diálogos envían `POST /v2/admin/bookings/:id/add-stay` con `guests` (usuarios como `userId`, externos como `name`, `email` y `phone`, con rol `main` o `guest`), las fechas, `notes` e `info`. El alquiler añade `price` y `pendingApproval`.
+
+### Oferta de alquiler
+
+En un alquiler con estancia, **Detalles de la estancia** empieza con la tarjeta de la oferta:
+
+- Pendiente: **Oferta de alquiler** · **Pendiente de respuesta**, con **Aprobar** y **Rechazar**.
+- Aprobada: **Oferta aprobada**, solo lectura.
+
+**Aprobar** quita la marca de pendiente de la estancia. **Rechazar** elimina la estancia.
+
+<Warning>
+  **Rechazar** no pide confirmación. Borra la estancia al momento y la reserva vuelve a quedar libre.
+</Warning>
+
+### Coste del intercambio
+
+En un intercambio con estancia ves **Coste del intercambio** en llaves y **Reclamada por**. Es solo lectura.
+
+### Fechas de la estancia
+
+Pulsa **Editar** en **Fechas de la estancia**, o haz clic en el campo. Se abre **Editar fechas de estancia**:
+
+- **Fecha de entrada:** y **Fecha de salida:**, cada una con su hora.
+- Si pones una fecha, la hora es obligatoria.
+- La salida debe ser posterior a la entrada.
+- Si te sales del rango de la reserva, un aviso te lo dice, pero puedes guardar.
+
+Pulsa **Guardar cambios**. Sale **Fechas actualizadas correctamente**.
+
+<Note>
+  Las horas del diálogo se interpretan en la zona horaria de la casa (`Europe/Madrid`, constante `HOUSE_TIMEZONE`), no en la de tu navegador.
+</Note>
+
+### Viajeros, notas y servicios
+
+Estos campos se guardan solos:
+
+- **Viajeros**: **Adultos** (a partir de 13 años), **Niños** (de 0 a 12 años) y **Mascotas**. Cada clic en los botones guarda.
+- **Notas de la estancia**: se guarda al salir del campo o con Enter.
+- **Planificación e itinerario del viaje**: **Servicios extra** (**Limpieza adicional**, **Cuna bebe**, **Alquileres (barco, coche...)**, **Reserva (restaurantes...)**) y **Otros servicios**.
+- **Ha disfrutado de su estancia**: **SI** / **NO**.
+- **Comunicación**: los cinco hitos con su **SI** / **NO**. Son los mismos flags que la tabla.
+
+**Customer Experience:** muestra el CX de la casa y no se edita aquí. Se cambia en la [ficha de la casa](/panel/homes/details).
+
+### Eliminar la estancia
+
+Pulsa **Eliminar estancia**, al final de **Detalles de la estancia**. El diálogo avisa: "¿Seguro que quieres eliminar esta estancia? La reserva volverá a quedar libre." Al confirmar sale **Estancia eliminada correctamente**. No existe en reservas de disfrute.
+
+## Huéspedes
+
+La lista **Asistentes** de **Detalles de la estancia** pone primero al huésped principal, con la etiqueta **Principal**. Cada huésped tiene botones para copiar email y teléfono.
+
+### Añadir un huésped
+
+Pulsa **Añadir**. Se abre **Añadir asistente** con dos pestañas:
+
+- **Usuario Vivla**: busca por nombre o email. Los que ya están en la estancia no se pueden volver a elegir.
+- **Externo**: **Nombre** y **Email**, los dos obligatorios. La persona se registra con su email.
+
+Todos se añaden con rol `guest`. Al terminar sale **Asistente añadido correctamente**.
+
+<Tip>
+  El alta de un externo no pide teléfono. Si lo necesitas, edita el huésped justo después.
+</Tip>
+
+### Editar un huésped
+
+- **Externo**: el lápiz abre **Editar asistente** con **Nombre**, **Email** y **Teléfono**. Nombre y un email válido son obligatorios.
+- **Usuario de Vivla**: el lápiz te lleva a editar el usuario (`/users/:id/edit`). Necesitas `edit:users`. Ver [Usuarios](/panel/users).
+
+El huésped principal no se edita desde aquí.
+
+### Quitar un huésped
+
+Pulsa la X y confirma en **Eliminar asistente**. El huésped principal no se puede quitar.
+
+<Note>
+  Editar y quitar usan `guestId`: el ID del huésped dentro de la estancia, no el ID del usuario.
+</Note>
+
+## Endpoints de vivla-api
+
+| Método | Endpoint | Para qué |
+|--------|----------|----------|
+| PUT | `/v2/admin/bookings/:id/edit` | Cambiar el tipo (`type`) o las notas de la reserva (`notes`) |
+| DELETE | `/v2/admin/bookings/:id/cancel` | Cancelar la reserva |
+| POST | `/v2/admin/bookings/:id/add-stay` | Añadir estancia de alquiler, intercambio o Thirdhome |
+| PUT | `/v2/admin/bookings/stay/:stayId/edit` | Fechas, viajeros, notas, servicios (`info`), flags y aprobar la oferta (`pendingApproval: false`) |
+| DELETE | `/v2/admin/bookings/stay/:stayId/remove` | Eliminar la estancia o rechazar la oferta de alquiler |
+| POST | `/v2/admin/bookings/stay/:stayId/add-guest` | Añadir un huésped |
+| PUT | `/v2/admin/bookings/guest/:guestId/edit` | Editar un huésped externo |
+| DELETE | `/v2/admin/bookings/guest/:guestId/remove` | Quitar un huésped |
+| GET | `/v2/admin/bookings/keys/wallets` | Saldo de llaves en el diálogo de intercambio (`user=:id`) |
+| GET | `/v2/admin/users/list` | Buscador de usuarios en los diálogos |
+
+Tras cada cambio, el panel invalida las queries `["booking", id]` y `["booking-list"]`. La hoja y la tabla se refrescan solas. Si la API devuelve error, sale un aviso con su mensaje.
+
+La referencia de la API está en [Endpoints de reservas](/backend/bookings-endpoints).
+
+## Código
+
+Rutas relativas a `src/features/bookings/components/BookingsDetailsSheet/content/`.
+
+| Qué | Dónde |
+|-----|-------|
+| Resumen | `BookingOverview/` |
+| Selector de tipo y avisos | `BookingOverview/components/ReservationType/` |
+| Diálogo de alquiler | `BookingOverview/components/ReservationType/actions/RentalTypeActions/` |
+| Diálogo de intercambio | `BookingOverview/components/ReservationType/actions/ExchangeTypeActions/` |
+| Diálogo de Thirdhome | `BookingOverview/components/ReservationType/actions/ThirdHomeTypeActions/` |
+| Piezas comunes de los diálogos | `BookingOverview/components/ReservationType/actions/shared/` (`guestSelection`, `stayInfo`) |
+| Cancelación | `BookingOverview/components/CancelBookingAction/`, `CancelBookingConfirmationDialog/` |
+| Editar fechas | `BookingOverview/components/UpdateBookDatesDialog/` |
+| Estancia y huéspedes | `StayDetails/` |
+| Sin estancia | `EmptyStay/` |
+| Comunicación | `Communications/` |
+| Plan de viaje | `TravelPlan/` |
+
+Fuera de la hoja:
+
+| Qué | Dónde |
+|-----|-------|
+| Mutations | `src/features/bookings/queries/bookingDetails/` |
+| Requests | `src/features/bookings/api/requests/bookingDetails/` |
+| Reglas de la UI | `src/core/bookings/rules/booking.rules.ts` (`canCancelBooking`, `getCancelWarning`, `canMutateBookingType`, `hasStay`) |

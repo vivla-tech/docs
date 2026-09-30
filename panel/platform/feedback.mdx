@@ -1,0 +1,245 @@
+---
+title: "Reportes"
+description: "Cómo el equipo de CX reporta errores e ideas desde el panel y cómo llegan a Slack con capturas y detalles técnicos"
+---
+
+# Reportes
+
+El panel permite reportar un error o proponer una idea sin salir de la pantalla en la que estás. El reporte llega al equipo de producto en Slack con el contexto de la pantalla ya adjunto: sección, persona que lo envía, último error de red y enlace a la grabación de la sesión en PostHog.
+
+Hay dos piezas. En el navegador vive el diálogo de reporte (`src/features/feedback/`). En Vercel vive una función serverless (`api/reports.ts`) que autentica al usuario, valida el reporte y lo publica en Slack como bot.
+
+## Cómo se abre el diálogo
+
+Hay dos entradas. Cada una queda registrada en el campo `source` del reporte.
+
+| Entrada | `source` | Dónde |
+|---|---|---|
+| Botón **Reportar** | `header` | En la cabecera, junto al menú de usuario. Siempre visible dentro del área autenticada. |
+| Botón **Reportar este error** | `error_toast` | En los toasts de error. El mensaje del toast se adjunta como error del reporte. |
+
+<Note>
+El botón del toast solo aparece si el diálogo está montado. `ReportDialog` vive en `PortalRoot` y marca `isAvailable` en su store al montarse. Por eso no hay botón de reporte en `/login` ni en `/forgot-password`. Los toasts reportables duran 8 segundos en vez del valor por defecto.
+</Note>
+
+Los errores del propio flujo de reporte usan `toast.error(mensaje, { reportable: false })`. Así no se ofrece reportar un fallo al enviar un reporte.
+
+## Qué rellena el usuario
+
+| Campo | Opciones | Por defecto | Validación en el cliente |
+|---|---|---|---|
+| Tipo | **Algo no funciona** (`bug`) · **Una idea** (`improvement`) | `bug` | — |
+| Descripción | Texto libre. La etiqueta cambia según el tipo. | vacía | Mínimo 10 caracteres |
+| Urgencia | **Me bloquea** (`blocking`) · **Molesta, pero puedo seguir** (`annoying`) · **Sin prisa** (`no_rush`) | `annoying` | — |
+| Capturas | Hasta 3 imágenes. Opcional. | ninguna | Ver [Capturas](#capturas) |
+
+El formulario usa React Hook Form con el schema de `components/ReportDialog/schema.ts`. Cada vez que se abre el diálogo se resetea el formulario y se vacían las capturas.
+
+## Qué contexto se adjunta
+
+El bloque **Se adjunta automáticamente** del diálogo enseña al usuario lo que se va a enviar. `useReportContext` construye el objeto `context` en el momento del envío:
+
+| Campo | Origen |
+|---|---|
+| `url` | `window.location.href` |
+| `section` | Etiqueta del menú lateral de la ruta actual (`navigableRoutes`), o `null` si la ruta no está en el menú |
+| `reporterEmail` | Email decodificado del token de la sesión |
+| `errorMessage` | Mensaje del toast, solo si se abrió desde **Reportar este error** |
+| `lastFailedRequest` | Última petición fallida de `apiClient` (ver [Observabilidad](/panel/platform/observability)) |
+| `sessionReplayUrl` | Enlace a la grabación de PostHog, o `null` si PostHog no está activo |
+
+<Note>
+El servidor no usa `reporterEmail` para identificar a quien reporta. La persona sale siempre del token verificado. El campo viaja en el payload, pero no aparece en el mensaje de Slack.
+</Note>
+
+## Capturas
+
+Puedes adjuntar hasta 3 capturas. Hay tres formas: arrastrarlas al recuadro **Añadir**, hacer clic en él o pegarlas con ⌘V / Ctrl+V en cualquier punto del diálogo.
+
+Antes de enviarlas, `compressImage` las reescala en el navegador:
+
+- El lado largo queda en 1600 px como máximo.
+- Se reexportan como JPEG con calidad 0,8.
+- El fondo transparente pasa a blanco.
+- El archivo se renombra a `.jpg`.
+
+Los límites se comprueban en los dos lados:
+
+| Límite | Cliente | Servidor |
+|---|---|---|
+| Número de capturas | 3 (`REPORT_IMAGE_MAX_FILES`) | 3 (`MAX_IMAGES`) |
+| Formatos | JPG, PNG, WebP | `image/jpeg`, `image/png`, `image/webp` |
+| Tamaño por captura | 15 MB antes de comprimir | 1,5 MB ya comprimida |
+| Tamaño total de la petición | — | 4 MB, según `content-length` |
+
+<Warning>
+Si el navegador no puede comprimir la imagen (sin contexto 2D o `toBlob` falla), `compressImage` devuelve el archivo original. Una captura original de más de 1,5 MB hace que el servidor rechace el reporte entero con `invalid_images`. El usuario solo ve el toast genérico de error.
+</Warning>
+
+## Flujo de envío
+
+```
+Navegador                               Vercel · api/reports.ts                 Slack
+─────────                               ───────────────────────                 ─────
+ReportDialog
+  │ buildContext() + compressImage()
+  ▼
+POST /api/reports ────────────────────▶ authenticate()      ── 401
+  multipart: report (JSON) + images     content-length      ── 413
+  Authorization: Bearer <token>         reportSchema        ── 400
+                                        imágenes            ── 400
+                                        deliverReport()
+                                          users.lookupByEmail ─────────────▶ mención
+                                          chat.postMessage ────────────────▶ mensaje principal
+                                          chat.postMessage (hilo) ─────────▶ Detalles técnicos
+                                          files.* (hilo) ──────────────────▶ capturas
+                                        202 / 502
+```
+
+El cliente envía un `multipart/form-data` con dos campos. `report` lleva el reporte serializado en JSON. `images` se repite una vez por captura. La petición usa `Axios` directamente contra `/api/reports`, no `apiClient`, y adjunta el token de la sesión en `Authorization`.
+
+Si la respuesta es correcta, se muestra el toast de éxito, se cierra el diálogo y se registra el evento `feedback_report_submitted` en PostHog.
+
+## La función `api/reports.ts`
+
+Es una función de Vercel que exporta un handler `POST(request)` con la API estándar de `Request` y `Response`. Hace las comprobaciones en este orden:
+
+<Steps>
+  <Step title="Autenticación">
+    `authenticate()` (`api/_lib/auth.ts`) lee el `Bearer` y verifica el JWT de Auth0 con `jose`. Usa el JWKS del dominio de Auth0 y comprueba `issuer` y `audience`. Del token saca el `sub` y el email (claim `email` estándar o el claim con namespace de VIVLA). Cualquier sesión válida del panel puede reportar: no hay restricción por permiso ni por dominio de email.
+  </Step>
+  <Step title="Tamaño">
+    Rechaza la petición si `content-length` supera 4 MB.
+  </Step>
+  <Step title="Schema">
+    Valida el campo `report` con el schema Zod de `api/_lib/reportSchema.ts`. Reutiliza los enums de `src/core/feedback/models/Report.ts`, así que cliente y servidor comparten los valores válidos de tipo, urgencia y origen. La descripción admite entre 1 y 5000 caracteres. Cada campo de contexto tiene su propio tope de longitud.
+  </Step>
+  <Step title="Imágenes">
+    Comprueba que no haya más de 3 y que todas tengan un tipo permitido y pesen 1,5 MB o menos.
+  </Step>
+  <Step title="Entrega">
+    `deliverReport()` (`api/_lib/delivery.ts`) publica en Slack.
+  </Step>
+</Steps>
+
+### Respuestas
+
+| Estado | Cuerpo | Cuándo |
+|---|---|---|
+| `202` | `{ delivered: true }` | El mensaje principal se publicó |
+| `400` | `{ error: "invalid_report" }` | El formulario no se puede leer o `report` no pasa el schema |
+| `400` | `{ error: "invalid_images" }` | Más de 3 imágenes, o alguna con tipo o tamaño no válido |
+| `401` | `{ error: "unauthorized" }` | Sin token, token inválido o sin `sub`/email |
+| `413` | `{ error: "payload_too_large" }` | `content-length` por encima de 4 MB |
+| `502` | `{ error: "delivery_failed" }` | Faltan las variables de Slack o falló la publicación del mensaje principal |
+
+<Warning>
+Si faltan `VITE_AUTH0_DOMAIN` o `VITE_AUTH0_AUDIENCE` en el entorno de la función, `getAuthConfig()` lanza una excepción fuera del `try`. La función no devuelve un JSON controlado: la respuesta es un error del runtime de Vercel.
+</Warning>
+
+## Entrega a Slack
+
+El reporte se publica en el canal de reportes configurado, como el bot **Panel VIVLA**. `api/_lib/slackApi.ts` llama a la Web API de Slack con `fetch` y un timeout de 5 segundos por llamada. La subida de cada archivo tiene 15 segundos.
+
+<Steps>
+  <Step title="Buscar a quien reporta">
+    `users.lookupByEmail` busca el email del token en Slack. Si lo encuentra, el mensaje menciona a la persona. Si no, se escribe el email en texto plano.
+  </Step>
+  <Step title="Mensaje principal">
+    `chat.postMessage` publica el reporte con el formato de las peticiones de producto (`buildProductRequestMessage`). Los enlaces no se despliegan (`unfurl_links` y `unfurl_media` a `false`).
+  </Step>
+  <Step title="Hilo de detalles técnicos">
+    Si hay grabación o petición fallida, `buildTechnicalDetails` publica una respuesta en el hilo con el título **Detalles técnicos**.
+  </Step>
+  <Step title="Capturas en el hilo">
+    Cada imagen se sube con `files.getUploadURLExternal`. Después, `files.completeUploadExternal` las comparte en el mismo hilo, tituladas **Captura 1**, **Captura 2** y **Captura 3**.
+  </Step>
+</Steps>
+
+Solo el mensaje principal es obligatorio. Si fallan el hilo de detalles o la subida de capturas, el error se registra en los logs de la función y la respuesta sigue siendo `202`.
+
+### Formato del mensaje principal
+
+El mensaje empieza con la cabecera "Petición enviada desde el panel" y sigue con estos campos:
+
+| Campo | Contenido |
+|---|---|
+| **Persona** | Mención de Slack o email de quien reporta |
+| **Producto** | Siempre "Panel" |
+| **Tipo de petición** | Según el tipo (tabla de abajo) |
+| **Descripción** | Texto del usuario más un bloque _Contexto del panel_ con la pantalla (enlazada a la URL) y, si lo hay, el error del toast |
+| **Fecha límite** | Siempre vacío |
+| **Grado de bloqueo** | Según la urgencia (tabla de abajo) |
+
+Si `section` es `null`, el enlace de la pantalla muestra la ruta de la URL.
+
+| En el panel | En Slack |
+|---|---|
+| **Algo no funciona** | `:triangular_flag_on_post:` Error |
+| **Una idea** | `:bulb:` Idea |
+| **Me bloquea** | `:exploding_head:` Me muero, debería estar sí o sí |
+| **Molesta, pero puedo seguir** | `:face_holding_back_tears:` Me encantaría, pero soy paciente |
+| **Sin prisa** | `:tired_face:` Puedo vivir sin ello |
+
+### Hilo de detalles técnicos
+
+Solo se publica si hay al menos una de estas líneas:
+
+- **Ver grabación en PostHog**: enlace a la grabación, posicionado 30 segundos antes del envío.
+- **Última petición fallida**: método y URL, estado HTTP (o "sin respuesta"), código de la API si lo hay, mensaje y hora del fallo en horario de Madrid.
+
+El texto del usuario y los datos técnicos se escapan (`&`, `<`, `>`) antes de publicarse. Así no rompen el formato de Slack.
+
+## Configuración
+
+Variables del entorno de la función en Vercel:
+
+| Variable | Uso |
+|---|---|
+| `VITE_AUTH0_DOMAIN` | Dominio de Auth0. Da el JWKS y el `issuer` esperado. |
+| `VITE_AUTH0_AUDIENCE` | `audience` esperada en el token |
+| `SLACK_BOT_TOKEN` | Token del bot que publica los reportes |
+| `SLACK_CHANNEL_ID` | Canal de reportes configurado |
+
+<Note>
+`SLACK_BOT_TOKEN` y `SLACK_CHANNEL_ID` no están en `env.template`. Solo existen en el entorno de Vercel. Si faltan, la función responde `502` y deja el aviso en sus logs.
+</Note>
+
+<Tip>
+`yarn dev` solo levanta Vite, que no ejecuta las funciones de `api/`. En local, el envío de un reporte falla con el toast de error. Para probar el flujo completo, usa un deploy de Vercel.
+</Tip>
+
+## Analítica
+
+| Evento | Cuándo | Propiedades |
+|---|---|---|
+| `feedback_report_opened` | Al abrir el diálogo | `source` |
+| `feedback_report_submitted` | Al enviar con éxito | `source`, `report_type`, `urgency`, `images_count` |
+
+## Evolución
+
+| Fecha | Cambio |
+|---|---|
+| 25-sep-2026 | Diálogo de reporte con el contexto de la pantalla |
+| 28-sep-2026 | Primera versión de `api/reports.ts`, que enviaba el reporte a un workflow de Slack por webhook. Se añade el token de sesión y se abre el envío a cualquier sesión del panel. Se retira el tipo "pregunta" hasta que las peticiones de producto lo soporten. |
+| 29-sep-2026 | La entrega pasa a hacerse como bot, con mención a quien reporta. Se añaden hasta 3 capturas, subidas al hilo. Se quitan del mensaje el navegador y el punto de entrada. Los detalles técnicos se mueven al hilo, con enlaces etiquetados. |
+
+## Código
+
+| Pieza | Ruta |
+|---|---|
+| Modelo compartido (tipos y enums) | `src/core/feedback/models/Report.ts` |
+| Botón de la cabecera | `src/features/feedback/components/ReportButton/` |
+| Diálogo | `src/features/feedback/components/ReportDialog/` |
+| Selector de capturas | `src/features/feedback/components/ReportImages/` |
+| Store del diálogo (Zustand) | `src/features/feedback/state/reportDialogStore.ts` |
+| Contexto adjunto | `src/features/feedback/hooks/useReportContext.ts` |
+| Compresión de imágenes | `src/features/feedback/utils/compressImage.ts` |
+| Petición y mutación | `src/features/feedback/api/requests/submitReport.ts`, `src/features/feedback/queries/useSubmitReport.ts` |
+| Toast con botón de reporte | `src/lib/toast.tsx`, `src/components/ErrorToast/` |
+| Límites del selector de capturas | `src/lib/dropzone.ts` |
+| Textos | `src/assets/locales/es/feedback.json` |
+| Función serverless | `api/reports.ts` |
+| Autenticación, schema, entrega | `api/_lib/auth.ts`, `api/_lib/reportSchema.ts`, `api/_lib/delivery.ts` |
+| Formato del mensaje y cliente de Slack | `api/_lib/productRequestMessage.ts`, `api/_lib/slackApi.ts` |
+| Typecheck de la función | `tsconfig.api.json` (incluye `api/` y `src/core/feedback/`) |

@@ -1,0 +1,60 @@
+---
+title: "Mapa de producto"
+description: "Dos páginas HTML autocontenidas (el mapa de workshops de Q4 y su apéndice de evidencia) servidas a cualquier usuario @vivla.com"
+---
+
+# Mapa de producto
+
+**Mapa de producto** (`/app/product-map`) es un ítem propio del menú, visible
+para **cualquier usuario autenticado con email `@vivla.com`** y no gateado por
+ningún claim de herramienta. Publica dos páginas HTML grandes y
+autocontenidas (~1,3 MB cada una) baked en el repo del backend: el mapa de
+workshops de Q4 y su apéndice de evidencia. No hay base de datos ni CMS
+detrás — los ficheros viven en `apps/backend/src/product-map/assets/`.
+
+## Rutas
+
+| Ruta | Qué hay |
+|------|---------|
+| `/app/product-map` | El mapa (HTML renderizado dentro de un iframe) |
+| `/app/product-map/evidence` | El apéndice de evidencia con las citas del mapa |
+
+## Endpoints
+
+| Método | Ruta | Qué devuelve |
+|--------|------|--------------|
+| `GET` | `/product-map` | `{ html }` con la página del mapa |
+| `GET` | `/product-map/evidence` | `{ html }` con la evidencia |
+
+Ambos endpoints están protegidos por `Auth0AuthGuard` + `VivlaStaffGuard` y
+responden con `Cache-Control: private, max-age=300`. El frontend solo
+renderiza el HTML en un iframe: nunca parsea su contenido.
+
+<Note>
+El cliente sube el timeout a **60 s** (frente a los 10 s por defecto) porque el
+blob de ~1,3 MB necesita margen, sobre todo cuando la instancia de Railway
+arranca en frío.
+</Note>
+
+## Acceso: solo staff de Vivla
+
+`VivlaStaffGuard` deja pasar a cualquier usuario autenticado cuyo email
+termine en `@vivla.com` (sin distinción de mayúsculas). No se apoya en un
+claim de herramienta porque el mapa es para todo el equipo. Las peticiones
+sin email de usuario (API keys, agentes) se rechazan con un `403`. El
+frontend replica la regla marcando el tool como `vivlaStaffOnly`.
+
+## Cómo se sirve el HTML
+
+Los ficheros `product-map.html` y `product-map-evidence.html` se leen del
+disco **una sola vez** y se cachean en memoria durante la vida del proceso
+(`ProductMapService`). No hay recarga en caliente: actualizar el mapa implica
+reemplazar los HTML en `assets/` y redeplegar.
+
+<Warning>
+El copiador de assets de `nest-cli.json` es relativo a `sourceRoot` (`src`) y
+deja los HTML en `dist/product-map/assets/*`, mientras que `tsc` compila el
+servicio a `dist/src/product-map`. Por eso `ProductMapService` sube desde
+`__dirname` hasta la raíz común `dist/` antes de bajar de nuevo a `assets/`.
+Si mueves el módulo, revisa esa ruta.
+</Warning>

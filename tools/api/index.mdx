@@ -1,0 +1,96 @@
+---
+title: "Tools API"
+description: "Arquitectura y configuración general del backend NestJS"
+---
+
+# Tools API
+
+El backend de Vivla Tools es una API REST construida con **NestJS 10** que sirve a todos los frontales (frontend, community-frontend) y a la app mobile (vivla-mobile).
+
+## Configuración general
+
+| Parámetro | Valor |
+|-----------|-------|
+| Framework | NestJS 10 (Express) |
+| Prefijo API | `/api` (rutas legacy) y `/api/v1/...` (rutas v1 con el envelope nuevo) |
+| Puerto | 3001 (o `PORT` env var) |
+| Documentación | Swagger UI en `/api/docs` (sólo en desarrollo). OpenAPI exportado a `apps/backend/openapi.json`. |
+| Rate limiting | 100 requests por 60 segundos (default global). Algunos endpoints como `/public/events/ingest` permiten 200/min. |
+| Seguridad | Helmet (XSS, CSP, headers) |
+| Validación | class-validator con transformación automática |
+| CORS | Frontend + community-frontend origins configurados |
+
+## Arquitectura modular
+
+La API se organiza en módulos NestJS independientes:
+
+```
+src/
+├── auth/              # Autenticación y autorización
+├── chat/              # Chat y soporte (16 sub-módulos)
+├── surveys/           # Encuestas dinámicas (mobile, results, rewards, action-plans)
+├── community/         # Gestión de propiedades (15 sub-módulos)
+├── notifications/     # Push notifications
+├── inbox/             # Bandeja de entrada
+├── teams/             # Gestión de equipos
+├── users/             # Gestión de usuarios
+├── permissions/       # Control de acceso
+├── admin/             # Operaciones administrativas
+├── email/             # Servicio de email (SMTP2GO)
+├── database/          # Conexión Supabase y migraciones
+├── health/            # Health checks
+├── shared/            # Servicios compartidos (Cloudinary)
+├── common/            # Filtros, interceptores, utilidades
+├── config/            # Configuración de la aplicación
+└── cli/               # Herramientas CLI (importación Zendesk)
+```
+
+## Servicios externos
+
+| Servicio | Uso |
+|----------|-----|
+| **Supabase** | Base de datos PostgreSQL con Row Level Security |
+| **Auth0** | Autenticación JWT/JWKS |
+| **Stream Chat** | Mensajería en tiempo real |
+| **Cloudinary** | Almacenamiento y transformación de imágenes |
+| **SMTP2GO** | Envío de emails transaccionales (con tracking de delivery, opens, clicks) |
+| **Firebase Admin SDK** | Push notifications (iOS/Android), lectura de legacy data (Firestore) |
+| **Expo Server SDK** | Push notifications (Expo apps) |
+| **Web Push** | Notificaciones web (VAPID) |
+
+## Convenciones de la API v1
+
+La API v1 sigue un set consistente de convenciones en toda la superficie: envelope `object` por recurso, paginación cursor, errores estructurados, `request_id` correlacionable, header `Idempotency-Key` para retries seguros, y headers de rate limit en cada respuesta. Detalle:
+
+- **[Convenciones](./conventions)** — punto de entrada para integradores.
+- **[Códigos de error](./errors)** — catálogo de `error.type` / `error.code`.
+- **[Paginación cursor](./pagination)** — `has_more` + `next_cursor`.
+- **[Idempotencia](./idempotency)** — header `Idempotency-Key` para retries seguros.
+
+## Manejo de errores
+
+La API devuelve errores con el envelope:
+
+```json
+{
+  "error": {
+    "type": "invalid_request_error",
+    "code": "validation_error",
+    "message": "Payload does not match schema for booking.created",
+    "param": "aggregate_id",
+    "request_id": "req_a1b2c3d4e5f6",
+    "details": [{ "path": "aggregate_id", "message": "Required" }]
+  }
+}
+```
+
+Los campos `statusCode`, `timestamp`, `path`, `method` y `message` también se incluyen al top-level para no romper consumers existentes; los nuevos clientes deben leer **sólo** el envelope `error`.
+
+Catálogo completo: [Códigos de error](./errors).
+
+## Health checks
+
+| Endpoint | Auth | Descripción |
+|----------|------|-------------|
+| `GET /api/health` | Público | Health check básico |
+| `GET /api/health/detailed` | Público | Health check detallado con estado de dependencias |

@@ -1,0 +1,345 @@
+---
+title: "Observabilidad"
+description: "Errores con Sentry, analítica y grabaciones con PostHog, y cómo el panel decide qué fallos de red reportar"
+---
+
+# Observabilidad
+
+El panel usa dos herramientas. **Sentry** recoge errores, logs y trazas del frontend. **PostHog** registra eventos de producto y graba las sesiones. Las dos están enlazadas: cada evento de Sentry se puede relacionar con la sesión de PostHog en la que ocurrió.
+
+Esta página explica cuándo está activa cada una, qué se reporta y qué no, cómo se identifica al usuario y cómo pasan los errores de red por `apiClient` y React Query.
+
+## Sentry
+
+### Cuándo está activo
+
+| `VITE_APP_ENV` | Activo | Entorno en Sentry | `tracesSampleRate` |
+|---|---|---|---|
+| `localdev` | No | — | 0 |
+| `staging` | Sí | `staging` | 1.0 |
+| `prod` | Sí | `production` | 0.2 |
+
+Además del entorno, hace falta `VITE_SENTRY_DSN`. Sin DSN, `initSentry()` sale sin hacer nada y todas las llamadas a Sentry son no-ops.
+
+<Note>
+El entorno `prod` se reporta como `production` a propósito. Las reglas de alerta del proyecto de Sentry del panel filtran por `production`. Con `prod`, no se disparaba ninguna.
+</Note>
+
+### Arranque
+
+`src/main.tsx` llama a `initSentry()` y a `initAnalytics()` antes de montar React. La configuración de `src/config/sentry/index.ts` incluye:
+
+- `release: __APP_RELEASE__`, con la forma `panel-front@<sha>`. Ver [Entornos y despliegue](/panel/platform/deploy).
+- `browserTracingIntegration()` para las trazas de navegación y de peticiones.
+- `tracePropagationTargets: [VITE_API_BASE_URL]`. El panel envía la cabecera `sentry-trace` a la API para enlazar trazas con el backend.
+- `enableLogs` más `consoleLoggingIntegration` con niveles `warn` y `error`. Cada `console.warn` y `console.error` llega a Sentry Logs. ESLint prohíbe el resto de `console.*` con la regla `no-console`.
+- `sendDefaultPii: false`.
+
+El router se crea con `Sentry.wrapCreateBrowserRouterV7(createBrowserRouter)`. Así Sentry nombra las transacciones por ruta.
+
+`PortalRoot` monta `useSentryFeatureTag`, que pone la etiqueta `feature` con el primer segmento de la ruta: `homes`, `bookings`, `users`… En `/`, la etiqueta es `keys`, porque ahí vive el dashboard de llaves. Sirve para filtrar incidencias y alertas por sección.
+
+### Release y source maps
+
+En builds de `staging` y `prod`, `vite.config.ts` activa `@sentry/vite-plugin`:
+
+- Crea la release `panel-front@<sha>` y sube los source maps con `SENTRY_ORG`, `SENTRY_PROJECT` y `SENTRY_AUTH_TOKEN`.
+- Genera los mapas en modo `hidden`, sin referencia en el JS publicado.
+- Borra los `.map` del build después de subirlos.
+
+La integración de Vercel con Sentry registra cada deploy en su release. Con eso Sentry distingue una incidencia nueva de una regresión.
+
+<Warning>
+El plugin se activa según `VITE_APP_ENV`, no según el modo de Vite, porque Vercel siempre construye con el modo `production`. Si `VITE_APP_ENV` no está bien configurado en Vercel, no se suben los source maps y los stack traces llegan minificados.
+</Warning>
+
+### Qué se reporta y qué no
+
+| Situación | A Sentry | Dónde se decide |
+|---|---|---|
+| Error de render dentro del router | Sí | `RouteErrorBoundary`, con `type: route_error` |
+| Error de render fuera del router | Sí | `Sentry.ErrorBoundary` en `main.tsx` |
+| API responde con `code` distinto de 20 | Sí | `apiClient` |
+| API responde con `code` 41, 43, 44 o 49 | **No** | `apiClient` (códigos esperados) |
+| Error HTTP con estado, salvo 401, 403 y 404 | Sí | `apiClient` |
+| HTTP 401, 403 o 404 | **No** | `apiClient` |
+| Sin respuesta (timeout, API caída) con el navegador online | Sí, nivel `warning` | `apiClient` → `captureNetworkError` |
+| Sin respuesta con el navegador offline, o petición cancelada | **No** | `apiClient` |
+| Error de query o mutación no reportado antes | Sí | `QueryCache` / `MutationCache` |
+| Petición rechazada otra vez tras refrescar el token | Sí, nivel `warning` | `apiClient` |
+| Sesión caducada, refresco imposible, login fallido, JWT ilegible | Sí | `src/features/auth/utils/authErrorReporting.ts` |
+| Login con credenciales incorrectas (`invalid_grant`) | **No** | `authErrorReporting.ts` |
+| Chunk recuperado tras un deploy | Sí, nivel `info` | `lazyWithReload` |
+| Ruido de navegador: `Network Error`, `Failed to fetch`, `Load failed`, `AbortError`, `ResizeObserver loop`, extensiones | **No** | `beforeSend` |
+
+Los códigos silenciados son respuestas esperadas de la API: 41 (token inválido, ya cubierto por el flujo de sesión), 43 (sin permisos), 44 (no encontrado) y 49 (precondición de negocio). El 40 (petición mal formada) sí se reporta, porque suele ser un bug del panel.
+
+<Note>
+`Network Error` está en la lista de ignorados de `beforeSend`. Aun así, los fallos de red de la API llegan a Sentry. `captureNetworkError` los etiqueta con `network_error: api`, y `beforeSend` deja pasar cualquier evento con esa etiqueta. Solo se descarta el ruido de red que no viene de `apiClient`.
+</Note>
+
+### Etiquetas y agrupación
+
+| Etiqueta | Valor | Cuándo |
+|---|---|---|
+| `feature` | Primer segmento de la ruta (`keys` en `/`) | Todos los eventos |
+| `network_error` | `api` | Fallos de red de `apiClient` |
+| `contract_violation` | `true` | Errores de query o mutación que son un `ZodError`: la respuesta de la API no cumple el DTO |
+
+Los fallos de red se agrupan con el fingerprint `["api-network-error", MÉTODO, ruta]`. La ruta se normaliza: se quita el query string y los UUID y segmentos numéricos pasan a `:id`. Un endpoint caído genera una incidencia, no una por registro.
+
+### Sin reportes duplicados
+
+Un mismo error puede pasar por `apiClient`, por React Query y por el error boundary. Para que llegue una sola vez, `src/config/sentry/utils.ts` guarda en un `WeakSet` los errores ya tratados:
+
+- `captureException` y `captureNetworkError` marcan el error al reportarlo.
+- `apiClient` también marca los errores que decide no reportar.
+- `QueryCache`, `MutationCache` y `RouteErrorBoundary` comprueban `isErrorProcessed()` antes de reportar. Si el error ya está tratado, el boundary muestra el ID con `Sentry.lastEventId()`.
+
+### Datos sensibles
+
+`beforeSend` filtra `extra` y las cabeceras de la petición. `beforeBreadcrumb` filtra los datos de los breadcrumbs `xhr` y `fetch`. En los tres casos, cualquier clave que contenga uno de estos textos pasa a valer `[FILTERED]`: `password`, `token`, `access_token`, `refresh_token`, `authorization`, `api_key`, `apikey`, `secret` o `credential`. El filtro es recursivo.
+
+Cada petición de `apiClient` deja además un breadcrumb `http` con el método y la URL.
+
+### Identidad del usuario
+
+`useAuth` asocia el usuario cuando hay token. En Sentry llama a `setSentryUser({ id, email })`, donde `id` es el `sub` del token. Al cerrar sesión, o si el token desaparece, llama a `clearSentryUser()`. PostHog sigue el mismo ciclo, descrito más abajo.
+
+### Pantalla de error
+
+Los dos boundaries muestran `ErrorFallback` (`src/components/ErrorBoundary/index.tsx`):
+
+- Un aviso de que el error se ha reportado automáticamente.
+- El enlace **Comprueba si es un problema conocido**, que abre la página de estado de VIVLA.
+- El ID del evento de Sentry con el botón **Copiar**. Con ese ID, cualquiera de tech encuentra la incidencia exacta.
+- El botón **Volver a intentar**. En el boundary del router recarga la página. En el raíz, resetea el boundary.
+
+`RouteErrorBoundary` reporta dentro de un `useEffect`, no en el render. Así no se repite el reporte en cada re-render.
+
+## Errores de red
+
+Todas las llamadas a la API pasan por `apiClient` (`src/lib/apiClient.ts`), una instancia de Axios con `baseURL` de `VITE_API_BASE_URL` y timeout de 30 segundos. React Query (`src/config/queryClient.ts`) hace de segunda red.
+
+```
+apiClient
+  │
+  ├─ 2xx con code ≠ 20
+  │    ├─ code 41 → refresco forzado del token y 1 reintento
+  │    ├─ crea ApiError y guarda la última petición fallida
+  │    └─ code 41/43/44/49 → marcado, sin evento · resto → captureException
+  │
+  └─ error HTTP o sin respuesta
+       ├─ 401 → refresco forzado del token y 1 reintento
+       ├─ guarda la última petición fallida (salvo cancelaciones)
+       └─ con estado ≠ 401/403/404 → captureException
+          sin estado y online      → captureNetworkError (warning)
+          resto                    → marcado, sin evento
+  │
+  ▼
+QueryCache.onError / MutationCache.onError
+  └─ ya marcado → nada · si no → captureException (+ contract_violation si es ZodError)
+```
+
+La API devuelve en el cuerpo un campo `code` propio: 20 es éxito. `apiClient` convierte cualquier otro código en un `ApiError` con `code`, `msg` y `data`. Así las mutaciones y queries reciben un error normal.
+
+<Warning>
+La captura global vive en `MutationCache.onError` y no en `defaultOptions.mutations.onError`. En TanStack Query v5, un `onError` definido en la mutación reemplaza al de `defaultOptions`. En cambio, el de `MutationCache` se ejecuta siempre. Casi todas las mutaciones del panel tienen su propio `onError` para mostrar un toast. No muevas la captura a `defaultOptions`.
+</Warning>
+
+El `QueryClient` usa `staleTime` de 60 segundos y `refetchOnWindowFocus: false`.
+
+### Última petición fallida
+
+`src/lib/lastFailedRequest.ts` guarda en memoria la última petición de `apiClient` que falló:
+
+| Campo | Contenido |
+|---|---|
+| `method` | Método en mayúsculas |
+| `url` | URL relativa de la petición |
+| `status` | Estado HTTP, si hubo respuesta |
+| `apiCode` | `code` de la API, si respondió con un código de error |
+| `message` | Mensaje del error |
+| `failedAt` | Fecha ISO del fallo |
+
+Solo se guarda la última, en una variable de módulo: una recarga la borra. El [diálogo de reportes](/panel/platform/feedback) la adjunta al contexto y el hilo de Slack la muestra como **Última petición fallida**.
+
+<Note>
+El envío de un reporte usa `Axios` directamente, no `apiClient`. Si falla, no pisa la última petición fallida. Sí llega a Sentry por `MutationCache`.
+</Note>
+
+## PostHog
+
+### Cuándo está activo
+
+| `VITE_APP_ENV` | Activo | `debug` |
+|---|---|---|
+| `localdev` | No | — |
+| `staging` | Sí | Sí |
+| `prod` | Sí | No |
+
+Además hace falta `VITE_PUBLIC_POSTHOG_TOKEN`. El host sale de `VITE_PUBLIC_POSTHOG_HOST`. Si PostHog no está activo, `initAnalytics()` instala un proveedor vacío (`providers/noop.ts`). Todas las llamadas funcionan sin hacer nada y `getSessionReplayUrl()` devuelve `null`.
+
+El resto del código no importa `posthog-js`. Todo pasa por la abstracción de `src/lib/analytics/`: `trackEvent`, `trackPageView`, `setAnalyticsUser`, `clearAnalyticsUser` y `getSessionReplayUrl`.
+
+### Configuración
+
+`providers/posthog.ts` inicializa PostHog así:
+
+- `capture_pageview: false`. Las páginas vistas se envían a mano.
+- `capture_pageleave: true`.
+- `persistence: "localStorage+cookie"`.
+- `startSessionRecording()` al arrancar: la grabación está siempre activa en staging y producción.
+- Propiedades globales en todos los eventos: `app: "vivla-panel"` y `environment`.
+- `posthog.sentryIntegration` se añade a Sentry con `sendExceptionsToPostHog: false`. Enlaza los eventos de Sentry con la sesión de PostHog sin duplicar las excepciones en PostHog.
+
+### Páginas vistas
+
+`PortalRoot` monta `useTrackPageView`. En cada cambio de `pathname` o `search`, envía un `$pageview` con `pageName` (la ruta), `search` y `$current_url`. Solo se registran páginas del área autenticada.
+
+### Identificación
+
+Cuando hay token, `useAuth` llama a `setAnalyticsUser({ id, email })`, que hace `posthog.identify(id, { email })`. El `id` es el `sub` del token de Auth0. Al cerrar sesión, `clearAnalyticsUser()` hace `posthog.reset()`.
+
+El proveedor admite también `role`, pero ahora mismo no se envía.
+
+### Grabaciones de sesión
+
+`getSessionReplayUrl()` devuelve el enlace a la grabación actual, posicionado 30 segundos antes del momento de la llamada. Lo usa el diálogo de reportes: lo enseña como **Grabación** y lo adjunta al reporte.
+
+### Catálogo de eventos
+
+Los eventos están tipados en `src/lib/analytics/events.ts` (`AnalyticsEventMap`). `trackEvent` solo acepta nombres de ese mapa, con sus propiedades exactas.
+
+<Tip>
+Para añadir un evento, decláralo primero en `AnalyticsEventMap` con sus propiedades y después llama a `trackEvent`. No llames a `posthog.capture()` directamente: te saltas el tipado y el proveedor vacío de local.
+</Tip>
+
+<Accordion title="Reservas">
+
+| Evento | Propiedades | Cuándo |
+|---|---|---|
+| `booking_create_started` | — | Declarado, no se emite |
+| `booking_create_step_viewed` | `step`, `step_name` | Declarado, no se emite |
+| `booking_create_succeeded` | `reservation_type` | Reserva creada desde el asistente |
+| `booking_create_failed` | `error_type` | Falla la creación |
+| `booking_edit_started` | — | Empieza la edición de fechas de check-in y check-out |
+| `booking_edit_succeeded` | `field_edited` (`dates`, `guests`, `guest_notes`, `notes`, `travel_plan`) | Edición guardada |
+| `booking_edit_failed` | `error_type` | Falla una edición |
+| `booking_cx_flag_toggled` | `flag_type`, `value` | Cambia una marca de seguimiento de CX en la reserva (comunicaciones, estancia disfrutada) |
+| `booking_action_executed` | `action_type` (`cancel`, `exchange`, `thirdhome`, `remove_stay`, `update_booking_type`, `add_guest`, `remove_guest`, `edit_guest`) | Se ejecuta una acción sobre la reserva |
+| `booking_data_exported` | `rows_count`, `total_available`, `truncated` | Exportación CSV de reservas |
+
+</Accordion>
+
+<Accordion title="Usuarios">
+
+Los eventos de usuarios conservan el prefijo `owner_*` para no romper los dashboards de PostHog.
+
+| Evento | Propiedades | Cuándo |
+|---|---|---|
+| `owner_create_started` | — | Empieza la creación de un usuario |
+| `owner_create_succeeded` | — | Usuario creado |
+| `owner_create_failed` | `error_type` | Falla la creación |
+| `owner_edit_started` | — | Empieza la edición |
+| `owner_edit_succeeded` | — | Edición guardada |
+| `owner_edit_failed` | `error_type` | Falla la edición |
+| `owner_deleted` | — | Usuario eliminado |
+| `owner_calendar_lock_toggled` | `value` | Se bloquea o desbloquea el calendario del usuario |
+| `user_type_switched` | `value` (`owner` o `visitor`) | Cambia el tipo de usuario en el listado |
+
+</Accordion>
+
+<Accordion title="Casas">
+
+| Evento | Propiedades | Cuándo |
+|---|---|---|
+| `home_create_started` | — | Empieza la creación de una casa |
+| `home_create_succeeded` | `home_type` | Casa creada |
+| `home_create_failed` | `error_type` | Falla la creación |
+| `home_detail_edited` | `card_name` | Se guarda una tarjeta de la ficha de la casa |
+| `home_status_changed` | `previous_status`, `new_status` | Cambia el estado de la casa |
+| `home_service_managed` | `action_type` (`add`, `update`, `remove`), `service_category` | Gestión de proveedores de servicios |
+| `home_gallery_managed` | `action_type` (`upload`, `set_cover`, `edit_title`, `delete`) | Gestión de la galería |
+
+</Accordion>
+
+<Accordion title="Llaves">
+
+| Evento | Propiedades | Cuándo |
+|---|---|---|
+| `key_movement_register_started` | — | Empieza el registro de un movimiento de llaves |
+| `key_movement_register_succeeded` | `concept` | Movimiento registrado |
+| `key_movement_register_failed` | `error_type` | Falla el registro |
+| `key_cost_edited` | `season`, `home_type` | Se edita el coste en llaves |
+| `key_calculator_used` | `home_type` | Uso de la calculadora de llaves |
+| `key_data_exported` | `export_type` (`movements`, `valuation`) | Exportación CSV |
+
+</Accordion>
+
+<Accordion title="Documento de check-in">
+
+| Evento | Propiedades | Cuándo |
+|---|---|---|
+| `checkin_document_opened` | `home_id` | Se abre el documento de planificación desde una reserva |
+| `checkin_document_downloaded` | `language`, `seconds_since_open`, `home_id`, `edited` | Se descarga ese documento |
+| `checkin_document_download_failed` | `language`, `error_type` | Falla la descarga |
+| `checkin_document_language_switched` | `from_language`, `to_language` | Cambia el idioma del documento |
+| `checkin_workbench_opened` | `home_id` | Se abre el documento de check-in de una casa (`/homes/:id/checkin-doc`) |
+| `checkin_workbench_pdf_downloaded` | `home_id`, `language` | Se descarga el PDF |
+| `checkin_workbench_pdf_download_failed` | `language`, `error_type` | Falla la descarga del PDF |
+
+</Accordion>
+
+<Accordion title="Calendarios">
+
+| Evento | Propiedades | Cuándo |
+|---|---|---|
+| `calendar_category_opened` | `home_type` | Se abre el calendario de una categoría de casa |
+| `calendar_year_navigated` | `home_type`, `direction` | Cambio de año |
+| `calendar_year_marked_empty` | `home_type`, `year` | Un año se marca como vacío |
+| `calendar_slot_create_started` | `home_type` | Empieza la creación de un slot |
+| `calendar_slot_create_succeeded` | `home_type`, `season`, `days_count` | Slot creado |
+| `calendar_slot_create_failed` | `home_type`, `error_type` | Falla la creación |
+| `calendar_slot_season_edited` | `home_type`, `previous_season`, `new_season` | Cambia la temporada de un slot |
+| `calendar_slot_deleted` | `home_type`, `season` | Slot eliminado |
+
+</Accordion>
+
+<Accordion title="Reportes y sesión">
+
+| Evento | Propiedades | Cuándo |
+|---|---|---|
+| `feedback_report_opened` | `source` | Se abre el diálogo de reporte |
+| `feedback_report_submitted` | `source`, `report_type`, `urgency`, `images_count` | Reporte enviado con éxito |
+| `auth_login` | `email` | Declarado, no se emite |
+| `auth_logout` | — | Declarado, no se emite |
+| `$pageview` | `pageName`, `search`, `$current_url` | Cambio de ruta en el área autenticada |
+| `$pageleave` | — | Automático de PostHog |
+
+</Accordion>
+
+<Note>
+`auth_login`, `auth_logout`, `booking_create_started` y `booking_create_step_viewed` están en el mapa, pero ningún componente los emite. Si un dashboard depende de ellos, estará vacío.
+</Note>
+
+## Código
+
+| Pieza | Ruta |
+|---|---|
+| Inicialización de Sentry y filtros | `src/config/sentry/index.ts` |
+| Configuración por entorno | `src/config/sentry/config.ts` |
+| Integraciones | `src/config/sentry/integrations.ts` |
+| Helpers (`captureException`, `captureNetworkError`, usuario, etiquetas) | `src/config/sentry/utils.ts` |
+| Etiqueta `feature` | `src/config/sentry/hooks/useSentryFeatureTag.ts` |
+| Plugin de Vite y release | `vite.config.ts` |
+| Router envuelto con Sentry | `src/router/index.tsx` |
+| Boundaries y pantalla de error | `src/main.tsx`, `src/components/ErrorBoundary/index.tsx` |
+| Reportes de auth | `src/features/auth/utils/authErrorReporting.ts` |
+| Cliente de API | `src/lib/apiClient.ts` |
+| React Query | `src/config/queryClient.ts` |
+| Última petición fallida | `src/lib/lastFailedRequest.ts` |
+| Inicialización de analítica | `src/config/analytics/index.ts`, `src/config/analytics/config.ts` |
+| Proveedores PostHog y vacío | `src/config/analytics/providers/` |
+| Abstracción y catálogo de eventos | `src/lib/analytics/utils.ts`, `src/lib/analytics/events.ts` |
+| Páginas vistas | `src/lib/analytics/hooks/useTrackPageView.ts` |

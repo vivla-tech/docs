@@ -1,0 +1,154 @@
+---
+title: "Calendarios"
+description: "Calendar Manager: tipos de calendario, slots por temporada y cómo crearlos, cambiarlos de temporada o borrarlos"
+---
+
+# Calendarios
+
+El módulo de **Calendarios** (Calendar Manager) define qué fechas caen en qué temporada. Sirve para preparar el calendario de temporadas de cada año. Las reservas se hacen sobre esos slots.
+
+Un calendario se compone de **slots**. Cada slot es un rango de fechas asignado a una temporada. Cada tipo de calendario tiene su propio juego de temporadas, con nombre y color.
+
+<Note>
+  Aquí no se crean temporadas ni se configura qué significa cada una. El panel solo asigna temporadas ya existentes a rangos de fechas. El modelo de temporadas está en [Calendario y temporadas](/backend/calendario-temporadas). Las reglas de reserva, en [Operativa](/operativa).
+</Note>
+
+## Rutas
+
+| Ruta | Qué hay | Permiso |
+|------|---------|---------|
+| `/calendars` | Lista de tipos de calendario | `read:calendar-manager` |
+| `/calendars/:id` | Editor del calendario de ese tipo, año a año | `read:calendar-manager` para verlo, `edit:calendar-manager` para editarlo |
+
+Sin `read:calendar-manager` no ves **Calendarios** en la barra lateral. Con solo lectura ves el calendario, pero los días no responden al clic. Más detalle en [Permisos](/panel/platform/permissions).
+
+<Warning>
+  El panel y vivla-api no usan los mismos permisos. El panel muestra el módulo con `read:calendar-manager` / `edit:calendar-manager`. vivla-api valida `read:calendars` / `edit:calendars` en sus endpoints. Si ves la pantalla pero fallan las llamadas, revisa que tu rol tenga los dos juegos.
+</Warning>
+
+## Calendarios y casas
+
+Cada casa se asocia a un calendario al darla de alta: es el campo **Calendario** de `/homes/create`, y solo se elige en el alta. Varias casas comparten el mismo calendario. Por eso un cambio aquí afecta a todas las casas que lo usan.
+
+La ficha de cada casa muestra esos slots en **Calendario de la casa**. Ver [Detalle de casa](/panel/homes/details).
+
+<Note>
+  No confundas este módulo con el interruptor **Calendario activo** / **Calendario inactivo** de la ficha de un usuario. Ese interruptor bloquea a un propietario concreto en una casa concreta. Ver [Usuarios](/panel/users).
+</Note>
+
+## Tipos de calendario
+
+`/calendars` muestra la tabla **Tipo de calendario** con los tipos que devuelve vivla-api. Cada fila lleva un icono y una descripción:
+
+| Tipo | Descripción en UI |
+|------|-------------------|
+| Costa | **Calendarios de destinos de costa** |
+| Montaña | **Calendarios de destinos de montaña** |
+| Ciudad | **Calendarios de destinos urbanos** |
+
+Pulsa una fila para abrir su editor en `/calendars/:id`.
+
+<Note>
+  El icono y la descripción salen de un mapa fijo por id en el código (`CALENDAR_TYPE_ID_TO_HOME_TYPE`: 1 costa, 2 montaña, 3 ciudad). Un tipo nuevo con otro id sale con icono genérico y descripción `-`.
+</Note>
+
+## El editor
+
+El editor muestra el título **Calendario** seguido del nombre del tipo, y el año completo mes a mes.
+
+### Navegar por años
+
+Usa las flechas junto al año. No puedes ir a años anteriores a 2026. Puedes avanzar hasta un año después del último año con slots.
+
+Los días anteriores al primer slot del calendario salen en gris y no se pueden pulsar.
+
+### Leyenda
+
+Encima del calendario tienes una píldora por temporada con **slots** y **noches** de ese año. La píldora **En blanco** cuenta los **días** sin slot hasta fin de año. En el año en curso cuenta desde hoy.
+
+<Tip>
+  Usa **En blanco** como control de calidad. Si queda algún día en blanco, a ese hueco le falta temporada.
+</Tip>
+
+### Crear un slot
+
+Con `edit:calendar-manager` verás la ayuda: «Haz click en un día vacío para empezar a crear un slot. Click en un slot existente para editarlo.»
+
+1. Pulsa el primer día del slot.
+2. Pulsa el último día. El slot tiene que durar al menos 3 días, contando el primero y el último.
+3. En el desplegable, elige la temporada.
+
+El slot aparece al momento con el color de la temporada. El panel lo guarda en segundo plano. Si falla, el slot desaparece y ves el error.
+
+Mientras eliges el rango:
+
+- Los días posteriores al inicio del siguiente slot salen bloqueados: un slot no puede pisar a otro.
+- Si pulsas un día anterior al inicio, ese día pasa a ser el nuevo inicio.
+- Si pulsas un fin a menos de 3 días del inicio, ese día pasa a ser el nuevo inicio.
+- Si vuelves a pulsar el día de inicio, o pulsas `Esc`, cancelas la selección.
+
+<Note>
+  Dos slots seguidos comparten el día de cambio: el último día de uno es el primero del siguiente. Ese día se pinta con los dos colores. Si pulsas el último día de un slot que aún no tiene siguiente, empiezas un slot nuevo desde ese mismo día.
+</Note>
+
+### Cambiar la temporada de un slot
+
+1. Pulsa cualquier día del slot menos el último.
+2. En el desplegable, elige otra temporada. La actual sale marcada.
+
+Solo puedes cambiar la temporada. Para cambiar las fechas, borra el slot y créalo de nuevo.
+
+<Tip>
+  El día de cambio (el de dos colores) no responde al clic. Pulsa otro día del slot para editarlo.
+</Tip>
+
+### Borrar un slot
+
+1. Pulsa cualquier día del slot menos el último.
+2. Pulsa **Eliminar slot** al final del desplegable.
+3. Confirma con **Eliminar** en el diálogo **Eliminar slot**.
+
+<Warning>
+  Un slot con reservas activas no se puede cambiar ni borrar. vivla-api lo rechaza y ves «No se ha podido cambiar la temporada porque el slot está en uso por reservas activas.» o «No se ha podido eliminar el slot porque está en uso por reservas activas.». El panel deshace el cambio en pantalla.
+</Warning>
+
+### Año sin calendario
+
+Si un año no tiene slots, ves **No existe un calendario para** seguido del año. Con permiso de edición aparece **Crear calendario vacío**.
+
+<Warning>
+  **Crear calendario vacío** no guarda nada en vivla-api. Solo muestra la rejilla vacía en tu pantalla. El año existe cuando creas su primer slot. Si recargas antes, vuelves a ver el aviso.
+</Warning>
+
+## Endpoints de vivla-api
+
+| Método | Endpoint | Para qué |
+|--------|----------|----------|
+| `GET` | `/v2/admin/calendars/types` | Lista los tipos de calendario |
+| `GET` | `/v2/admin/calendars/:id/seasons` | Temporadas del calendario, con nombre y color |
+| `GET` | `/v2/admin/calendars/:id/slots?from=` | Slots desde una fecha. El editor pide desde `2025-12-01` |
+| `POST` | `/v2/admin/calendars/:id/slots/create` | Crea un slot. Cuerpo: `season.id`, `from`, `to` |
+| `PUT` | `/v2/admin/calendars/slot/:id/update` | Cambia la temporada de un slot. Cuerpo: `season.id` |
+| `DELETE` | `/v2/admin/calendars/slot/:id/delete` | Borra un slot |
+
+El error de slot en uso llega como `ApiError` con código `49` (`slotInUseError.ts`).
+
+<Note>
+  El editor no usa `GET /v2/admin/calendars`. Ese endpoint devuelve los slots por casa, con sus reservas. Lo usan la vista de calendario de [Reservas](/panel/bookings) y la sección **Calendario de la casa**.
+</Note>
+
+## Código
+
+| Qué | Dónde |
+|-----|-------|
+| Lista de tipos | `src/pages/Calendars` |
+| Página del editor | `src/pages/CalendarDetails` |
+| Editor | `src/features/bookings/components/CalendarManager/CalendarEditor` |
+| Estado del editor | `CalendarEditor/hooks/useCalendarEditor` (`slotsReducer.ts` para los cambios optimistas, `useSlotActions.ts` para crear, editar y borrar) |
+| Selección de días | `CalendarEditor/hooks/useSlotSelection` |
+| Reglas de la rejilla | `CalendarEditor/utils/calendarSlots.ts` (duración mínima, solapes, leyenda, días en blanco) |
+| Constantes | `CalendarEditor/constants.ts` (mapa de tipos, año mínimo, fecha de carga) |
+| Componentes | `CalendarEditor/components` (`CalendarGrid`, `CalendarMonth`, `SeasonPopover`, `SeasonLegend`, `YearNavigator`, `CreateYearEmptyState`, `DeleteSlotConfirmationDialog`) |
+| Requests y DTOs | `src/features/bookings/api/requests/calendarManager`, `src/features/bookings/api/dtos/calendar` |
+| Queries | `src/features/bookings/queries/calendarManager` (claves `calendar-types`, `calendar-seasons`, `calendar-slots`) |
+| Textos de UI | `src/assets/locales/es/calendarManager.json` |

@@ -1,0 +1,183 @@
+---
+title: "Reporte semanal NPS"
+description: "Lógica del reporte semanal de NPS: métricas, fórmulas, ventanas, fuentes y el filtro de reservas disfrutadas en casa activa"
+---
+
+# Reporte semanal NPS
+
+El **Reporte semanal NPS** resume la satisfacción de propietarios e invitados por métrica y por periodo. Existe en dos superficies que comparten **exactamente el mismo payload**:
+
+- **Email de los lunes** — Windmill cron `0 9 * * 1` → `POST /surveys/reports/weekly-nps/send` (autenticado con `x-api-key`). Renderiza el payload con la plantilla React Email y lo envía a `WEEKLY_NPS_REPORT_TO` (lista separada por comas/punto y coma).
+- **Vista in-app "Reporte semanal"** — pestaña Reportes de Resultados de encuestas, `GET /surveys/reports/weekly-nps` (rol `tool-chat` viewer). Acepta `?week=<ISO>` para navegar semanas.
+
+Ambas llaman a `WeeklyNpsReportService.computePayload()`. Documentar el cálculo aquí lo deja bien definido: una sola fuente de verdad para email y vista.
+
+```
+apps/backend/src/surveys/reports/
+  weekly-nps-report.service.ts   # computePayload(): orquesta ventanas y métricas
+  weekly-nps-data.service.ts     # acceso a Supabase (queries por ventana + globales)
+  weekly-nps-compute.ts          # helpers puros (ventanas, normalización, NPS Bain, filtros)
+  weekly-nps.constants.ts        # slugs incluidos, targets
+  templates/WeeklyNpsEmail.tsx   # plantilla del email
+```
+
+## Ventanas de tiempo
+
+El reporte muestra una columna por ventana, en orden: **Anual (YTD)**, un **trimestre por cada trimestre transcurrido** del año, y **Semana anterior**. Se calculan en `buildWindows()` (`weekly-nps-compute.ts`):
+
+| Columna | Desde | Hasta (exclusivo) |
+|---------|-------|-------------------|
+| Anual | 1 ene del año | este lunes 00:00 |
+| Qn | inicio del trimestre | min(fin del trimestre, este lunes) |
+| Semana anterior | lunes anterior | este lunes 00:00 |
+
+- Todo se computa en **UTC**. El cron corre lunes 09:00 Madrid; el desfase de ~2h es irrelevante para el volumen de respuestas (misma aproximación que el reporte original).
+- La **semana** reportada es la **semana completa anterior**: lunes → lunes (extremo derecho exclusivo).
+- El frontend espeja esta aritmética en `lib/surveys/week.ts` (`getWeekBounds`) y envía `?week` al backend.
+
+### La semana en curso
+
+El **Reporte semanal** (NPS agregado) solo muestra **semanas cerradas**: es el mismo número que sale por email y se persiste en `analytics.nps_weekly_snapshot`, y un NPS a medias citado como "el de la semana" engaña más de lo que informa. Si la URL apunta a la semana en curso, la vista retrocede sola a la última semana cerrada.
+
+La **Lista semanal** sí llega a la semana en curso: lee respuestas en bruto vía `GET /survey-responses` (rango de fechas arbitrario, sin agregación), así que una semana a medias es exactamente lo que CX quiere leer un miércoles. En `week.ts` esto es el flag `allowCurrentWeek` de `isNextWeekFuture()`, que mueve el tope del navegador una semana adelante. Cuando estás ahí:
+
+- El rango se etiqueta `DD/MM – hoy` (`formatWeekRangeOpen`) y aparece un badge **En curso**.
+- La consulta y la cabecera del XLSX se cortan en hoy, nunca anuncian días futuros.
+- La flecha `›` se bloquea ahí: no se puede pasar de la semana en curso.
+
+Por defecto sigues aterrizando en la semana pasada completa; llegar a la actual es un clic de flecha.
+
+## Slugs incluidos y excluidos
+
+Constante `REPORT_SURVEY_SLUGS` (`weekly-nps.constants.ts`):
+
+- **Incluidos:** `stay-review`, `arrival-review`, `onboarding-review`.
+- **Excluidos:** `home-review`, `financial-review`, `book-review` (no entran en ninguna métrica de este reporte).
+
+## Fuentes de datos
+
+| Fuente | Tabla | Enlace a reserva | Uso |
+|--------|-------|------------------|-----|
+| Respuestas nuevas | `survey_responses` (status `completed`) | `scope_id` = booking id | pools NPS + numerador % Respondidas |
+| Respuestas legacy | `survey_legacy_responses` | `booking_id` (stay/arrival); `nps_score` / `response_data` | pools NPS + numerador % Respondidas |
+| Estancias | `bookings` | `id` | Estancias, denominador % Respondidas, Frictionless |
+| Links de onboarding | `survey_tokens` (`survey_type_slug = onboarding-review`) | — | denominador % Respondidas |
+
+- Respuestas nuevas: la ventana se aplica por `completed_at`. Ratings 1-5 envueltos como `{ value: n }` (desde mayo 2026; se aceptan ambas formas).
+- Respuestas legacy: la ventana se aplica por `responded_at`. `nps_score` ya viene en 0-10; el stay-review legacy lleva `response_data.experience.nps` (Casa) y `response_data.stay.nps` (Equipo/CX).
+- Estancias: la ventana se aplica por `check_in_date` (no por `actual_check_in_date`). Estados `active`/`past`/`inprogress`.
+
+## Normalización a 0-10 y NPS Bain
+
+Todo se lleva a una escala 0-10 antes de poolear:
+
+- **Ratings 1-5 → 0-10**: `normFromFivePoint(v) = value × 2` (rechaza fuera de 0-5).
+- **Llegada (arrival-review nuevo)**: `approvalRateTo010(answers)` = aprobados / total × 10 (tasa de aprobación de los ítems swipe).
+- **Legacy NPS / arrival legacy**: `clamp010` (ya 0-10).
+
+NPS estilo **Bain** (`computeNpsStats`): promotor `9-10`, pasivo `7-8`, detractor `0-6`; **NPS = %Promotores − %Detractores** (−100..+100). También expone `mean`, `n` y el desglose.
+
+## Pools NPS (NO filtrados por disfrutadas)
+
+Cada pool agrega todos los scores existentes de la ventana. Los pools **no** se filtran por `flag_enjoyed` ni por casa activa: filtrarlos descartaría respuestas legacy sin reserva enlazada y movería los NPS de cabecera.
+
+| Pool | Numerador (scores pooleados) | Notas |
+|------|------------------------------|-------|
+| **Estancia** | `stay-review` nuevo `q_home_rating` (×2) + stay legacy `experience.nps` | Casa |
+| **Experiencia CX** | `stay-review` nuevo `q_team_rating` (×2) + stay legacy `stay.nps` | Equipo |
+| **Llegada** | `arrival-review` nuevo `approvalRateTo010` + arrival legacy `nps_score` | `bigNumber = 'mean'` (se muestra como media, no como NPS) |
+| **Onboarding** | `onboarding-review` nuevo `q_onboarding_rating` (×2) + onboarding legacy `nps_score` | — |
+| **Global** | Estancia + Experiencia CX + Onboarding | **Excluye Llegada** (Llegada es una media, no se poolea) |
+
+Targets en `TARGETS` (`weekly-nps.constants.ts`): Global 60, Estancia 50, Experiencia CX 70, Llegada 80, Onboarding 100.
+
+## Estancias
+
+Contabiliza estancias **disfrutadas en casa activa** con check-in en la ventana (ver sección final). Base = `filterEnjoyedActive(checkIns, activeHids)`.
+
+| Campo | Fórmula |
+|-------|---------|
+| `stays` | nº de estancias disfrutadas+activas con check-in en la ventana (dedup `isOccupantStay`) |
+| `distinctHomes` | nº de `property_hid` distintos en ese conjunto |
+| `activeHomes` | nº de casas activas no-test (constante en todas las columnas) |
+| `homesCoveragePct` | `distinctHomes / activeHomes × 100` (null si `activeHomes = 0`) |
+
+`isOccupantStay` deja una fila por estancia real del ocupante: `book`/`rent`/`exchange` cuentan; `to_rent`/`to_swap` solo si NO fueron cedidas (la fila derivada rent/exchange ya cuenta esa estancia del invitado).
+
+## % encuestas completadas
+
+Desde VIV-2763 (acordada con CX el 23-sep-2026), la fila única de % Respondidas se sustituye por **tres ratios completadas/debidas** por columna: **Total**, **Estancia** y **Llegada**. Se calculan en `computeResponseRates` (`assembleResponseRatio`) sobre el universo **UNGATED** de estancias elegibles (sin filtrar por `flag_enjoyed`).
+
+- **Debidas (denominador)** — cada estancia elegible vence su **stay-review** en `eff_out` (check-out) y su **arrival-review** en `eff_in` (check-in); la ventana se aplica a cada fecha por separado. `Total` suma stay + arrival. **Onboarding no entra** en estas filas (conserva su propia fila de NPS).
+- **Completadas (numerador)** — respuestas `completed` de estancias elegibles, contadas contra la fecha de vencimiento de su tipo.
+- **Exclusión interna/test** — `isInternalTestEmail` / `internalUserIdSets` descartan usuarios internos y de prueba del universo, replicando `response-rate-20-periods.sql`. Ojo: ese patrón matchea `@vivla.com` a secas (a diferencia del resto del código, que conserva `cx.books@vivla.com`) — la métrica sigue la SQL de referencia, no la convención de CLAUDE.md.
+- `pct = completadas / debidas × 100` (null si `debidas = 0`).
+
+<Note>
+  El contrato mantiene `responseRate` (una sola fila) como **alias deprecado** de `responseRates.total`, para no romper el frontend ni el snapshot writer, que aún lo desestructuran.
+</Note>
+
+## Frictionless v2 (sin fricción)
+
+Mide el **% del total de estancias libres de fricción**. Definición v2 (VIV-2763, acordada con CX el 23-sep-2026), calculada por `isFrictionlessV2` sobre estancias **UNGATED** (sin filtro `flag_enjoyed`). Una estancia es frictionless cuando cumple **las dos** condiciones:
+
+1. **Sin rating bajo** — ninguna nota **presente** del review (Casa/Equipo, 0-10) está **por debajo de 7**. Una cara ausente pasa; una estancia **sin review vinculada** también pasa (silencio = sin problema reportado). Umbral `>= 7`: **el 7 exacto ahora pasa**, a diferencia de la v1, que exigía `> 7`.
+2. **Sin ticket urgente** — ningún ticket urgente vinculado (`stayHasUrgentTicket`, método combinado: `booking_id` directo **o** solape casa/fecha entre `created_at` y el rango de la estancia), excluyendo `ticket_kind = 'improvement_proposal'`.
+
+- **Denominador** = estancias ocupante de la ventana en casa activa, **ungated**.
+- El enlace de ratings lo resuelve `resolveStayRatingLink` por `bookings.id` **o** `bookings.old_bid` (nuevo gana a legacy; el último gana en empates) — corrige el bug de la v1 que perdía ~97% de los enlaces legacy.
+
+<Note>
+  Escala 0-10 para comparar igual nuevo y legacy: las notas nuevas vienen de 1-5★ y se normalizan con `normFromFivePoint` (×2 → 0-10); las legacy (`nps`) ya están en 0-10. Target Frictionless: 90 (`FRICTIONLESS_TARGET`).
+</Note>
+
+## Resolución de tickets
+
+Métrica nueva (VIV-2763, `tickets-v2-01-p90.sql` + `tickets-v2-02-metrics.sql`) con **dos filas por columna**: **Urgent** y **All**. Cohorte fija desde `2026-07-01` (`TICKET_RESOLUTION_COHORT_START_ISO`).
+
+- **P90 como umbral de outlier** — `percentileCont(0.9)` se calcula **una vez por grupo** (urgent/all) sobre la cohorte completa hasta el corte del informe y se reutiliza como umbral en cada columna. Un ticket **resuelto** por encima del P90 es `resolved_outlier`; un ticket **abierto** cuya antigüedad ya supera el P90 es `open_outlier` (`classifyOutlier`).
+- **Media y mediana** (`summarizeResolution`) se calculan solo sobre los tickets **resueltos y no-outlier**; `ticketResolveDays` descarta resoluciones sin timestamp o anteriores/iguales a la creación (glitch de datos).
+- **Celda vacía** cuando la columna termina en/antes del inicio de la cohorte, o cuando la cohorte queda vacía.
+- Exclusión de casas/usuarios de prueba con `isTestTicketHomeOrUser` (patrón propio, distinto del de % completadas: no descarta `@vivla.com` a secas).
+
+Cada celda muestra `n`, `% resueltos`, nº de outliers y el `P90` en días.
+
+## Filtro: reservas disfrutadas + casa activa
+
+Es la regla central del conteo de **Estancias**. Desde VIV-2763, **% encuestas completadas** y **Frictionless v2** pasaron a un universo **ungated**, así que este filtro ya **solo** afecta a Estancias; tampoco afecta a los pools NPS.
+
+Una estancia entra en los conteos solo si cumple las tres condiciones (`filterEnjoyedActive`):
+
+1. **Casa activa** — `properties.status = 'active'` **y** `deleted_at IS NULL` **y** `name NOT ILIKE '%[Test]%'`. El conjunto de `hid` activos lo provee `fetchActiveHomes()`.
+2. **Reserva disfrutada** — `bookings.flag_enjoyed = true` (CX marca la estancia como disfrutada; se sincroniza desde Firestore `bookFlags.enjoyed`).
+3. **property_hid no nulo** y dentro del set de casas activas.
+
+| Métrica | ¿Filtrada por disfrutadas+activa? |
+|---------|-----------------------------------|
+| Estancias (`stays`, `distinctHomes`, `homesCoveragePct`) | **Sí** |
+| % encuestas completadas (Total/Estancia/Llegada) | **No** — universo ungated de estancias elegibles |
+| Frictionless v2 (numerador y denominador) | **No** — ungated (VIV-2763) |
+| Pools NPS (Estancia, CX, Llegada, Onboarding, Global) | **No** — sobre todas las respuestas |
+
+<Note>
+  Matiz operativo: CX a veces marca `enjoyed` 1-2 días después de empezar la estancia. Como el reporte es retrospectivo, la mayoría de las estancias ya están marcadas cuando se computa. Por eso el **emisor** de `arrival-review` (`SurveyCandidatesService`) NO se gatea por `enjoyed`, pero el reporte sí cuenta sobre la regla disfrutadas+activa.
+</Note>
+
+### Semanas cedidas: el flag vive en la reserva del propietario
+
+En intercambio y alquiler el modelo antiguo escribe **dos** reservas: la del propietario que cede la semana (`to_rent` / `to_swap`) y la de quien se aloja (`rent` / `exchange`), que apunta a la primera por `origin_booking_id`.
+
+CX marca `flag_enjoyed` sobre la reserva del propietario, porque es la única que existe en v2 (`v2_booking_id` está al 98-99% en `book` y al 0% en `rent` / `exchange`). La reserva del ocupante **nunca** lleva el flag: 0 de 420 `exchange` y 0 de 347 `rent` en todo el histórico.
+
+Por eso, tanto el emisor (`SurveyCandidatesService`) como el reporte (`WeeklyNpsDataService`) resuelven el flag sobre la reserva padre para esos dos tipos. `book` sigue leyendo el suyo. La regla vive en un único sitio, `stay-enjoyed-flag.ts`, para que envío y métricas cuenten lo mismo.
+
+<Warning>
+  Una reserva de ocupante sin `origin_booking_id` no tiene padre del que heredar, así que no recibe encuesta ni cuenta como estancia. El emisor lo registra con un `warn`. Es una decisión consciente (VIV-2525): no hay emparejamiento por fechas como respaldo, porque el refactor del modelo de reservas unifica ambas filas.
+</Warning>
+
+## Endpoints
+
+| Endpoint | Auth | Descripción |
+|----------|------|-------------|
+| `GET /surveys/reports/weekly-nps` | `tool-chat` viewer | Payload del reporte (Anual + trimestres + semana). Acepta `?week=<ISO>`. |
+| `POST /surveys/reports/weekly-nps/send` | `x-api-key` | Computa + renderiza + envía el email (`to`, `week`, `dryRun` opcionales). |

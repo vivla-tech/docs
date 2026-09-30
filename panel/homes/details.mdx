@@ -1,0 +1,299 @@
+---
+title: "Detalle de casa"
+description: "Ficha de una casa en /homes/:id: secciones, edición por tarjetas, fotos, documentos, parkings, comodidades, estado, agente CX y códigos de acceso de propietarios"
+---
+
+# Detalle de casa
+
+El detalle es la ficha completa de una casa. CX lo usa para consultar y mantener todo lo que necesita en el día a día: acceso, wifi, alarma, fotos, guías, proveedores, propietarios y calendario.
+
+La pantalla se organiza en secciones. Cada sección es una lista de tarjetas. Pulsas una tarjeta para abrir su editor.
+
+## Rutas
+
+| Ruta | Qué hay | Permiso |
+|------|---------|---------|
+| `/homes/:id` | Detalle en la sección **Información sobre la casa** | `read:homes` |
+| `/homes/:id?section=:section` | Detalle abierto en otra sección | `read:homes` |
+| `/homes/:id?section=:section&component=:cardId` | Detalle con una tarjeta seleccionada y su editor abierto | `read:homes` (editar exige `edit:homes`) |
+
+Si la casa no existe, verás **La casa que buscas no existe o ha sido eliminada** y el panel te devuelve a `/homes`.
+
+## Cómo funciona la pantalla
+
+- Arriba ves el nombre de la casa y una flecha para volver. La flecha desaparece si tienes una casa fijada en el [selector global](/panel/homes#selector-global-de-casa).
+- Debajo tienes el selector de sección. Es un desplegable, no pestañas.
+- Pulsa una tarjeta para seleccionarla. La URL añade `?component=<cardId>` y el editor se abre en la columna derecha. En móvil se abre en un panel inferior (`EditSectionCardSheet`).
+- Vuelve a pulsar la tarjeta para cerrarla.
+- Algunas tarjetas se editan en la propia tarjeta (estado, agente CX, licencia turística, guías) y no abren editor.
+
+En los valores de las tarjetas tienes acciones rápidas:
+
+- El icono de copiar copia el valor y muestra **Copiado al portapapeles**.
+- El icono del ojo muestra u oculta los datos sensibles, como el número de cuenta.
+- **Ver más** y **Ver menos** expanden los textos largos.
+
+<Note>
+  Sin `edit:homes` ves los mismos editores, pero con los campos deshabilitados
+  y sin botón **Guardar**. Los selectores de las tarjetas también quedan
+  bloqueados.
+</Note>
+
+## Secciones
+
+| Sección en la UI | `section` | Qué hay |
+|------------------|-----------|---------|
+| **Información sobre la casa** | `basicInformation` | Todas las tarjetas operativas de la casa |
+| **Calendario de la casa** | `calendar` | Slots del calendario, mes a mes |
+| **Propietarios** | `owners` | Fracciones vendidas y ficha de cada propietario |
+| **Proveedores y suministros** | `services` | Proveedores asignados, por categoría |
+| **Documento de Check in** | `checkinDoc` | Te lleva a [`/homes/:id/checkin-doc`](/panel/homes/checkin-doc). Solo aparece con `edit:homes` |
+
+<Warning>
+  Existe una sexta sección, **Información legal y financiera** (`propCos`). Está
+  oculta en el selector y solo se abre escribiendo `?section=propCos` en la URL.
+  Hoy muestra datos de maqueta fijos en el código, no datos reales de la casa.
+  No la uses como fuente.
+</Warning>
+
+## Información sobre la casa
+
+| Tarjeta | Qué muestra | Cómo se edita |
+|---------|-------------|---------------|
+| **Recorrido fotográfico** | Mosaico con la portada y dos fotos, más el recuento | Editor de fotos |
+| Datos básicos | **Ocupación máxima**, **Localización**, **Dirección completa**, indicaciones, **Web Link** y trastero | Formulario **Información de la casa** |
+| **Parking** | Dirección, plaza, código e información de acceso de cada parking | Formulario **Parkings** |
+| **Estado de la casa** | Estado actual con icono | Selector en la tarjeta |
+| **Descripción** | Texto descriptivo | Formulario **Descripción de la casa** |
+| **Comodidades** | Comodidades por estancia | Editor **Comodidades** |
+| **Datos del wifi** | Red y contraseña | Formulario **Wifi** |
+| **Método de llegada** | Código de acceso del propietario que elijas | Formulario **Códigos de acceso de propietarios** |
+| **Seguridad y Alarma** | Palabras clave y códigos de la alarma | Formulario **Información de acceso** |
+| **Guía de la casa** | PDFs subidos | Subida en la tarjeta |
+| **Guía de recomendaciones** | PDFs subidos | Subida en la tarjeta |
+| **Normas de la casa** | Texto de normas | Formulario **Normas de la casa** |
+| **Agente CX** | Agente asignado | Selector en la tarjeta |
+| Otros datos | **Email de la casa**, dirección de envío, **Welcome pack** y **Supermercado online** | Formulario **Información de la casa** |
+| **Número de cuenta de la casa** | Número enmascarado | Formulario **Información bancaria** |
+| Licencias y alquiler | **Licencia turística**, registros, **Hostaway**, **Airbnb** y **Coanfitrión Airbnb** | Selector de licencia en la tarjeta y formulario **Información de licencia turística** |
+| Comunidad | **Domiciliación comunidad**, **Admin comunidad** y **Conserje** | Formulario **Información bancaria** |
+| **Información sobre zonas comunes y lugares de interés** | Texto libre | Formulario **Información de la zona** |
+
+Casi todos los formularios guardan con **Guardar** contra la misma petición de edición de la casa. Al terminar verás **Información de la casa actualizada**.
+
+<Warning>
+  En **Información de la casa**, varios campos se bloquean en cuanto tienen
+  valor: nombre, destino, tipo, dirección, ciudad, provincia, código postal,
+  dormitorios, baños y superficie. Camas, ocupación, Google Maps, indicaciones,
+  web y trastero siguen editables. Dirección, ciudad, código postal, Google
+  Maps e indicaciones también se editan desde **Dirección y llegada** en el
+  [documento de check-in](/panel/homes/checkin-doc#contenido-del-documento).
+</Warning>
+
+<Tip>
+  **Admin comunidad** y **Conserje** no se escriben a mano. Salen de los
+  proveedores de la categoría **Comunidad** con servicio administrador o
+  conserje. Añádelos desde [Proveedores y suministros](#proveedores-y-suministros).
+</Tip>
+
+### Estado de la casa
+
+La tarjeta **Estado de la casa** tiene un selector con tres opciones: **Casa Inactiva**, **Casa Pre-Activada** y **Casa Activada**. Cada opción muestra su descripción en el desplegable.
+
+- El cambio se aplica al elegir, sin botón de guardar.
+- Si falla, el selector vuelve al estado anterior y verás **Error al actualizar el estado de la casa**.
+- Si va bien, verás **Estado de la casa actualizado**.
+
+Qué implica cada estado para reservas e intercambios está en [Operativa](/operativa#estados-de-una-casa).
+
+### Agente CX
+
+La tarjeta **Agente CX** tiene un selector con la lista de agentes (`GET /v2/admin/properties/cx-agents`). Al elegir uno se guarda al momento. Es el mismo dato que el **Home manager** del [documento de check-in](/panel/homes/checkin-doc).
+
+<Note>
+  `CxAgentSelector` es otro componente: un filtro por agente CX (**Agente CX**,
+  **Todos**) que usan los listados de [Usuarios](/panel/users) y
+  [Reservas](/panel/bookings). No se usa en esta pantalla.
+</Note>
+
+### Fotos
+
+Pulsa **Recorrido fotográfico** para abrir el editor de fotos. Tiene dos bloques:
+
+- **Portada**: "Es la foto que ve el propietario al abrir la casa en la app."
+- **Recorrido**: el resto de fotos, en orden de subida. El propietario las ve en ese orden. No se pueden reordenar.
+
+Para subir fotos, pulsa **Añadir fotos** o arrastra archivos sobre el editor (**Suelta las fotos aquí**). Admite JPG o PNG de hasta 25 MB, con un máximo de 10 fotos por tanda. Cada foto se sube por separado: si alguna falla, verás **No se ha podido subir «archivo»** y el resto sigue.
+
+En cada foto tienes:
+
+- **Hacer portada**: la foto pasa a portada y la portada anterior vuelve al recorrido.
+- **Editar título**: cambia el texto alternativo de la foto.
+- **Eliminar**: pide confirmación en **Eliminar imagen**.
+- Clic en la foto: abre el visor a pantalla completa. Muévete con las flechas y cierra con Esc.
+
+<Warning>
+  Si eliminas la portada, la casa se queda sin portada en la app hasta que
+  elijas otra foto del recorrido. El diálogo te lo avisa.
+</Warning>
+
+Sin `edit:homes` verás **Solo lectura. No tienes permiso para editar las fotos de esta casa.**
+
+### Imágenes de acceso
+
+Las imágenes de acceso ya no tienen tarjeta en el detalle. Se gestionan en línea dentro del [documento de check-in](/panel/homes/checkin-doc): subir, ordenar, renombrar, redimensionar y borrar.
+
+### Documentos descargables
+
+Las tarjetas **Guía de la casa** y **Guía de recomendaciones** guardan PDFs.
+
+- Pulsa **Añadir documento** y elige uno o varios PDF de hasta 50 MB. En la guía de recomendaciones el máximo es 10 por tanda.
+- Pulsa el nombre del documento para abrirlo en otra pestaña. El icono de descarga hace lo mismo.
+- Pulsa la **X** para borrarlo. Te pide confirmación en **Eliminar documento**.
+
+La primera **Guía de la casa** es la que enlaza el documento de check-in con **Ver guía de la casa**.
+
+### Parkings
+
+El formulario **Parkings** admite varios parkings. Pulsa **Añadir Parking** y rellena **Plaza**, **Código de acceso**, **Información de acceso**, **Dirección** y **URL de Google Maps**. Guarda con **Guardar**.
+
+Para borrar un parking guardado, pulsa la papelera y confirma en **Eliminar parking**. El borrado se ejecuta al confirmar, sin esperar a **Guardar**. Un parking que aún no has guardado se quita sin confirmación.
+
+### Comodidades
+
+En el editor **Comodidades**:
+
+1. Pulsa **Añadir**.
+2. Elige la comodidad en **Selecciona una comodidad**. El catálogo viene de la API.
+3. Elige la estancia en **Selecciona habitación**: **Dormitorio**, **Sala de estar**, **Cocina**, **Baño**, **Jardín**, **Estudio** o **Genérico**.
+4. Pulsa **Guardar**.
+
+Al guardar se envía la lista completa, que sustituye a la anterior. Verás **Comodidades de la casa actualizadas**.
+
+### Wifi, seguridad y alarma
+
+- **Wifi** admite varias redes (**Añadir Wifi**), cada una con **Red** y **Contraseña**. El listado de casas solo enseña la primera.
+- **Información de acceso** recoge **Palabra clave SD**, **Mi palabra clave**, **Palabra clave coacción**, **Pin de seguridad**, **Código coacción** y **Código de acceso**.
+
+### Códigos de acceso de propietarios
+
+Cada propietario puede tener un código de acceso personal para esta casa.
+
+En la tarjeta **Método de llegada**, elige un propietario en **Selecciona propietario** para ver su código.
+
+Para editarlos, pulsa la tarjeta. El formulario **Códigos de acceso de propietarios** muestra una fila por propietario, con sus fracciones. Incluye a los copropietarios vinculados.
+
+1. Escribe o cambia el código de cada propietario.
+2. Pulsa **Guardar**. Solo se envían las filas que han cambiado.
+3. Si todo va bien, verás **Códigos de acceso guardados**.
+
+<Warning>
+  Por ahora un código se puede cambiar, pero no quitar. Si vacías un código
+  existente, verás **Por ahora no se puede quitar un código, solo
+  sustituirlo**. La API rechaza los códigos vacíos. El máximo es 100
+  caracteres.
+</Warning>
+
+<Note>
+  La API no tiene un endpoint propio para estos códigos. Viajan en la edición
+  del usuario (`PUT /v2/admin/users/:userId/update`, campo `accessCodes`), una
+  petición por propietario. Si alguna falla, el aviso nombra a los propietarios
+  afectados: **No se pudo guardar el código de acceso de: …**. El resto queda
+  guardado. Antes de cada petición el panel lee el teléfono y la foto del
+  propietario y los reenvía, porque esa edición los vacía en Firestore si no
+  llegan.
+</Note>
+
+El [documento de check-in](/panel/homes/checkin-doc) usa estos códigos en la tabla de llegada. Lo explica su apartado sobre el código del propietario.
+
+## Calendario de la casa
+
+Muestra los slots del calendario de la casa mes a mes, coloreados por temporada. Es solo lectura.
+
+- Pulsa un día para abrir **Detalle del slot**, con **Fechas** y **Temporada**.
+- Si el slot tiene reserva, pulsa **Ver detalles de reserva** para abrirla en [Reservas](/panel/bookings).
+- Si no la tiene, verás **No hay reserva asociada a este slot**.
+
+Si la casa no tiene slots, verás **El calendario de esta casa no está disponible**. Los slots y las temporadas se gestionan en [Calendarios](/panel/calendars). Contexto de producto en [Calendario y temporadas](/backend/calendario-temporadas).
+
+## Propietarios
+
+- **Fracciones vendidas** suma las fracciones de todos los propietarios de la casa.
+- Cada propietario tiene su tarjeta con nombre, fracciones y **Datos personales** (email y teléfono copiable). Si comparte fracción con otro usuario, verás **(compartida)**.
+- **Ver reservas** abre [Reservas](/panel/bookings) filtrado por ese propietario y esta casa.
+- **Ver perfil completo** abre su ficha en [Usuarios](/panel/users).
+
+Esta sección es de consulta. Los propietarios se gestionan desde [Usuarios](/panel/users).
+
+## Proveedores y suministros
+
+Los proveedores se agrupan por categoría: **Experiencias**, **Mantenimiento**, **Mobiliario**, **Suministros**, **Comunidad** y **Otros servicios**.
+
+Para añadir uno, pulsa la tarjeta **Añadir proveedor**:
+
+- **Proveedor existente**: elige el **Tipo de servicio**, busca en **Buscar proveedor...**, selecciona uno y pulsa **Añadir**.
+- **Proveedor nuevo**: pulsa **Crear nuevo proveedor**, rellena **Nombre**, **Teléfono**, **Email**, **Página web** y **Tipo de servicio**, y pulsa **Crear**.
+
+Cualquier proveedor puede prestar cualquier servicio. El tipo que elijas se asigna al proveedor en esta casa.
+
+Pulsa un proveedor para editar sus datos. **Quitar de la lista** lo desvincula de esta casa, pero no borra el proveedor.
+
+<Warning>
+  Editar un proveedor cambia sus datos (nombre, teléfono, email, web) en todas
+  las casas donde está asignado. La edición va contra el proveedor
+  (`PUT /v2/admin/properties/providers/:providerId/edit`), no contra su
+  asignación a la casa.
+</Warning>
+
+## Endpoints de vivla-api
+
+| Método | Endpoint | Para qué |
+|--------|----------|----------|
+| `GET` | `/v2/admin/properties/:id` | Ficha completa de la casa |
+| `PUT` | `/v2/admin/properties/:id/edit` | Edición general: datos, acceso, wifi, parkings, licencias, banco y agente CX |
+| `PUT` | `/v2/admin/properties/:id/change-status` | Cambio de estado |
+| `GET` | `/v2/admin/properties/cx-agents` | Lista de agentes CX |
+| `GET` | `/v2/admin/properties/amenities` | Catálogo de comodidades |
+| `PUT` | `/v2/admin/properties/:id/amenities/edit` | Sustituye las comodidades de la casa |
+| `DELETE` | `/v2/admin/properties/parkings/:parkingId/remove` | Borra un parking |
+| `GET` | `/v1/upload-url` | URL firmada para subir fotos y PDFs |
+| `POST` | `/v2/admin/properties/:id/images/add` | Añade una foto al recorrido |
+| `PUT` | `/v2/admin/properties/images/:imageId/edit` | Cambia el título de una foto |
+| `PUT` | `/v2/admin/properties/:id/images/:imageId/set-cover` | Marca una foto como portada |
+| `DELETE` | `/v2/admin/properties/images/:imageId/delete` | Borra una foto |
+| `POST` | `/v2/admin/properties/:id/documents/add` | Añade un PDF (`home-guide` o `recommendations-guide`) |
+| `DELETE` | `/v2/admin/properties/documents/:documentId/delete` | Borra un PDF |
+| `PUT` | `/v2/admin/users/:userId/update` | Guarda el código de acceso de un propietario (`accessCodes`) |
+| `GET` | `/v2/admin/calendars` | Slots del calendario de la casa (filtro `homes`) |
+| `GET` | `/v2/admin/calendars/:calendarId/seasons` | Temporadas y colores |
+| `GET` | `/v2/admin/properties/providers` | Catálogo de proveedores |
+| `GET` | `/v2/admin/properties/providers/services` | Tipos de servicio por categoría |
+| `POST` | `/v2/admin/properties/:id/providers/add` | Asigna un proveedor existente o crea uno nuevo en la casa |
+| `PUT` | `/v2/admin/properties/providers/:providerId/edit` | Edita los datos del proveedor |
+| `DELETE` | `/v2/admin/properties/:id/providers/:providerId/remove` | Quita el proveedor de la casa |
+
+## Código
+
+| Qué | Dónde |
+|-----|-------|
+| Página | `src/pages/HomeDetails` |
+| Secciones y card ids | `src/features/homes/constants/sections.ts`, `src/features/homes/constants/sectionsCardIds.ts` |
+| Selector de sección | `src/features/homes/components/DetailsSectionSwitcher` |
+| Render de sección y de editor | `src/features/homes/components/renderHomeDetailsSection.tsx`, `src/features/homes/components/renderHomeDetailsSectionCardEditor.tsx` |
+| Selección de tarjeta por URL | `src/features/homes/hooks/useSelectableSectionCard.ts` |
+| Panel de edición en móvil | `src/features/homes/components/EditSectionCardSheet` |
+| Tarjetas y editores | `src/features/homes/components/detailsSections/` (`BasicInformation`, `Calendar`, `Owners`, `Services`, `PropCos`) |
+| Editor de fotos | `src/features/homes/components/detailsSections/BasicInformation/editors/GalleryEditor` |
+| Formularios | `src/features/homes/components/forms/` |
+| Botón de documento | `src/features/homes/components/DownloadableDocButton` |
+| Reglas de propietarios | `src/core/homes/rules/owner.rules.ts` |
+| Límites de subida | `src/lib/dropzone.ts` |
+| Peticiones y queries | `src/features/homes/api/requests/`, `src/features/homes/queries/` |
+| Textos de UI | `src/assets/locales/es/homes.json` |
+
+<Note>
+  `flattenLinkedOwners` ordena a los propietarios por id antes de aplanar los
+  vinculados. La API los devuelve en un orden que cambia cada vez que se
+  actualiza un propietario, así que sin ese orden el formulario se reordenaría
+  tras cada guardado.
+</Note>
