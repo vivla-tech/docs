@@ -49,7 +49,7 @@ El importe se fija al alquilar, pero el equipo también puede **editarlo despué
 
 ## 4. Hostaway
 
-Las casas alquilables pueden tener una ficha en **Hostaway** (el motor de alquiler externo). La relación es **solo un enlace**: si la casa tiene identificador de Hostaway, el sistema compone la URL hacia su ficha. No hay sincronización automática de reservas ni de precios entre VIVLA y Hostaway.
+Las casas alquilables pueden tener una ficha en **Hostaway** (el motor de alquiler externo). Ya no es solo un enlace: VIVLA **sincroniza automáticamente** hacia Hostaway el estado de alquiler de la semana (abre, reserva o libera las noches en el calendario de Hostaway según avanza la reserva). Es una sincronización **en un solo sentido** (de VIVLA a Hostaway) y solo para reservas de alquiler de casas con ficha de Hostaway configurada; los precios los sigue fijando el equipo a mano.
 
 ---
 
@@ -58,5 +58,5 @@ Las casas alquilables pueden tener una ficha en **Hostaway** (el motor de alquil
 | Actor | Rol |
 |-------|-----|
 | **App móvil** | El copropietario publica su semana para alquiler. |
-| **Vivla API** | Guarda estados y valida transiciones; enlaza a Hostaway. No calcula precio ni comisión. |
+| **Vivla API** | Guarda estados y valida transiciones; sincroniza el alquiler hacia Hostaway. No calcula precio ni comisión. |
 | **Panel CX** | El equipo fija el precio a mano, aprueba/rechaza y libera. |

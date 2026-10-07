@@ -23,23 +23,21 @@ La API versiona por URI. Cada ruta empieza por su versión: `/v1/...` o `/v2/...
 
 ## La dualidad v1 / v2
 
-vivla-api convive con dos bases de datos a la vez. Entender cuál manda en cada dato es lo más importante de este backend.
+vivla-api todavía convive con dos bases de datos, pero **reservas, calendario y temporadas ya migraron a Postgres (v2)**: se eliminaron los endpoints y la lógica `/v1` de reservas y de calendario, y se retiró la sincronización de reservas con Firestore. Entender qué queda en cada sitio sigue siendo clave.
 
 <Tabs>
-  <Tab title="v1 — Firestore">
-    **Fuente de verdad de reservas y calendario.** Las reservas, los slots del calendario, las temporadas por casa y los estados de las estancias viven en Firestore (Firebase). Los endpoints `/v1/...` leen y escriben aquí.
-
-    El calendario de cada casa se guarda en `config/{año}/{calendar_ref}` con subcolecciones por temporada (`src/bookings/calendars/v1/calendars.repository.ts:69`).
-  </Tab>
   <Tab title="v2 — PostgreSQL (TypeORM)">
-    **Wallet de llaves y experiencias.** El monedero de llaves de intercambio, los movimientos, los costes en llaves por casa y las experiencias viven en Postgres vía TypeORM. Los endpoints `/v2/...` leen y escriben aquí.
+    **Fuente de verdad de reservas, calendario, temporadas y wallet de llaves.** Las reservas, los slots del calendario, las temporadas (ahora con columnas propias `slots_available`, `allows_consecutive`, `instant_keys`), las experiencias y el monedero de llaves viven en Postgres vía TypeORM. Toda la superficie de reservas es `/v2/...` (`src/bookings/v2/...` y `src/calendars/v2/...`).
 
-    Entidades clave: `exchange_keys` (movimientos), `exchange_keys_wallet` (saldo con caducidad), `home_exchange_keys` (coste por casa+temporada), `configurations` (parámetros).
+    Entidades clave: `bookings`, `stays`, `seasons`, `exchange_keys` (movimientos), `exchange_keys_wallet` (saldo con caducidad), `home_exchange_keys` (coste por casa+temporada), `configurations` (parámetros).
+  </Tab>
+  <Tab title="v1 — Firestore (legacy)">
+    **Datos legacy de casas y usuarios.** Firestore ya **no** es la fuente de verdad de reservas ni de calendario. Conserva datos legacy de casas (caché que se refresca por cron) y usuarios, que se transfieren a Postgres (`users:transfer`). Las tablas v2 aún referencian casas/usuarios por sus IDs antiguos (`oldHid`, `oldUid`).
   </Tab>
 </Tabs>
 
 <Warning>
-  **v2 todavía depende de v1.** Las tablas Postgres referencian las casas y usuarios de Firestore por sus IDs antiguos (`oldHid`, `oldUid`). Muchas operaciones de v2 (por ejemplo el coste en llaves de una casa) resuelven primero la casa en Firestore para encontrar su equivalente en Postgres. No es una migración cerrada: es una capa nueva montada sobre la vieja.
+  **No es una migración cerrada del todo.** Las tablas Postgres siguen referenciando casas y usuarios de Firestore por sus IDs antiguos (`oldHid`, `oldUid`), y la caché de casas y la transferencia de usuarios aún parten de Firestore. Lo que sí quedó cerrado es **reservas y calendario**: viven solo en Postgres.
 </Warning>
 
 ## Módulos
@@ -48,8 +46,8 @@ La API se organiza en módulos NestJS (`src/app.module.ts`).
 
 | Módulo | Qué contiene |
 |--------|--------------|
-| **Bookings** | Reservas: crear, cancelar, alquilar, intercambiar. v1 (Firestore) y v2 (experiencias + llaves). |
-| **Calendars** | Calendario de cada casa, slots, temporadas, disponibilidad. Vive dentro de `bookings/calendars`. |
+| **Bookings** | Reservas: crear, cancelar, alquilar, intercambiar, experiencias y wallet de llaves. Solo v2 (Postgres); los controllers y la lógica v1 se eliminaron. |
+| **Calendars** | Calendario de cada casa, slots, temporadas, disponibilidad. Módulo propio `src/calendars` (v2, Postgres); ya no vive dentro de `bookings/calendars`. |
 | **Homes** | Casas: lectura de las casas del usuario, listados y localizaciones (v1/v2 + controller `tools` por HMAC). Sus endpoints de catálogo `admin` se están migrando al módulo **Properties**. |
 | **Properties** | Catálogo de propiedades (dirección, amenities, proveedores, bancos, hosting, parking, documentos e imágenes). Controllers `admin` y `apps`; destino de la migración desde `Homes`. |
 | **Users** | Usuarios y perfiles. Controllers v1/v2 + variantes `admin` y `tools`. |
@@ -57,7 +55,7 @@ La API se organiza en módulos NestJS (`src/app.module.ts`).
 | **Notifications** | Envío de notificaciones (push / buzón Firestore). |
 | **Invitations** | Invitaciones de asistentes a reservas. |
 | **Configuration** | Tabla `configurations` (parámetros clave/valor). |
-| **ScheduledJobs** | Crons: caducidad de llaves, bono anual, refresco de caché, transfers. |
+| **ScheduledJobs** | Crons: caducidad de llaves, bono anual, refresco de caché de casas, envío de la cola de eventos (incluida la sincronización con Hostaway) y transferencia de usuarios. |
 | **Firestore / Database** | Conexión a Firestore (v1) y a Postgres/TypeORM (v2). |
 | **Common** | Filtros de error, i18n, utilidades, entidades compartidas. |
 
@@ -65,7 +63,7 @@ La API se organiza en módulos NestJS (`src/app.module.ts`).
 
 <CardGroup cols={2}>
   <Card title="Endpoints de reservas" icon="list" href="/backend/bookings-endpoints">
-    Referencia de endpoints público/admin de v1 y v2, más los de calendario.
+    Referencia de endpoints v2 (app del copropietario y panel), más los de calendario.
   </Card>
   <Card title="Reglas de reserva" icon="scale-balanced" href="/backend/reglas-de-reserva">
     Cada validación que impone el código, con su `archivo:línea`.
@@ -74,7 +72,7 @@ La API se organiza en módulos NestJS (`src/app.module.ts`).
     Enum de temporadas, fechas por casa, coste en llaves y check-in/out.
   </Card>
   <Card title="Llaves e intercambio" icon="key" href="/backend/keys-exchange">
-    Wallet, caducidad, los dos motores de intercambio y ThirdHome.
+    Wallet, caducidad, cobro de llaves (instantáneo vs pendiente) y ThirdHome.
   </Card>
   <Card title="Alquiler" icon="house" href="/backend/alquiler">
     Flujo de alquiler, estados, precio manual y Hostaway.

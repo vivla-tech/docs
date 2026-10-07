@@ -23,15 +23,9 @@ En la app, este flujo vive en el módulo de [reservas](/mobile/modules/booking) 
 
 ## 2. Cuánto puede reservar
 
-Cada copropietario tiene un **cupo anual por temporada**, que depende del tipo de casa y del número de fracciones que posee. A grandes rasgos, cuantas más fracciones, más reservas; y las temporadas de más demanda tienen menos cupo.
+Cada copropietario tiene un **cupo anual por temporada**, que depende de la configuración de cada temporada y del número de fracciones que posee. A grandes rasgos, cuantas más fracciones, más reservas; y las temporadas de más demanda suelen tener menos cupo.
 
-| Tipo de casa | Baja | Media | Alta | Pico |
-|--------------|:---:|:---:|:---:|:---:|
-| **Playa** | 2 | 2 | 2 | 1 |
-| **Ski** | 3 | 2 | 1 | 1 |
-| **Urbano** | 2 | 2 | 2 | 0 |
-
-Estos valores se multiplican por las fracciones del copropietario. En casas de playa, reservar en temporada pico también consume cupo de temporada alta. El detalle y las excepciones (casa inactiva, deal bloqueado) están en [Reglas de reserva](/backend/reglas-de-reserva).
+El cupo de cada temporada es un **dato configurable** (por temporada y casa) que se multiplica por las fracciones del copropietario: `cupo disponible = cupo de la temporada × fracciones`. Los números concretos por temporada y casa los fija VIVLA. El detalle (y qué pasa si el copropietario no tiene fracciones o su calendario está bloqueado) está en [Reglas de reserva](/backend/reglas-de-reserva).
 
 ---
 
@@ -40,7 +34,7 @@ Estos valores se multiplican por las fracciones del copropietario. En casas de p
 El copropietario elige uno o dos slots y confirma. La API valida, entre otras cosas:
 
 - máximo **2 estancias** por reserva, de la **misma temporada** y con fechas **consecutivas**;
-- solo se pueden encadenar dos estancias en temporada **baja o media**;
+- solo se pueden encadenar dos estancias si la temporada lo permite (es un ajuste por temporada);
 - la reserva no puede terminar a más de **2 años** vista;
 - debe quedar **cupo** en esa temporada.
 
@@ -65,11 +59,11 @@ Una vez hecha, la reserva puede seguir varios caminos:
 - **Ponerla en alquiler** — dentro de la red VIVLA. Ver [Alquiler de semanas](/operativa/alquiler).
 - **Cancelarla** — libera el slot.
 
-Los invitados de una reserva pueden anular su propia invitación sin cancelar la reserva entera.
+Los invitados que no son el asistente principal pueden anular su propia invitación sin cancelar la reserva entera.
 
-<Warning>
-  **Ventana de cancelación (p. ej. "hasta 30 días antes"): PENDIENTE confirmar por CX/negocio.** El sistema no impone hoy ningún plazo temporal para cancelar; solo comprueba que el usuario tenga permiso. Cualquier política de plazos se gestiona fuera del código.
-</Warning>
+<Note>
+  **Para cancelar deben faltar más de 30 días.** Hoy el sistema solo permite al copropietario cancelar su reserva si **faltan más de 30 días** para que empiece. En reservas de alquiler o intercambio, además, no debe tener asistentes ni haber cobrado llaves. (Antes, con el sistema anterior, no había plazo; esta ventana de 30 días la aplica ahora el código.)
+</Note>
 
 ---
 
