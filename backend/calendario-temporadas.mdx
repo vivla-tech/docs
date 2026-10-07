@@ -25,45 +25,36 @@ Solo las temporadas **baja y media** permiten encadenar dos estancias consecutiv
   **Modelo v2 (Postgres): la temporada dejó de llevar `slug`.** En la entidad `Season` de v2 se retiró el enum de slug (`low`/`mid`/`high`/`peak`) y se sustituyó por un flag booleano explícito **`instant_keys`** (`src/common/database/v2/entities/calendars/season.entity.ts:29`). Ese flag decide el **cobro instantáneo de llaves**: un slot reservado con **≥ 9 meses de antelación** en una temporada con `instant_keys = true` se marca para cobro automático (`src/calendars/v2/apps/calendars.apps.repository.ts:101`) — antes esto se derivaba de "la temporada no es baja". La migración inicial puso `instant_keys = true` en todas las temporadas que no eran `low`, así que el comportamiento no cambia; ahora es **configurable por temporada** en vez de deducirse del slug. El enum `SeasonSlug` de la tabla superior sigue vivo solo en el DTO v1 (`src/common/dtos/season.dto.ts`).
 </Note>
 
-## Las fechas de cada casa (dato Firestore)
+## Las fechas de cada casa (dato en Postgres)
 
-Qué fechas caen en qué temporada **no está en el código**: es dato en Firestore, por casa.
+Qué fechas caen en qué temporada **no está hardcodeado**: es dato por casa. Con la retirada de v1, el calendario y las temporadas ya **no viven en Firestore** (`config/{año}/{calendar_ref}`): ahora son tablas en Postgres (`calendars`, `seasons`, `slots`).
 
-- Cada casa tiene un `calendar_ref`. El calendario se lee de `config/{año}/{calendar_ref}`, que tiene una subcolección por temporada; cada documento es un slot con `from`/`to` en formato `DD/MM/YYYY` (`src/bookings/calendars/v1/calendars.repository.ts:69`).
-- **Plantillas compartidas:** varias casas pueden apuntar al mismo `calendar_ref` y compartir así el mismo calendario. El código resuelve qué casas comparten calendario por ese campo (`calendars.repository.ts:454`).
-- Se gestiona desde los **endpoints admin de calendario** (`slots/create`, `slots/update`, `slots/delete`, `slots/duplicate-year`). Ver [Endpoints de reservas](/backend/bookings-endpoints).
+- Cada calendario tiene sus temporadas (`seasons`) y sus slots con `from`/`to`. Varias casas pueden compartir el mismo calendario.
+- Se gestiona desde los **endpoints admin de calendario** v2 (`/v2/admin/calendars/...`: `:id/slots/create`, `slot/:id/update`, `slot/:id/delete`). Ver [Endpoints de reservas](/backend/bookings-endpoints).
+- El endpoint de calendario de la app (`GET /v2/calendars/property/:id`) devuelve ahora, además de la disponibilidad y el coste en llaves, los **datos de la temporada** que antes faltaban: `maximum` (cupo) y `allowsConsecutive`, más la marca `isLastHour` de cada reserva (`src/calendars/v2/apps/calendars.apps.repository.ts`).
 
 <Warning>
-  **Fechas concretas de temporada por casa: son dato, no código.** Qué semanas son alta o pico en cada casa se define en Firestore y cambia por año y por casa. No lo afirmes desde esta wiki: consúltalo en el calendario de la casa.
+  **Fechas concretas de temporada por casa: son dato, no código.** Qué semanas son alta o pico en cada casa se define en la base de datos y cambia por año y por casa. No lo afirmes desde esta wiki: consúltalo en el calendario de la casa.
 </Warning>
 
 ## Coste en llaves por casa y temporada
 
-El coste en llaves de reservar un intercambio depende de la casa y la temporada (`src/bookings/calendars/v1/calendars.repository.ts:1079`; también `src/bookings/v1/bookings.repository.ts:1999`):
+El coste en llaves de reservar un intercambio depende de la casa y la temporada:
 
-1. **Última hora → 1 llave fija** (`bookings.repository.ts:2001`).
-2. Si existe un registro en la tabla `home_exchange_keys` para esa casa + temporada, se usa su valor (`calendars.repository.ts:1091`). Esta tabla se gestiona con el endpoint admin `POST /v2/admin/bookings/keys/home/:homeId/set`.
-3. Si no existe, se usa el **fallback** de la variable de entorno `DEFAULT_KEYS`, un CSV con el orden `[alta, media, baja]` (`calendars.repository.ts:1109`). Pico usa el mismo índice que alta.
+1. **Última hora → 1 llave fija**.
+2. Si existe un registro en la tabla `home_exchange_keys` para esa casa + temporada, se usa su valor. Esta tabla se gestiona ahora desde el módulo Properties: `POST /v2/admin/properties/:homeId/set-keys`.
+3. Si no existe, se usa el **fallback** de la variable de entorno `DEFAULT_KEYS`, un CSV con el orden `[alta, media, baja]` (`src/homes/v2/homes.repository.ts:331`). Pico usa el mismo índice que alta.
 
 <Warning>
   **Valores de `DEFAULT_KEYS`: PENDIENTE confirmar.** Es una variable de entorno; su valor en producción no está en el código.
 </Warning>
 
-## Check-in y check-out: fuente doble (inconsistencia conocida)
+## Check-in y check-out
 
-Hay **dos fuentes distintas** para las horas de entrada y salida, y no coinciden:
-
-<Tabs>
-  <Tab title="Hardcode 16:00 / 10:00">
-    Al construir el calendario futuro de una casa, las horas de entrada y salida entre slots encadenados usan valores **fijos en código**: check-in 16:00 y check-out 10:00 (`src/bookings/calendars/v1/calendars.repository.ts:56`).
-  </Tab>
-  <Tab title="Tabla Configuration por tipo de casa">
-    Al construir las estancias de una reserva concreta, las horas se leen de la tabla `configurations`, con claves `default_check_in_<HomeType>` y `default_check_out_<HomeType>` (`src/bookings/v1/bookings.repository.ts:1163`; también `calendars.repository.ts:895`).
-  </Tab>
-</Tabs>
+Las horas de entrada y salida por defecto son ahora **columnas del propio calendario** en Postgres: `default_checkin_hour` y `default_checkout_hour` (tipo `time`) de la entidad `Calendar` (`src/common/database/v2/entities/calendars/calendar.entity.ts:13`), sembradas por defecto a **16:00:00 / 10:00:00**. Con la retirada de v1 desaparecieron tanto el hardcode `16:00/10:00` del calendario v1 como las claves por tipo de casa `default_check_in_<HomeType>` / `default_check_out_<HomeType>`.
 
 <Warning>
-  **Inconsistencia conocida.** El check-in/out sale de dos sitios distintos (constante `16/10` vs tabla `configurations` por tipo de casa) que pueden discrepar. Las **horas reales** de check-in/out son política operativa: **PENDIENTE confirmar por CX/negocio** cuáles rigen.
+  **Horas reales de check-in/out: política operativa, PENDIENTE confirmar por CX/negocio.** Los valores son dato en la tabla `calendars`.
 </Warning>
 
 ## Tipos y estados de casa

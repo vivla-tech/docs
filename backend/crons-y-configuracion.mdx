@@ -11,20 +11,28 @@ Los crons viven en `src/common/scheduled-jobs/scheduled-jobs.service.ts`. Todos 
 
 | Horario | Tarea | Referencia |
 |---------|-------|------------|
-| **00:00 diario** | Limpia caché y refresca caché de casas y reservas. | `scheduled-jobs.service.ts:32` |
-| **12:00 diario** | Refresca caché de casas y reservas. | `scheduled-jobs.service.ts:102` |
+| **00:00 diario** | Limpia caché completo y, si `cron_homes_cache=enabled`, refresca la caché de casas. | `scheduled-jobs.service.ts:32` |
+| **12:00 diario** | Si `cron_homes_cache=enabled`, refresca la caché de casas. | `scheduled-jobs.service.ts:103` |
 | **23:30 diario** | Comprueba la **caducidad de llaves** (`KeyExpiresCommand`). | `scheduled-jobs.service.ts:72` |
-| **Cada hora** | Transfiere reservas y casas (se omite con `APP_MODE=debug`). | `scheduled-jobs.service.ts:138` |
-| **Cada 15 min** | Transfiere usuarios (se omite con `APP_MODE=debug`). | `scheduled-jobs.service.ts:177` |
-| **31-dic 23:30** | **Bono anual de fidelización** (`YearlyBonusCommand`), solo si `NEW_EXCHANGE_SYSTEM=true`. | `scheduled-jobs.service.ts:211` |
+| **Cada 5 min** | Envía la **cola de eventos** pendientes (`sendEvents`), si `cron_send_events=enabled`. Incluye las notificaciones del nuevo sistema y la sincronización con Hostaway. Usa un advisory lock para no solaparse. | `scheduled-jobs.service.ts:141` |
+| **Cada 15 min** | Transfiere usuarios desde Firestore, si `cron_transfer_users=enabled`. | `scheduled-jobs.service.ts:179` |
+| **31-dic 23:30** | **Bono anual de fidelización** (`YearlyBonusCommand`). | `scheduled-jobs.service.ts:215` |
+
+<Note>
+  **Cambios recientes en los crons.** Desaparecieron el cron horario de transferencia de reservas y casas y los comandos `import`/`transfer-bookings`/`refresh-cache` de reservas (con la retirada de v1 y de la sincronización de reservas con Firestore). La transferencia de usuarios ya no se desactiva con `APP_MODE=debug`, sino con la clave `cron_transfer_users`. El bono anual ya **no** está condicionado a `NEW_EXCHANGE_SYSTEM`.
+</Note>
 
 ### Caducidad de llaves (23:30)
 
-`KeyExpiresCommand` recorre todos los monederos: avisa cuando faltan los días configurados, aplica la prórroga automática de 12 meses en la primera caducidad y elimina las llaves en la segunda. El detalle está en [Llaves e intercambio](/backend/keys-exchange).
+`KeyExpiresCommand` recorre todos los monederos: avisa cuando faltan los días configurados (evento `KEYS_EXPIRING_SOON`, `key-expires.command.ts:81`), aplica la prórroga automática de 12 meses en la primera caducidad (evento `KEYS_EXTENDED`, `:108`) y elimina las llaves en la segunda. El detalle está en [Llaves e intercambio](/backend/keys-exchange).
+
+### Envío de la cola de eventos (cada 5 min)
+
+El nuevo sistema de eventos encola movimientos (reservas, llaves, Hostaway) en la tabla `events` y `EventManagerService.sendEvents()` los procesa en lotes: envía las notificaciones a la plataforma de ingesta y ejecuta la sincronización con Hostaway de las reservas de alquiler (solo en producción y si `cron_hostaway_sync=enabled`). Ver [Alquiler](/backend/alquiler#hostaway).
 
 ### Bono anual (31-dic)
 
-`YearlyBonusCommand` otorga +2 llaves a quienes tuvieron ≥ 2 intercambios válidos en el año. Está **condicionado a la flag** `NEW_EXCHANGE_SYSTEM=true` (`scheduled-jobs.service.ts:219`).
+`YearlyBonusCommand` otorga +2 llaves a quienes tuvieron ≥ 2 intercambios válidos en el año y emite el evento `KEYS_YEARLY_BONUS` (`yearly-bonus.command.ts:146`).
 
 ## Tabla `configurations`
 
@@ -32,12 +40,21 @@ Parámetros de negocio en la tabla `configurations` (Postgres), con estructura `
 
 | Clave | Uso | Referencia |
 |-------|-----|------------|
-| `keys_expiration_warning_days` | Días de aviso previo a la caducidad de llaves (CSV). | `src/bookings/v2/commands/key-expires.command.ts:43` |
-| `default_check_in_<HomeType>` | Hora de check-in por tipo de casa. | `src/bookings/v1/bookings.repository.ts:1163` |
-| `default_check_out_<HomeType>` | Hora de check-out por tipo de casa. | `src/bookings/v1/bookings.repository.ts:1174` |
+| `keys_expiration_warning_days` | Días de aviso previo a la caducidad de llaves (CSV). | `src/bookings/v2/commands/key-expires.command.ts:46` |
+| `cron_homes_cache` | `enabled`/`disabled`: activa el refresco de la caché de casas (00:00 y 12:00). | `scheduled-jobs.service.ts:245` |
+| `cron_send_events` | `enabled`/`disabled`: activa el envío de la cola de eventos (cada 5 min). | `scheduled-jobs.service.ts:249` |
+| `cron_transfer_users` | `enabled`/`disabled`: activa la transferencia de usuarios (cada 15 min). | `scheduled-jobs.service.ts:253` |
+| `cron_hostaway_sync` | `enabled`/`disabled`: habilita las escrituras de sincronización con Hostaway. | migración `1790170270240-AlterBookingsTables.ts` |
+| `hostaway_api_url` | URL base de la API de Hostaway que usa el cliente de sincronización. | `src/common/hostaway/hostaway.service.ts` |
+| `hostaway_token` | Token Bearer de la API de Hostaway. | `src/common/hostaway/hostaway.service.ts` |
+| `default_checkin_hour` / `default_checkout_hour` | Hora de check-in / check-out por defecto (`16:00:00` / `10:00:00`). | migración `1779351647973-CreateCalendarTables.ts` |
+
+<Note>
+  Las claves `cron_transfer_bookings`, `cron_import_bookings` y `cron_bookings_cache` se eliminaron en la migración `1790170270240-AlterBookingsTables.ts`, junto con la lógica v1 de reservas.
+</Note>
 
 <Warning>
-  Los **valores** de estas claves son dato en base de datos: **PENDIENTE confirmar** cuáles rigen en producción. Además, el check-in/out convive con un hardcode `16:00 / 10:00` — ver la [inconsistencia documentada](/backend/calendario-temporadas).
+  Los **valores** de estas claves son dato en base de datos: **PENDIENTE confirmar** cuáles rigen en producción. El check-in/out por defecto se resuelve ahora desde `default_checkin_hour` / `default_checkout_hour` y desde las columnas de la temporada — ver [Calendario y temporadas](/backend/calendario-temporadas).
 </Warning>
 
 ## Variables de entorno relevantes
@@ -46,16 +63,16 @@ Solo se listan los **nombres**; sus valores son secretos de despliegue y no se d
 
 | Variable | Para qué sirve |
 |----------|----------------|
-| `NEW_EXCHANGE_SYSTEM` | Activa globalmente el nuevo motor de intercambio de llaves. |
-| `NEW_EXCHANGE_SYSTEM_ENABLED_USERS` | Lista de usuarios habilitados para el nuevo motor (CSV de IDs). |
-| `DEFAULT_KEYS` | Coste en llaves por defecto `[alta, media, baja]` cuando no hay valor por casa. |
-| `RENTALS_URL` | Base de la URL de alquiler de Hostaway (se concatena con `hostawayId`). |
-| `APP_MODE` | Con `debug` se omiten los crons de transferencia. |
+| `DEFAULT_KEYS` | Coste en llaves por defecto `[alta, media, baja]` cuando no hay valor por casa (`src/homes/v2/homes.repository.ts:331`). |
+| `APP_MODE` | Con `debug` activa el emulador de Firebase, el seeder y el endpoint `debug/register`. **Ya no** gobierna los crons de transferencia (eso es ahora `cron_transfer_users`). |
 | `PORT` | Puerto del servicio (por defecto 3000). |
-| `VIVLA_USER` | Usuario técnico "Vivla" usado en intercambios de última hora. |
 | `DB_POOL_MAX` | Máximo de conexiones del pool de Postgres/TypeORM (por defecto **20**). |
 | `DB_POOL_CONNECTION_TIMEOUT_MS` | Tiempo máximo de espera para obtener una conexión del pool, en ms (por defecto **10000**). |
 | `DB_POOL_IDLE_TIMEOUT_MS` | Tiempo que una conexión inactiva permanece abierta antes de cerrarse, en ms (por defecto **30000**). |
+
+<Note>
+  **Variables ahora inertes en el código.** Con la retirada de v1, el código ya **no** lee `NEW_EXCHANGE_SYSTEM`, `NEW_EXCHANGE_SYSTEM_ENABLED_USERS`, `RENTALS_URL` ni `VIVLA_USER` (siguen apareciendo en `.env.example`, pero ninguna ruta las consulta). La configuración de Hostaway se lee ahora de la tabla `configurations` (`hostaway_api_url`, `hostaway_token`, `cron_hostaway_sync`), no de `.env`.
+</Note>
 
 <Warning>
   **Valores de `DEFAULT_KEYS` y del resto de variables: PENDIENTE confirmar.** Son configuración de entorno; sus valores no están en el código.

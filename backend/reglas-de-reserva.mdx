@@ -8,74 +8,69 @@ description: "Las validaciones que impone vivla-api al reservar, con su referenc
 Estas son las reglas que **el código** aplica al crear o gestionar una reserva. Cada una apunta a su `archivo:línea` en `vivla-api` (rutas relativas a `src/`). Si un valor no aparece aquí con su referencia, es política de negocio, no código.
 
 <Note>
-  La lógica de cupos y validación está duplicada entre v1 (Firestore) y v2. Las referencias principales son de v1; la v2 (`src/bookings/v2/bookings.service.ts:198`) replica el mismo comportamiento.
+  **Reservas y calendario ya solo viven en v2 (Postgres).** Tras eliminarse los endpoints y la lógica `/v1` y retirarse la sincronización de reservas con Firestore, toda la validación la impone ahora el módulo v2 (`src/bookings/v2/apps/bookings.apps.service.ts` y `src/calendars/v2/...`). Las referencias de esta página apuntan al código v2 actual.
 </Note>
 
 ## Antelación y horizonte
 
 | Regla | Detalle | Referencia |
 |-------|---------|------------|
-| **Antelación mínima 72 h** | Un slot cuya fecha de inicio esté a menos de 72 horas se marca como no disponible. | `src/bookings/calendars/v1/calendars.service.ts:217` |
-| **Horizonte máximo 2 años** | No se admiten reservas cuya fecha de fin supere los 2 años desde hoy (error `END_DATE_TOO_FAR`). | `src/bookings/v1/bookings.service.ts:725` |
+| **Antelación mínima 72 h** | Un slot cuya fecha de inicio esté a menos de 72 horas se marca como no disponible. | `src/bookings/v2/apps/bookings.apps.repository.ts:410` (también `src/calendars/v2/apps/calendars.apps.repository.ts:114`) |
+| **Horizonte máximo 2 años** | Las estancias disponibles se calculan solo hasta 2 años naturales desde hoy (`today.getFullYear() + 2`). | `src/bookings/v2/apps/bookings.apps.service.ts:1823` |
 
 ## Estancias por reserva
 
-Una reserva puede combinar una o dos estancias (slots) del calendario, con condiciones estrictas (`src/bookings/v1/bookings.service.ts:643`).
+Una reserva puede combinar una o dos estancias (slots) del calendario, con condiciones estrictas (`src/bookings/v2/apps/bookings.apps.service.ts`).
 
-- **Máximo 2 estancias** por reserva. Más de dos devuelve `LIMIT_OVER` (`bookings.service.ts:643`).
-- Ambas estancias deben ser de la **misma temporada** (`bookings.service.ts:702`).
-- Solo se pueden encadenar dos estancias si su temporada **permite consecutivas**. `allowConsecutive` es `true` únicamente para temporada baja (`low`) y media (`mid`) (`src/common/dtos/season.dto.ts:14`).
-- Las fechas deben ser **consecutivas**: la primera termina el día anterior o el mismo día en que empieza la segunda (diferencia ≤ 1 día) (`bookings.service.ts:712`).
-- Cada estancia debe tener `id` y estar **disponible** (`bookings.service.ts:648`).
+- **Máximo 2 estancias** por reserva; superarlo devuelve `LIMIT_OVER` (`bookings.apps.service.ts:1000` y `:1072`).
+- Ambas estancias deben ser de la **misma temporada**.
+- Solo se pueden encadenar dos estancias si su temporada **permite consecutivas**. Esto ya **no** se deriva del slug `low`/`mid`: cada temporada lleva un flag booleano propio **`allows_consecutive`** (columna de la entidad `Season` de v2, por defecto `false`) (`src/common/database/v2/entities/calendars/season.entity.ts:42`). Es dato por temporada, configurable en Postgres.
+- Las fechas deben ser **consecutivas**.
 
 ## Cupos anuales por temporada
 
-Cada usuario tiene un número máximo de reservas por temporada, que depende del **tipo de casa**. Los valores base (`src/bookings/v1/bookings.service.ts:263`):
+<Warning>
+  **El cuadro de cupos fijo por tipo de casa (playa/ski/urbano × baja/media/alta/pico) ya NO está en el código.** En v2 el cupo de cada temporada es **dato por temporada** en Postgres: la columna `slots_available` de la entidad `Season` (por defecto **2**) (`src/common/database/v2/entities/calendars/season.entity.ts:50`).
+</Warning>
 
-| Tipo de casa | Baja (`low`) | Media (`mid`) | Alta (`high`) | Pico (`peak`) |
-|--------------|:---:|:---:|:---:|:---:|
-| **Playa (`beach`)** | 2 | 2 | 2 | 1 |
-| **Ski (`ski`)** | 3 | 2 | 1 | 1 |
-| **Urbano (`city`)** | 2 | 2 | 2 | 0 |
+El cupo disponible de un usuario en una temporada se calcula así (`src/bookings/v2/apps/bookings.apps.service.ts:1747`):
 
-Sobre esos valores base se aplican estos ajustes:
+```
+disponible = season.slots_available × fracciones_del_usuario
+```
 
-- **Fracciones:** los cupos se multiplican por el número de fracciones del `deal` del usuario en esa casa (`bookings.service.ts:308`).
-- **Casa inactiva:** si la casa está `INACTIVE`, todos los cupos pasan a 0 (`bookings.service.ts:279`).
-- **Deal bloqueado:** si el `deal` está `locked`, todos los cupos pasan a 0 (`bookings.service.ts:298`).
-- **Pico descuenta de alta (solo playa):** en casas de playa, cada reserva en temporada pico también resta del cupo de temporada alta; y si no queda cupo de alta, el de pico se pone a 0 (`bookings.service.ts:356` y `:365`).
-- **Urbano sin pico:** en casas urbanas el cupo de pico es siempre 0 (`bookings.service.ts:370`).
+- **Fracciones:** el cupo se multiplica por el número de fracciones del usuario en esa casa (`bookings.apps.service.ts:1747`).
+- **Sin fracciones o calendario bloqueado:** si el usuario no tiene fracciones o su calendario está bloqueado (`lockCalendar`), no puede reservar (`bookings.apps.service.ts:968`).
+- Cada reserva activa del usuario descuenta de la temporada de su slot; si no queda cupo, se devuelve `LIMIT_OVER` (`bookings.apps.service.ts:1000`, `:1072`, `:1205`).
 
-Si al reservar no queda cupo suficiente en esa temporada, el código devuelve `LIMIT_OVER` (`bookings.service.ts:742`).
-
-<Note>
-  Internamente la temporada "pico" es el slug `peak` (enum `SeasonSlug.HIGH2`). Ver [Calendario y temporadas](/backend/calendario-temporadas).
-</Note>
+<Warning>
+  **Cupos concretos por temporada y casa, y la antigua lógica de "pico descuenta de alta" / "urbano sin pico": PENDIENTE confirmar por CX/negocio.** Los valores de `slots_available` son dato en Postgres, no código, y pueden variar por temporada y casa. La lógica especial de pico/alta por tipo de casa de v1 ya no existe en el código v2.
+</Warning>
 
 ## Reservas de última hora
 
 Las estancias de última hora dejan reservar slots próximos que nadie ha cogido, incluso con el cupo agotado.
 
-- Se marcan como última hora las **4 primeras estancias disponibles** del calendario futuro de la casa (`src/bookings/calendars/v1/calendars.service.ts:195` y `:306`).
-- Si el usuario ya hizo una reserva de última hora en esa casa en los **últimos 3 meses**, el límite baja a **3** (`calendars.service.ts:311`).
-- El coste de un intercambio de última hora es **fijo: 1 llave** (`calendars.service.ts:340`; también `src/bookings/v1/bookings.repository.ts:2001`).
-- Un usuario solo puede tener **1 reserva de última hora activa** por casa a la vez (`bookings.service.ts:762`).
-- El intercambio de última hora exige que el slot permita última hora y esté disponible, y que el usuario tenga llaves suficientes (`bookings.service.ts:950`).
+- Se marcan como última hora las **4 primeras estancias disponibles** del calendario futuro de la casa (`src/bookings/v2/apps/bookings.apps.service.ts:1838`).
+- Si el usuario ya tiene tantas reservas de última hora recientes (últimos 3 meses) como fracciones, el límite baja a **3** (`bookings.apps.service.ts:1845`).
+- El coste de un intercambio de última hora es **fijo: 1 llave** (`bookings.apps.service.ts:1361`; en la reserva de disfrute, `:1097`).
 
 ## Cancelación
 
-- Cancelar exige el permiso `permissions.cancel` sobre la reserva (`src/bookings/v1/bookings.service.ts:406`).
-- Si quien cancela es solo un **invitado** (`GUEST`), se anula su invitación, no la reserva (`bookings.service.ts:410`).
-- El ajuste de llaves al cancelar depende del motor de intercambio activo (`src/bookings/v1/bookings.repository.ts:1005`).
+Con la retirada de v1, la cancelación se rige por las reglas de v2 (`src/bookings/v2/apps/bookings.apps.service.ts`). Al calcular los permisos de una reserva, el `permissions.cancel` del propietario se concede solo si la reserva **no está cancelada, no ha empezado y no es de ThirdHome**, y además:
+
+- **Disfrute (`ENJOY`):** faltan **más de 30 días** para que empiece (`bookings.apps.service.ts:1502`).
+- **Alquiler o intercambio:** faltan **más de 30 días**, la reserva **no tiene asistentes** y **no ha cobrado llaves** (`bookings.apps.service.ts:1505`).
+
+Los invitados que no son el asistente principal pueden anular su propia invitación sin cancelar la reserva (`bookings.apps.service.ts:476`).
 
 <Warning>
-  **Ventana de cancelación (p. ej. "hasta 30 días antes"): PENDIENTE confirmar por CX/negocio.** El código **no** impone ninguna ventana temporal de cancelación: solo comprueba el permiso `permissions.cancel`. Cualquier plazo de cancelación es política que no está en el código.
+  **La ventana de 30 días la impone ahora el código v2.** A diferencia de v1 (que solo comprobaba el permiso `permissions.cancel` sin plazo), v2 ya **no** permite cancelar si faltan 30 días o menos. Confirmar con CX si ese umbral de 30 días debe aplicarse a todos los tipos de reserva.
 </Warning>
 
 ## Ocupación
 
-- Al crear la reserva, los valores por defecto son `adults = 2`, `kids = 0`, `pets = 0` (`src/bookings/v1/bookings.repository.ts:110`).
-- La validación solo exige que `adults`, `kids` y `pets` sean ≥ 0 (`Min(0)`), sin tope superior (`bookings.service.ts:1524`).
+- Los datos de ocupación (`adults`, `kids`, `pets`) y extras se guardan con la estancia; la validación solo exige valores ≥ 0 (`Min(0)`), sin tope superior.
 
 <Warning>
   **Límite de ocupación por capacidad de la casa: PENDIENTE confirmar por CX/negocio.** El código no valida la ocupación contra la capacidad máxima de la propiedad.

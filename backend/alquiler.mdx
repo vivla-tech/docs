@@ -1,44 +1,55 @@
 ---
 title: "Alquiler"
-description: "Flujo de alquiler de semanas: estados, precio manual y enlace a Hostaway"
+description: "Flujo de alquiler de semanas: estados, precio manual y sincronización con Hostaway"
 ---
 
 # Alquiler
 
 El alquiler pone una reserva a disposición para que se alquile dentro de la red. El **precio lo fija a mano un admin**; no hay ninguna fórmula de comisión en el código.
 
+<Note>
+  **Todo el alquiler es ahora v2 (Postgres).** Con la eliminación de v1 ya no existen los endpoints dedicados `/v1/.../rent`, `/rent/approve` ni `/liberate`. El alquiler se gestiona con los endpoints genéricos de v2 (`src/bookings/v2/apps/...` y `src/bookings/v2/admin/...`) y el estado de aprobación `BookingApproval` (`FREE` / `PENDING` / `APPROVED` / `EXCHANGED`).
+</Note>
+
 ## Flujo del copropietario
 
-El copropietario publica su reserva como disponible para alquiler cambiando su tipo, y solicita el alquiler de reservas publicadas con `POST /v1/bookings/rent/:id` (`src/bookings/v1/bookings.service.ts:877`). Para que una reserva se pueda solicitar debe estar **libre y activa** (`approval = FREE`, `status = ACTIVE`) (`bookings.service.ts:899`).
+El copropietario publica su reserva como disponible para alquiler y solicita el alquiler de reservas publicadas con `PUT /v2/bookings/:id/request-rent` (`src/bookings/v2/apps/bookings.apps.controller.ts:154`). La reserva debe estar **libre y activa**.
 
 ## Flujo del admin (panel CX)
 
-El alquiler efectivo lo gestiona un admin (`src/bookings/v1/bookings.service.ts:2162`):
+El admin gestiona el alquiler desde los endpoints de `admin/bookings` (todos con permiso `edit:bookings`):
 
-1. **Alquilar** — `POST /v1/admin/bookings/:id/rent`. Exige `price` **> 0** (manual) y datos del asistente (nombre + email, o un `id` de usuario). La reserva debe ser de tipo alquiler y estar libre (`RENTAL` + `FREE`) (`bookings.service.ts:2171` y `:2202`). Por defecto queda `APPROVED`, salvo que se pase `status = pending` (`bookings.service.ts:2249`).
-2. **Aprobar o rechazar** — `PUT /v1/admin/bookings/:id/rent/approve`. Exige que la reserva esté **activa, de tipo alquiler y en estado pendiente** (`RENTAL` + `PENDING`) (`bookings.service.ts:2285`).
-3. **Liberar** — `DELETE /v1/admin/bookings/:id/liberate`. Retira asistentes. Solo procede si la reserva está activa y es una de estas combinaciones (`bookings.service.ts:2120`):
-   - disfrute intercambiada en ThirdHome (`OWN` + `TH_EXCHANGED`),
-   - alquiler aprobado (`RENTAL` + `APPROVED`),
-   - intercambio aprobado (`EXCHANGE` + `APPROVED`).
+1. **Registrar / editar la reserva de alquiler** — `POST /v2/admin/bookings/register` (`:121`) o `PUT /v2/admin/bookings/:id/edit` (`:201`), indicando el estado de aprobación (`approval`). El alta valida el precio sobre `stay.price` (`bookings.admin.service.ts:758`).
+2. **Añadir la estancia con el inquilino** — `POST /v2/admin/bookings/:id/add-stay` (`:241`), con el precio y los datos del asistente (usuario existente, o nombre + email). Emite el evento `BOOKING_RENT_CREATED_BY_ADMIN` (`bookings.admin.service.ts:1031`).
+3. **Cancelar / retirar** — `DELETE /v2/admin/bookings/:id/cancel` (`:229`) o la retirada de asistentes con `DELETE /v2/admin/bookings/guest/:guestId/remove` (`:296`).
 
 ## Precio
 
-El precio no solo se fija al alquilar: un admin puede **editarlo después** desde `PUT /v2/admin/stay/:id/edit` (`editStay`, permiso `edit:bookings`), pasando `price` en la estancia (`src/bookings/v2/admin/bookings.admin.service.ts:1425`). Reglas del código:
+Un admin puede **editar el precio** después desde `PUT /v2/admin/bookings/stay/:id/edit` (`editStay`, permiso `edit:bookings`), pasando `price` en la estancia. Reglas del código:
 
 - Solo se admite en reservas de tipo **alquiler** (`RENT`); en cualquier otro tipo se rechaza con `UPDATE_NOT_ALLOWED`.
-- El precio debe ser **numérico y > 0**, con **dos decimales como máximo** (representable en céntimos); si no, se rechaza con el error de validación `INVALID_NUMBER` sobre el campo `price` (`parseRentPrice`, `bookings.admin.service.ts:2222`). En el alta de reserva de alquiler el mismo error se devuelve sobre `stay.price` (`bookings.admin.service.ts:760`).
-- Internamente se guarda en **céntimos** (`price × 100`) y el `final_price` se sincroniza al documento contraparte `rentBooks` en Firestore (`src/bookings/v2/bookings.common.repository.ts:2094`).
-- Editar el precio **no** cambia el estado de aprobación de la reserva ni emite el evento `BOOKING_RENT_APPROVED`.
+- El precio debe ser **numérico y > 0**, con **dos decimales como máximo** (representable en céntimos); si no, se rechaza con el error `INVALID_NUMBER` sobre el campo `price` (`parseRentPrice`, `src/bookings/v2/admin/bookings.admin.service.ts:758`).
+- Internamente se guarda en **céntimos** (`price × 100`). La sincronización del `final_price` al documento contraparte de Firestore **ya no existe** (se retiró junto con la sincronización de reservas con Firestore).
+- Editar el precio **no** cambia el estado de aprobación de la reserva.
 
 <Warning>
   **Comisión de alquiler (p. ej. 15% / 20-25%): PENDIENTE confirmar por CX/negocio.** El código **no** contiene ninguna fórmula ni porcentaje de comisión. El `price` del alquiler es un número que introduce el admin a mano. Cualquier cálculo de comisión ocurre fuera del sistema.
 </Warning>
 
 <Warning>
-  **Elegibilidad "tras 2 rondas" u otros requisitos para alquilar: PENDIENTE confirmar por CX/negocio.** El código solo comprueba el estado de la reserva (`RENTAL` + `FREE`), no antigüedad ni número de rondas.
+  **Elegibilidad "tras 2 rondas" u otros requisitos para alquilar: PENDIENTE confirmar por CX/negocio.** El código solo comprueba el estado de la reserva (alquiler + libre), no antigüedad ni número de rondas.
 </Warning>
 
 ## Hostaway
 
-La integración con Hostaway es **solo un enlace**: si la casa tiene `hostawayId` y está definida la variable `RENTALS_URL`, se compone la URL externa `RENTALS_URL + hostawayId` (`src/bookings/v1/bookings.repository.ts:1296`). No hay sincronización de datos ni llamadas a la API de Hostaway desde `vivla-api`.
+Ya **no** es solo un enlace: existe una **sincronización real (unidireccional) de Vivla → Hostaway** para las reservas de alquiler (`src/common/hostaway/hostaway-sync.service.ts`, `src/common/hostaway/hostaway.service.ts`).
+
+- Es **dirigida por eventos**: al registrar/editar una reserva de alquiler o su estancia se encola un evento `hostaway.booking_sync`, que procesa el cron de envío de eventos cada 5 minutos (ver [Crons](/backend/crons-y-configuracion)).
+- El sync **recalcula el estado** de la reserva en Hostaway de forma idempotente y la deja en uno de tres estados: **cerrada** (cancelada o de un tipo que no se alquila), **ofertada** (alquiler sin estancia aprobada → se abren las noches en el calendario) o **alquilada** (alquiler con estancia aprobada → se crea la reserva en Hostaway) (`hostaway-sync.service.ts:104`).
+- La casa debe tener un `hostaway_id` configurado en su ficha de hosting (`home_hosting_info.hostaway_id`); si no, el booking no se sincroniza (`hostaway-sync.service.ts:80`).
+- Las **escrituras en Hostaway solo ocurren en producción** (`hostaway.service.ts:60`) y solo si `cron_hostaway_sync=enabled` en la tabla `configurations` (`src/common/v2/event-manager.service.ts:204`).
+- Credenciales y URL salen de `configurations` (`hostaway_api_url`, `hostaway_token`), no de variables de entorno.
+
+<Note>
+  La variable `RENTALS_URL` del antiguo enlace externo ya **no** la lee el código (se usaba en el `vivla-api` v1 eliminado).
+</Note>
