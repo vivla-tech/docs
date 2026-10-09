@@ -1,0 +1,188 @@
+---
+title: "Propiedades"
+description: "Listado de casas del panel: búsqueda, filtros por destino y estado, vista previa, selector global de casa y alta de casas nuevas"
+---
+
+# Propiedades
+
+**Propiedades** es el inventario de casas de VIVLA dentro del panel. El equipo de CX lo usa para consultar la ficha de una casa, encontrar datos operativos (acceso, wifi, proveedores…) y dar de alta casas nuevas.
+
+Desde el listado saltas al [detalle de casa](/panel/homes/details) y al [documento de check-in](/panel/homes/checkin-doc). Los estados de una casa y el glosario viven en [Operativa](/operativa#estados-de-una-casa).
+
+## Rutas
+
+| Ruta | Qué hay | Permiso |
+|------|---------|---------|
+| `/homes` | Listado paginado con búsqueda, filtros por destino y estado, y vista previa | `read:homes` |
+| `/homes?homeId=:id` | El mismo listado con la vista previa de una casa abierta | `read:homes` |
+| `/homes/create` | Formulario de alta de casa. **Desactivado temporalmente**: redirige a `/homes` (ver [Alta de casa](#alta-de-casa)) | `edit:homes` |
+| `/homes/:id` | [Detalle de la casa](/panel/homes/details) | `read:homes` |
+| `/homes/:id/checkin-doc` | [Documento de check-in](/panel/homes/checkin-doc) | `edit:homes` |
+
+<Note>
+  Si te falta el permiso, `PermissionBasedRedirect` te lleva a la primera
+  sección del menú a la que sí tienes acceso, o a `/unauthorized` si no hay
+  ninguna. Detalle en [Permisos](/panel/platform/permissions).
+</Note>
+
+## Listado de casas
+
+Entra desde **Propiedades** en el menú lateral. Cada fila muestra la foto de portada, el nombre y el destino de la casa en una columna fija. El resto de columnas se desplaza en horizontal.
+
+Las columnas se agrupan así:
+
+- **Identificación**: **Estado**, **Link web**, **Dirección de la casa** y **Link Maps**.
+- **Características**: ocupación, dormitorios, baños, camas, **Parking**, **Trastero**, **Acceso a la casa**, wifi y **Guía de la casa**.
+- **Seguridad**: palabras clave y códigos de la alarma.
+- **Alojamiento y licencias**: email, envíos, welcome pack, supermercado, **Cuenta bancaria**, **Licencia turística** y los IDs de Hostaway y Airbnb.
+- **Proveedores**: una columna por tipo de proveedor, más **Admin comunidad** y **Conserje**.
+- **Datos bancarios de comunidad**.
+
+Algunas celdas son atajos:
+
+- **Estado** y **Licencia turística** llevan un icono (activa, pre-activa, inactiva; sí, no, pendiente).
+- **Parking** y **Guía de la casa** muestran **Ver listado** y abren el detalle con esa tarjeta seleccionada.
+- **Cuenta bancaria** se ve enmascarada (solo los últimos dígitos) y enlaza a su tarjeta en el detalle.
+- Los enlaces externos (web, Maps, supermercado) se abren en otra pestaña.
+
+<Tip>
+  Los atajos usan los parámetros `?section=` y `?component=` del detalle. Puedes
+  compartir esas URLs para llevar a alguien directo a una tarjeta concreta.
+</Tip>
+
+### Buscar y filtrar
+
+- Escribe en **Buscar propiedad** para filtrar por nombre. La búsqueda espera 300 ms antes de lanzar la petición.
+- Elige un destino en el selector de destinos (**Todos los destinos** por defecto).
+- Elige un estado en el selector de estados (**Todos los estados** por defecto): **Casa Activada**, **Casa Pre-Activada** o **Casa Inactiva**. Solo se puede elegir un estado a la vez.
+- Pulsa **Limpiar filtros** para quitar nombre, destino y estado. Solo aparece si hay algún filtro activo.
+- Ajusta el tamaño de página y navega con el paginador. Por defecto ves 10 casas.
+
+Todos los filtros viven en la URL (`page`, `pageSize`, `name`, `location`, `status`). Un `status` que no sea `active`, `pre-active` o `inactive` se ignora. Si sales a otra sección y vuelves desde el menú lateral, el panel recupera la última búsqueda.
+
+<Note>
+  El listado solo filtra por nombre, destino y estado. El selector de tipo de casa
+  (**Esquí**, **Playa**, **Ciudad**) existe en el código, pero se usa en el
+  formulario de la casa y en otros módulos, no en este listado.
+</Note>
+
+### Vista previa
+
+Pulsa una fila para abrir la vista previa. Es un panel lateral (inferior en móvil) con las mismas secciones que el detalle y el mismo selector de sección.
+
+- La URL añade `?homeId=:id`, así que puedes compartirla.
+- El botón de pantalla completa te lleva a `/homes/:id`.
+- Si eliges **Documento de Check in** en el selector, navegas a la página del documento.
+- Si la casa no existe, verás el aviso **La casa que buscas no existe o ha sido eliminada** y la vista previa se cierra.
+
+Con `edit:homes` puedes usar en la vista previa lo que se edita en la propia tarjeta: estado, agente CX, licencia turística y guías en PDF. Si pulsas una tarjeta que tiene editor, el panel te lleva al detalle con esa tarjeta abierta.
+
+## Selector global de casa
+
+En la parte superior del menú lateral hay un buscador de casas (`HomesCollectionSelector`). Por defecto muestra **Todas las casas**.
+
+Cuando eliges una casa:
+
+- Si estás en `/homes`, el panel te lleva al detalle de esa casa.
+- Si estás en el detalle de otra casa, cambia al de la casa elegida.
+- En el detalle desaparece la flecha de volver, porque la casa está fijada.
+
+Vuelve a **Todas las casas** para soltar la selección.
+
+<Note>
+  La selección vive en un contexto de React (`HomeCollectionContextProvider`)
+  montado en `main.tsx`, por encima del router. Es global para todo el panel,
+  pero no se guarda: se pierde al recargar la página.
+</Note>
+
+El mismo contexto expone la lista simplificada de casas (`GET /v2/admin/properties/names`). La reutilizan otros módulos, por ejemplo:
+
+- La calculadora del [sistema de llaves](/panel/keys).
+- `useHomeIdByName`, que resuelve el id de una casa a partir de su nombre. Lo usa el documento de check-in que se abre desde una [reserva](/panel/bookings/manage).
+
+## Alta de casa
+
+<Warning>
+  **Desactivado temporalmente.** `vivla-api` tiene desactivado a propósito
+  `POST /v2/admin/properties/create` mientras se integra el alta con Vivla
+  Tools, así que cualquier alta desde el panel fallaría. Mientras tanto:
+
+  - El botón **Añadir casa** del listado sale desactivado. A su lado, la ayuda
+    dice **De momento las casas nuevas las da de alta producto. Pídenosla y la
+    creamos.**
+  - Si entras directamente en `/homes/create`, el panel te lleva a `/homes`.
+  - Si necesitas una casa nueva, pídesela a producto y la dan de alta ellos.
+
+  La página, el formulario y la petición siguen en el código. Para reactivar el
+  alta basta con poner `IS_HOME_CREATION_ENABLED` a `true` en
+  `src/features/homes/constants/homeCreation.ts`. Lo que sigue describe el alta
+  tal y como funciona cuando está activa.
+</Warning>
+
+Con `edit:homes` verás el botón **Añadir casa** junto a los filtros. Te lleva a `/homes/create`.
+
+<Steps>
+  <Step title="Sube la portada">
+    Arrastra o selecciona una imagen JPG o PNG de hasta 10 MB en **Subir imagen**. Es opcional.
+  </Step>
+  <Step title="Rellena los datos obligatorios">
+    Completa **Nombre de la casa**, **Localización de la casa** (destino), **Tipo de casa**, **Calendario** y **Provincia**. Los campos obligatorios llevan asterisco.
+  </Step>
+  <Step title="Configura las llaves por temporada">
+    Al elegir calendario aparece **Valor en llaves por temporada**, con una casilla por cada temporada de ese calendario. Todas son obligatorias y deben ser números enteros de al menos 1.
+  </Step>
+  <Step title="Añade el resto de datos">
+    Dirección, ciudad, código postal, URL de Google Maps, indicaciones, habitaciones, camas, baños, ocupación máxima, superficie, **Web link** y **Otros (Trastero, guardaesquí...)**. Todo es opcional.
+  </Step>
+  <Step title="Guarda">
+    Pulsa **Añadir casa**. Si todo va bien, verás **Casa creada correctamente** y el panel te lleva al detalle de la casa nueva.
+  </Step>
+</Steps>
+
+<Warning>
+  Toda casa nueva nace en estado **Casa Inactiva**. El formulario no deja
+  elegir otro estado. Cámbialo después desde la tarjeta **Estado de la casa**
+  del [detalle](/panel/homes/details#estado-de-la-casa).
+</Warning>
+
+<Note>
+  Si el calendario no tiene temporadas configuradas, verás **Este calendario no
+  tiene temporadas configuradas**. Las temporadas se gestionan en
+  [Calendarios](/panel/calendars). Contexto de producto en
+  [Calendario y temporadas](/backend/calendario-temporadas).
+</Note>
+
+La portada se sube antes de crear la casa: el panel pide una URL firmada a la API, sube el archivo y manda la URL resultante en el alta.
+
+## Endpoints de vivla-api
+
+| Método | Endpoint | Para qué |
+|--------|----------|----------|
+| `GET` | `/v2/admin/properties` | Listado paginado (`page`, `limit`, `name`, `location`, `status`) |
+| `GET` | `/v2/admin/properties/locations` | Destinos para el filtro y el formulario |
+| `GET` | `/v2/admin/properties/names` | Lista simplificada para el selector global |
+| `GET` | `/v2/admin/properties/:id` | Ficha completa (vista previa y detalle) |
+| `GET` | `/v2/admin/properties/provinces` | Provincias del formulario |
+| `GET` | `/v2/admin/calendars/types` | Calendarios disponibles en el alta |
+| `GET` | `/v2/admin/calendars/:calendarId/seasons` | Temporadas del calendario elegido |
+| `GET` | `/v1/upload-url` | URL firmada para subir la portada |
+| `POST` | `/v2/admin/properties/create` | Alta de la casa. Desactivado temporalmente en la API |
+
+## Código
+
+| Qué | Dónde |
+|-----|-------|
+| Página del listado | `src/pages/Homes` |
+| Página de alta | `src/pages/CreateHome` |
+| Interruptor del alta | `IS_HOME_CREATION_ENABLED` en `src/features/homes/constants/homeCreation.ts` |
+| Rutas y permisos | `src/router/index.tsx`, `src/features/auth/constants/index.ts` |
+| Tabla del listado | `src/features/homes/components/HomeOverviewTable` (columnas en `constants.ts`, celdas en `renderers/`) |
+| Filtros en la URL | `src/features/homes/hooks/useHomesUrlFilters.ts` |
+| Filtro de destino | `src/features/homes/components/LocationSelector` |
+| Filtro de estado | `src/features/homes/components/HomeStatusSelector` |
+| Vista previa | `src/features/homes/components/HomeDetailsPreviewSheet` |
+| Selector global y contexto | `src/features/homes/components/HomesCollectionSelector`, `src/features/homes/hooks/useHomeCollection.tsx` |
+| Formulario de alta | `src/features/homes/components/forms/BasicInformationForm` (validación en `schema.ts`) |
+| Peticiones y queries | `src/features/homes/api/requests/`, `src/features/homes/queries/` |
+| Modelos | `src/core/homes/models/` |
+| Textos de UI | `src/assets/locales/es/homes.json`, `src/assets/locales/es/createHome.json` |

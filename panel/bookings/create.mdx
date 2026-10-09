@@ -1,0 +1,210 @@
+---
+title: "Alta de reserva"
+sidebarTitle: "Wizard de alta"
+description: "Wizard de /bookings/create: pasos según el tipo de reserva, validaciones del formulario y qué se envía a vivla-api"
+---
+
+# Alta de reserva
+
+`/bookings/create` abre un wizard para registrar una reserva a mano. CX lo usa para dar de alta reservas en nombre de un propietario o bloqueos a nombre de VIVLA. Sirve para los cuatro tipos: disfrute, alquiler, intercambio y Thirdhome.
+
+Necesitas `edit:bookings`. Entras con **Crear reserva** desde [Reservas](/panel/bookings). La flecha de la cabecera vuelve a la página anterior o, si no hay historial, a `/bookings`.
+
+Si buscas el paso a paso para CX, ve a [Crear una reserva](/panel/bookings/create-booking).
+
+<Note>
+  El wizard valida el formulario, pero la API decide si la reserva es posible. Las reglas de cupos, última hora, alquiler y llaves están en [El ciclo de reserva](/operativa/reservas), [Reservas de última hora](/operativa/reservas-ultima-hora), [Alquiler](/operativa/alquiler), [Llaves e intercambio](/operativa/intercambio-keys) y [Reglas de reserva](/backend/reglas-de-reserva).
+</Note>
+
+## Cómo funciona el wizard
+
+- Todos los pasos comparten un solo formulario (`react-hook-form` con el schema Zod `createBookingSchema`).
+- El primer paso elige el tipo. El tipo decide qué pasos vienen después (`buildFlow` en `flows.ts`).
+- Algunos pasos aparecen o desaparecen según lo que rellenas. Por ejemplo, en alquiler **Detalles de la estancia** solo aparece si añades asistentes.
+- **Siguiente** se desactiva mientras el paso actual tenga errores. Solo cuentan los campos de ese paso (`STEP_FIELDS`).
+- Los pasos de elegir una opción (tipo, última hora, casa y propietario) avanzan solos al seleccionar.
+- El pie muestra **Paso NN de NN**, **Atrás** y **Siguiente**. En el último paso, el botón pasa a ser **Crear reserva**.
+- Los pasos opcionales llevan la etiqueta **Opcional**.
+
+## Pasos por tipo
+
+| Tipo | Pasos |
+|------|-------|
+| Disfrute | Tipo, Última hora, Casa, Propietario, Fechas, Asistentes adicionales, Detalles de la estancia, Notas, Resumen |
+| Alquiler | Tipo, Casa, Propietario, Fechas, Asistentes, Detalles de la estancia y Estado y precio (solo con asistentes), Notas, Resumen |
+| Intercambio | Tipo, Casa, Propietario, Fechas, Propietario receptor, Detalles de la estancia (solo con receptor), Notas, Resumen |
+| Thirdhome | Tipo, Casa, Propietario, Fechas, Asistente de Thirdhome, Detalles de la estancia (solo con asistente), Notas, Resumen |
+
+### Tipo
+
+"¿Qué tipo de reserva vas a registrar?". Cuatro tarjetas: **Disfrute**, **Alquiler**, **Intercambio** y **Thirdhome**. Es obligatorio.
+
+### Última hora (solo disfrute)
+
+"¿Es una reserva de última hora?". Elige **Reserva normal** o **Última hora**. Es obligatorio en disfrute.
+
+### Casa
+
+"¿En qué casa se registra la reserva?". Busca por nombre. Se muestran 5 casas y un contador del total. La casa elegida queda fija arriba mientras no busques otra cosa. Es obligatoria.
+
+### Propietario
+
+El título cambia según el tipo (por ejemplo, "¿Quién disfrutará la reserva?" o "¿Quién publica el alquiler?"). La lista son los propietarios de la casa elegida. Haz clic otra vez en el propietario seleccionado para quitarlo.
+
+- Es opcional. Si no eliges a nadie, el aviso **Bloqueo a nombre de VIVLA** explica que la reserva se registra a nombre de VIVLA.
+- En disfrute de última hora es obligatorio. Lo indica el aviso **Propietario obligatorio en última hora**.
+
+### Fechas
+
+"¿Qué fechas quieres reservar?". Un calendario con los slots de la casa: dos meses en escritorio y uno en móvil.
+
+- Haz clic en el día de entrada y después en el de salida. Si vuelves a pulsar el día de entrada, la selección se reinicia.
+- No puedes empezar en un día pasado ni en un slot ocupado o no disponible. Tampoco puedes cruzar días no disponibles.
+- Puedes elegir como máximo 2 slots. La excepción es un disfrute sin propietario (bloqueo de VIVLA), que no tiene límite.
+- Con propietario elegido, la barra **Reservas disponibles del propietario** muestra su disponibilidad por temporada.
+- El bloque **Resumen de la operación** muestra **Entrada**, **Salida**, **Slots** y **Temporada**.
+- Si la casa no tiene calendario, sale **Calendario no disponible**. Configúralo en el [Calendar Manager](/panel/calendars).
+
+### Asistentes adicionales (disfrute)
+
+"¿Quién más va a asistir?". Es opcional. **Añadir asistente** abre un buscador con dos pestañas:
+
+- **Usuarios Vivla**: busca por nombre o email. Puedes elegir varios. El propietario elegido no aparece.
+- **Añadir externo**: pide nombre, email y teléfono. Los tres son obligatorios.
+
+### Asistentes (alquiler)
+
+"¿Quiénes serán los asistentes?". Es opcional. Usa el mismo buscador. En externos, el email es opcional y el teléfono obligatorio.
+
+- El primer asistente que añades queda como **Principal**.
+- Usa **Marcar como principal** para cambiarlo.
+- Si hay asistentes pero ninguno principal, un aviso te pide marcar uno.
+
+### Estado y precio de la oferta (alquiler con asistentes)
+
+Registra la oferta del asistente:
+
+- **Cerrado**: precio ya acordado. La reserva se aprueba directa.
+- **Abierto**: oferta pendiente de aprobación por el propietario.
+
+Debajo va **Precio total de la reserva**. Admite decimales con coma o punto. Si hay un asistente principal, el estado y un precio mayor que 0 son obligatorios.
+
+### Propietario receptor (intercambio)
+
+"¿A quién va dirigido el intercambio?". Es opcional. Solo puedes elegir usuarios de Vivla, y nunca al propietario que publica.
+
+- Al elegir receptor, ves **Llaves necesarias** y **Saldo del propietario receptor** con **Suficientes** o **Insuficientes**.
+- Si el saldo no llega, no puedes avanzar.
+- Si no eliges receptor, las llaves se descuentan cuando un propietario tome la reserva.
+
+### Asistente de Thirdhome
+
+"¿Quién es el asistente de Thirdhome?". Es opcional. Campos: **Nombre del huésped**, **Email** y **Teléfono (opcional)**. Si rellenas cualquiera, el nombre y un email válido pasan a ser obligatorios.
+
+### Detalles de la estancia
+
+Aparece siempre en disfrute. En los otros tipos, solo si hay asistentes, receptor o huésped de Thirdhome.
+
+- **Día de entrada** / **Hora de entrada** y **Día de salida** / **Hora de salida**. Vienen de las fechas elegidas en el calendario. Puedes salir del rango de slots: un aviso te lo recuerda.
+- **Adultos**, **Niños** y **Mascotas**. El mínimo de adultos es el número de personas con nombre en la reserva. El panel lo ajusta solo.
+- **Notas de la estancia**.
+
+### Notas
+
+"Notas de la reserva". Texto libre y opcional.
+
+### Resumen
+
+"Revisa todo antes de confirmar". Muestra la casa con el tipo y tres bloques con botón **Editar** para volver al paso:
+
+- **Estancia**: check-in, check-out, noches, temporada y viajeros.
+- Propietario: el título cambia según el tipo. Sin propietario, sale **Bloqueo a nombre de VIVLA**.
+- Participantes: asistentes, receptor o huésped de Thirdhome, según el tipo.
+
+La tarjeta **Impacto de la operación** resume qué consume la reserva: cupo del propietario, llaves del receptor o datos de la oferta de alquiler. La pantalla avisa de que al confirmar se envía un correo a las personas implicadas y se actualizan los calendarios.
+
+Pulsa **Crear reserva**. Si va bien, sale **¡Reserva creada con éxito!** y el panel abre la hoja de detalle de la nueva reserva. Si falla, sale un aviso con el mensaje de la API y sigues en el wizard.
+
+## Validaciones del formulario
+
+Salen de `createBookingSchema` (`schema.ts`).
+
+| Campo | Regla | Mensaje |
+|-------|-------|---------|
+| `type` | Obligatorio | "Selecciona un tipo de reserva" |
+| `isLastHour` | Obligatorio en disfrute | "Indica si es una reserva de última hora" |
+| `homeId` | Obligatorio | "Selecciona una casa" |
+| `ownerId` | Obligatorio en disfrute de última hora | "Selecciona un propietario para que la reserva de última hora sea efectiva" |
+| `checkIn`, `checkOut` | Obligatorios | "Selecciona check-in", "Selecciona check-out" |
+| `checkOut` | Posterior a `checkIn` | "La salida debe ser posterior a la entrada" |
+| `slotIds` | Al menos uno | "Selecciona al menos un slot" |
+| `rentalStatus` | Obligatorio en alquiler con asistente principal | "Selecciona estado" |
+| `rentPrice` | Mayor que 0 si hay asistente principal o si lo rellenas | "Precio debe ser mayor que 0" |
+| `receiverOwnerId` | El receptor debe tener llaves suficientes | "El receptor no tiene llaves suficientes" |
+| `thirdHomeGuest` | Nombre y email válido si rellenas algún campo | "Indica el nombre del huésped", "Indica el email del huésped", "Email inválido" |
+
+Las personas externas se validan al pulsar **Añadir** en el buscador (`ExternalGuestInlineForm`): nombre y teléfono siempre, email obligatorio en disfrute y opcional en alquiler.
+
+## Qué se envía a la API
+
+Al confirmar, `mapFormToRegisterBody` construye el body y lo envía a `POST /v2/admin/bookings/register`. Hay un mapper por tipo en `mappers/byType/`.
+
+| Campo | Cuándo va | De dónde sale |
+|-------|-----------|---------------|
+| `type` | Siempre | Paso Tipo |
+| `property` | Siempre | ID de la casa |
+| `slots` | Siempre | IDs de los slots elegidos en Fechas |
+| `ownerUser` | Si eliges propietario | Paso Propietario |
+| `isLastHour` | Disfrute e intercambio | Paso Última hora. `false` por defecto |
+| `notes` | Si no está vacío | Paso Notas |
+| `stay` | Según el tipo (ver abajo) | Personas y Detalles de la estancia |
+
+Qué lleva `stay` en cada tipo:
+
+| Tipo | Se envía si… | Huéspedes |
+|------|--------------|-----------|
+| Disfrute | Hay asistentes, ocupación, horas tocadas o notas de estancia | Asistentes con rol `guest` |
+| Alquiler | Hay asistentes | Principal con rol `main`, resto `guest`. Añade `price` y `pendingApproval` (`true` si elegiste **Abierto**) |
+| Intercambio | Hay receptor | El receptor con rol `main` |
+| Thirdhome | Hay huésped | El huésped externo con rol `main` |
+
+Detalles de `stay`:
+
+- Los usuarios de Vivla van como `userId`. Los externos van como `name`, `email` y `phone`.
+- `checkIn` y `checkOut` solo van si cambiaste días u horas en **Detalles de la estancia**.
+- `info` (`adults`, `kids`, `pets`) solo va si alguna cifra es mayor que 0.
+- `notes` es la nota de la estancia, distinta de la nota de la reserva.
+
+La respuesta trae el ID de la reserva. El panel refresca el listado (`booking-list`) y el calendario (`calendar-list`) y navega a `/bookings?bookingId=:id&viewMode=list`.
+
+## Endpoints de vivla-api
+
+| Método | Endpoint | Para qué |
+|--------|----------|----------|
+| POST | `/v2/admin/bookings/register` | Crear la reserva |
+| GET | `/v2/admin/properties` | Buscador del paso Casa |
+| GET | `/v2/admin/properties/:id` | Datos de la casa y sus propietarios |
+| GET | `/v2/admin/calendars` | Slots de la casa para el paso Fechas (`homes=:id`) |
+| GET | `/v2/admin/calendars/:calendarId/seasons` | Colores de temporada |
+| GET | `/v2/admin/calendars/owner/:ownerId/available-stays/:homeId` | Disponibilidad del propietario por temporada |
+| GET | `/v2/admin/properties/:homeId/calendar-keys` | Coste en llaves de los slots |
+| GET | `/v2/admin/bookings/keys/wallets` | Saldo de llaves del receptor (`user=:id`) |
+| GET | `/v2/admin/users/list` | Buscador de usuarios de Vivla |
+
+## Código
+
+| Qué | Dónde |
+|-----|-------|
+| Página | `src/pages/CreateBooking/index.tsx` |
+| Wizard | `src/features/bookings/components/CreateBookingWizard/index.tsx` |
+| Flujos por tipo | `CreateBookingWizard/flows.ts` (`buildFlow`, `STEP_FIELDS`, `OPTIONAL_STEPS`) |
+| Navegación entre pasos | `CreateBookingWizard/hooks/useWizardNav.tsx` |
+| Schema Zod | `CreateBookingWizard/schema.ts` |
+| Valores por defecto | `CreateBookingWizard/constants.ts` |
+| Pasos | `CreateBookingWizard/steps/` (uno por carpeta, enrutados en `renderStep.tsx`) |
+| Selección de fechas | `CreateBookingWizard/steps/CalendarStep/hooks/useCalendarRangeSelection.ts` |
+| Buscador de personas | `CreateBookingWizard/components/PersonPickerDialog` |
+| Mappers al body | `CreateBookingWizard/mappers/` |
+| Mutation | `src/features/bookings/queries/registerBooking.ts` |
+| Request | `src/features/bookings/api/requests/registerBooking.ts` |
+| Textos | `src/assets/locales/es/createBooking.json` |

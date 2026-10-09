@@ -1,0 +1,235 @@
+---
+title: "Reservas"
+description: "Listado y calendario de reservas del panel: filtros en la URL, tabla con flags de seguimiento, hoja de detalle y export CSV"
+---
+
+# Reservas
+
+El módulo **Reservas** es donde CX consulta y sigue las reservas de todas las casas. Tiene dos vistas: una tabla con una fila por reserva y un calendario con una fila por casa. Desde las dos abres la hoja de detalle de una reserva.
+
+Para registrar una reserva nueva, ve a [Alta de reserva](/panel/bookings/create). Para editar, cancelar o tocar estancias y huéspedes, ve a [Gestión de una reserva](/panel/bookings/manage).
+
+<Note>
+  Esta página describe la pantalla, no las reglas de negocio. Cupos, última hora, alquiler y llaves están en [El ciclo de reserva](/operativa/reservas), [Reservas de última hora](/operativa/reservas-ultima-hora), [Alquiler](/operativa/alquiler) y [Reglas de reserva](/backend/reglas-de-reserva).
+</Note>
+
+## Rutas
+
+| Ruta | Qué hay | Permiso |
+|------|---------|---------|
+| `/bookings` | Vista lista (por defecto) | `read:bookings` |
+| `/bookings?viewMode=calendar` | Vista calendario | `read:bookings` |
+| `/bookings?bookingId=:id` | Hoja de detalle abierta sobre la vista actual | `read:bookings` para ver, `edit:bookings` para editar |
+| `/bookings/create` | Wizard de alta | `edit:bookings` |
+
+Sin `read:bookings` no ves **Reservas** en el menú y la ruta te redirige. El botón **Crear reserva** solo aparece con `edit:bookings`. El permiso `*` lo da todo. Ver [Permisos](/panel/platform/permissions).
+
+Otros módulos enlazan aquí con la URL ya filtrada:
+
+- La ficha de un usuario abre sus reservas (`?user=`). Ver [Usuarios](/panel/users).
+- Los propietarios de una casa abren las reservas de ese usuario en esa casa (`?user=&home=`).
+- Los movimientos de [llaves](/panel/keys) y el calendario de una [casa](/panel/homes/details) abren la hoja de detalle (`?bookingId=`).
+
+## Cabecera
+
+- **Crear reserva** lleva a `/bookings/create`.
+- El switch **Lista** / **Calendario** (`ListModeSwitch`) cambia de vista. Guarda la elección en `viewMode` (`list` o `calendar`). Cualquier otro valor cae en lista.
+
+## Vista lista
+
+### Filtros
+
+Todos los filtros viven en la URL. Copia el enlace para compartir una búsqueda concreta.
+
+| Filtro en pantalla | Param | Qué hace |
+|--------------------|-------|----------|
+| **Estado de la reserva** | `status` | **Activa** por defecto (sin param). **Pasada** es `past`. **Todas** es `all`. |
+| **Tipo de reserva** | `type` | **Disfrute**, **Alquiler**, **Intercambio** o **Thirdhome**. Cambiarlo borra `approval`. |
+| **Estado de aprobación** | `approval` | Solo aparece si el tipo no es disfrute. Las opciones dependen del tipo (ver abajo). |
+| **Todas las casas** | `home` | Selección múltiple. IDs separados por comas. |
+| **Todos los destinos** | `location` | Un destino. |
+| **Todos los calendarios** | `calendar` | Un calendario (playa, montaña, urbano…). No filtra por sí solo: sirve para elegir la temporada. Cambiarlo borra `season`. |
+| **Todas las temporadas** | `season` | Una temporada del calendario elegido (alta, media, baja…). Se activa al elegir calendario. |
+| **Mostrar canceladas** | `cancelled` | Casilla. Sin marcar, las canceladas no salen. |
+| **Todos los usuarios** | `user` | Buscador de usuarios. |
+| **Agente CX** | `cx` | El CX asignado a la casa. |
+| **Buscar por rango de fecha** | `from`, `to` | Con solo fecha de inicio, busca "en adelante". |
+
+Opciones de **Estado de aprobación**:
+
+- **Alquiler**: **Sin asistente**, **Pendiente**, **Aprobada**.
+- **Intercambio** y **Thirdhome**: **Sin intercambiar**, **Intercambiada**.
+
+La paginación usa `page` y `pageSize` (10 por defecto). Cambiar cualquier filtro te devuelve a la página 1. **Limpiar filtros** aparece cuando hay algún filtro activo y los quita todos.
+
+<Tip>
+  Para buscar reservas en fechas pasadas, pon **Estado de la reserva** en **Pasada**. Lo recuerda el tooltip del filtro de fechas.
+</Tip>
+
+<Note>
+  El panel traduce los params de la URL a los de la API: `home` pasa como `properties`, `user` como `userId`, `cx` como `cx_agent` y `cancelled` como `showCancelled=include` o `exclude`.
+</Note>
+
+### Tabla
+
+Las dos primeras columnas quedan fijas al hacer scroll horizontal:
+
+- **Nombre de la casa**: enlaza a la ficha de la casa.
+- **Fecha de la reserva**: primer y último día de los slots, con temporada y año.
+
+El resto de columnas:
+
+| Bloque | Columnas |
+|--------|----------|
+| Reserva | **Estado de la estancia**, **Propietario**, **Tipo de reserva**, **Huésped principal**, **Notas de la estancia** |
+| Estancia | **Fecha de entrada**, **Fecha de salida**, **Nº de personas**, **Nº de estancia**, **CX** |
+| Seguimiento | **Planificación**, **Estado de la casa**, **Check-in**, **Pre-estancia**, **Control de llegada**, **NPS**, **Disfrutada** |
+| Notas | **Notas de la reserva** |
+
+Haz clic en una fila para abrir la hoja de detalle. Los enlaces de casa, propietario y huésped llevan a su ficha sin abrir la hoja. Las reservas canceladas salen atenuadas.
+
+**Estado de la estancia** combina el tipo y el estado de aprobación. Por ejemplo, un alquiler aprobado sale como **Alquilada** y un intercambio aprobado como **Intercambiada**. Una reserva cancelada siempre sale como **Cancelada**. Sin estado de aprobación, sale **Desconocido**.
+
+### Tipos de reserva e iconos
+
+| Tipo | Valor en la API | Etiqueta en la tabla | Icono |
+|------|-----------------|----------------------|-------|
+| Disfrute | `enjoy` | **Disfrute** | `BookIcon` |
+| Alquiler | `rent` | **Para alquilar** | `RentIcon` |
+| Intercambio | `exchange` | **Para intercambiar** | `ExchangeIcon` |
+| Thirdhome | `thirdhome` | **Thirdhome** | `ThirdHomeTypeIcon` |
+
+`BookingTypeIcon` elige el icono según el tipo. Lo usan la tabla, el selector de tipo de la hoja de detalle y los eventos del calendario.
+
+### Flags de seguimiento
+
+Las columnas de seguimiento son flags de la estancia (`BookingFlags`). Se editan desde la propia tabla con un selector **SI** / **NO**.
+
+| Columna | Flag | Dónde más aparece |
+|---------|------|-------------------|
+| **Planificación** | `planning` | Hoja de detalle, **30 días antes** |
+| **Estado de la casa** | `homeStatus` | Solo en la tabla |
+| **Check-in** | `checkIn` | Hoja de detalle, **7 días antes** |
+| **Pre-estancia** | `preStay` | Hoja de detalle, **1 día antes** |
+| **Control de llegada** | `arrivalControl` | Hoja de detalle, **Mismo día de llegada** |
+| **NPS** | `sentNPS` | Hoja de detalle, **Mismo día de salida** |
+| **Disfrutada** | `enjoyed` | Hoja de detalle, **Ha disfrutado de su estancia** |
+
+El selector queda desactivado si no tienes `edit:bookings`, si la reserva está cancelada o si no tiene estancia. El cambio se ve al momento. Si la API falla, vuelve al valor anterior y sale un aviso con el error.
+
+<Note>
+  Los flags cuelgan de la estancia, no de la reserva. Una reserva sin estancia no tiene flags editables.
+</Note>
+
+### Badge de última hora
+
+`LastHourBadge` muestra un rayo y el texto **Última hora**. Aparece junto al tipo en la columna **Tipo de reserva** cuando la reserva tiene `isLastHour`. En la hoja de detalle se ve como sufijo **Última hora** en el selector de tipo. En el CSV, el tipo sale como `Disfrute · Última hora`. La vista calendario no lo muestra.
+
+<Note>
+  La última hora se decide al crear la reserva. La hoja de detalle no permite cambiarla después. Las reglas están en [Reservas de última hora](/operativa/reservas-ultima-hora).
+</Note>
+
+### Export CSV
+
+Pulsa **Exportar a CSV**. El botón se desactiva mientras carga la tabla o si no hay resultados. Se abre el diálogo **Exportar reservas a CSV**:
+
+- Arriba ves cuántas reservas y columnas vas a exportar, y los filtros activos como chips.
+- **Nombre del archivo** viene como `reservas_AAAA-MM-DD`. Es obligatorio.
+- El export usa los mismos filtros que la tabla. No se limita a la página visible.
+- El panel pide las reservas en bloques de 500 y muestra el progreso (**Exportando… X de Y**).
+- El archivo se genera en tu navegador.
+
+El CSV lleva el **Id reserva**, todas las columnas de la tabla y estas columnas extra: **Id casa**, **Id propietario**, **Email propietario**, **Id huésped**, **Email huésped**, **Teléfono huésped**, **Fecha inicio reserva**, **Fecha fin reserva**, **Temporada**, **Total personas** y **Servicios**.
+
+<Warning>
+  El export tiene un tope de 10.000 reservas. Si el listado es mayor, el diálogo avisa y exporta solo las 10.000 primeras. Acota con filtros para tener un export completo.
+</Warning>
+
+<Warning>
+  El CSV incluye emails y teléfonos de propietarios y huéspedes. Trátalo como dato personal y no lo compartas fuera del equipo.
+</Warning>
+
+## Vista calendario
+
+Una fila por casa y una columna por día del mes. Cada slot se pinta con el color de su temporada. Si el slot tiene una reserva, muestra el propietario, el icono del tipo y el tipo. Haz clic en la reserva para abrir su hoja de detalle.
+
+- **Navegación**: flechas de mes, selector de mes (tres años atrás y tres adelante) y botón **Hoy**, que vuelve al mes actual y centra el día de hoy.
+- **Filtros** (**Filtrar por**): casas (selección múltiple), **Agente CX** y destino. **Limpiar filtros** los quita.
+- **Cabecera**: **Nombre de la casa** y el total de casas que cumplen los filtros.
+- **Paginación**: 5 casas por página por defecto.
+
+Sus params llevan prefijo `cal`: `calHome`, `calCx`, `calLocation`, `calFrom`, `calTo`, `calPage` y `calPageSize`. Así los filtros de lista y calendario no se pisan. Sin fechas en la URL, se muestra el mes actual.
+
+<Note>
+  Esta vista solo lee. No tiene filtros de estado, tipo ni usuario, ni export CSV. Para crear, mover o borrar slots de calendario usa el [Calendar Manager](/panel/calendars).
+</Note>
+
+## Hoja de detalle
+
+`BookingsDetailsSheet` se abre cuando la URL lleva `bookingId`. Sale por la derecha en escritorio y desde abajo en móvil. Al cerrarla, el panel quita `bookingId` de la URL.
+
+- El título es **Detalles de la reserva**. Debajo, **ID de la reserva: N**. Haz clic en el ID para copiarlo.
+- Si la reserva no carga, sale **Error al cargar los datos de la reserva** y la hoja se cierra.
+- Si la reserva está cancelada o no tienes `edit:bookings`, casi todo es de solo lectura.
+
+El contenido depende de si la reserva ya tiene estancia:
+
+| Situación | Secciones |
+|-----------|-----------|
+| Con estancia | Resumen, **Detalles de la estancia**, **Comunicación**, **Planificación e itinerario del viaje** |
+| Sin estancia | Resumen y el aviso **Todavía no hay estancia** |
+
+El resumen muestra la casa, **Propietario: nombre** con **Ver perfil**, **Fechas de la reserva**, avisos, **Tipo de reserva**, **Estado de la reserva**, **Notas de la reserva** y **Cancelar reserva**. Qué puedes cambiar en cada bloque está en [Gestión de una reserva](/panel/bookings/manage).
+
+### Comunicación
+
+La sección **Comunicación** agrupa cinco hitos de seguimiento. Cada uno tiene un selector **SI** / **NO** (el flag de la tabla) y un mensaje plantilla con **Ver mensaje** y **Copiar mensaje**.
+
+| Hito | Qué es | Flag |
+|------|--------|------|
+| **30 días antes** | Llamada y mensaje de planificación | `planning` |
+| **7 días antes** | Notificación de Check in | `checkIn` |
+| **1 día antes** | Llamada o mensaje de Pre-estancia | `preStay` |
+| **Mismo día de llegada** | Llamada y mensaje de control de llegada | `arrivalControl` |
+| **Mismo día de salida** | Mensaje de NPS | `sentNPS` |
+
+En **7 días antes** tienes **Generar documento de Check in**. Abre el diálogo **Documento de Check in** con **Descargar PDF**. **Enviar ahora** aparece desactivado (**Disponible próximamente**). El contenido del documento sale de la casa: ver [Documento de check-in](/panel/homes/checkin-doc).
+
+<Note>
+  **Enviar mensaje**, en la cabecera de la hoja, todavía no hace nada.
+</Note>
+
+## Endpoints de vivla-api
+
+| Método | Endpoint | Para qué |
+|--------|----------|----------|
+| GET | `/v2/admin/bookings` | Listado paginado con filtros. También lo usa el export CSV. |
+| GET | `/v2/admin/bookings/:id` | Datos de la hoja de detalle |
+| GET | `/v2/admin/calendars` | Vista calendario: casas con sus slots y reservas |
+| GET | `/v2/admin/calendars/types` | Calendarios del filtro **Todos los calendarios** |
+| GET | `/v2/admin/calendars/:calendarId/seasons` | Colores de temporada del calendario y opciones del filtro **Todas las temporadas** |
+| PUT | `/v2/admin/bookings/stay/:stayId/edit` | Guardar un flag desde la tabla (`flags`) |
+
+La referencia completa de la API de reservas está en [Endpoints de reservas](/backend/bookings-endpoints).
+
+## Código
+
+| Qué | Dónde |
+|-----|-------|
+| Página | `src/pages/Bookings/index.tsx` |
+| Vista lista | `src/pages/Bookings/sections/BookingsList` |
+| Vista calendario | `src/pages/Bookings/sections/BookingsCalendar` |
+| Filtros en la URL | `src/features/bookings/hooks/useBookingsListUrlFilters.ts`, `useBookingsCalendarUrlFilters.ts` |
+| Filtros de la tabla | `src/features/bookings/components/bookingsTableFilters` |
+| Tabla | `src/features/bookings/components/BookingsTable` (columnas en `constants.ts`) |
+| Tabla calendario | `src/features/bookings/components/BookingsCalendarTable` |
+| Hoja de detalle | `src/features/bookings/components/BookingsDetailsSheet` |
+| Switch de vista | `src/features/bookings/components/ListModeSwitch` |
+| Badge de última hora | `src/features/bookings/components/LastHourBadge` |
+| Iconos | `src/features/bookings/components/BookingTypeIcon.tsx`, `FlagSelectorIcon.tsx` |
+| Export CSV | `src/features/bookings/components/BookingsCSVExportDialog`, `src/features/bookings/utils/bookingsCsv.ts` |
+| Queries | `src/features/bookings/queries/getPaginatedBookingList.ts`, `getBookingById.ts`, `getCalendarList.ts`, `getCalendarSeasonColors.ts` |
+| Modelos | `src/core/bookings/models` (`Booking`, `BookingType`, `ApprovalStatus`, `BookingFlags`) |
+| Reglas de la UI | `src/core/bookings/rules/booking.rules.ts` |
+| Textos | `src/assets/locales/es/bookings.json` |
+| Rutas | `src/config/paths.ts`, `src/router/index.tsx` |

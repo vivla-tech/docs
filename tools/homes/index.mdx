@@ -1,0 +1,1455 @@
+---
+title: 'Inventario'
+description:
+  'Setup y compras de las casas: shopping list por apartados, plantillas,
+  catálogo y pedidos con su seguimiento, recepción y coste real'
+---
+
+# Inventario
+
+Herramienta del equipo de Homes para el setup de una casa y sus compras. En el
+hito 1, la shopping list por apartados, con presupuesto controlado, plantillas
+repetibles y un catálogo que se llena solo desde las listas. En el hito 2, los
+pedidos: se preparan desde la lista o se crean sueltos, se siguen paso a paso
+hasta que llegan, se reciben línea a línea y dejan el coste real de la casa, con
+sus devoluciones y reembolsos; también las compras de mantenimiento de una casa
+que ya funciona. Son los dos primeros hitos del circuito de inventario (setup →
+compras → revisión → reposiciones).
+
+## Rutas
+
+| Ruta                                                   | Qué hay                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/app/homes`                                           | Casas con foto, tipo y destino, y filtros por destino, tipo, estado y situación de la lista (vienen del panel vía sync; aquí no se crean). La tarjeta enseña la fecha de montaje y cuántos pedidos tienen aviso                                                                                                                                                                                                                   |
+| `/app/homes/houses/$propertyId`                        | La casa, con dos pestañas: la shopping list y Pedidos. Una casa activa sin shopping list se abre en Pedidos y su pestaña Shopping list lo explica, con «Crear la shopping list» como enlace; una casa que se está montando y aún no tiene lista pide el tope de presupuesto para crearla. `?tab=list` abre la shopping list                                                                                                       |
+| `/app/homes/houses/$propertyId?tab=orders`             | Pedidos de la casa en dos historiales, con un selector: setup (resumen de costes y «Hasta el montaje») y mantenimiento (su propio resumen). Una casa activa se abre en mantenimiento. «Preparar pedidos» saca borradores de la shopping list y «Nuevo pedido» apunta una compra aún sin pedir, ya pagada online o pagada en tienda. Lista por urgencia o tablero por estado. En una casa sin shopping list solo hay mantenimiento |
+| `/app/homes/houses/$propertyId?tab=orders&order=<id>`  | El pedido en un panel lateral: pasos de estado e historial, datos del pedido, líneas, recepción por línea, devoluciones y reembolsos, y factura y documentos                                                                                                                                                                                                                                                                      |
+| `/app/homes/houses/$propertyId?tab=orders&scope=setup` | La pestaña Pedidos abierta en un historial (`setup` o `maintenance`). Una casa con las compras del setup cerradas se abre en mantenimiento si tiene algún pedido de mantenimiento (si no, en setup); el enlace del resumen diario sobre su cierre lleva a `setup`, donde está la tarjeta del cierre                                                                                                                               |
+| `/app/homes/arrivals`                                  | Pedidos de todas las casas, pestaña «Llegadas» (VIV-2983): lo que tiene que llegar a un almacén o a la gobernanta de una casa, sin precios, para imprimir, copiar como texto o bajar en Excel, y la recepción en bloque. `?dest=` (claves de destino, por comas), `?window=` (`week`, `next_week`, `all`), `?property=` (casas, por comas) y `?mark=1` (abre en modo marcar)                                                      |
+| `/app/homes/arrivals/print`                            | La hoja de llegadas para imprimir o guardar en PDF, con los mismos filtros, sin el marco de Tools                                                                                                                                                                                                                                                                                                                                 |
+| `/app/homes/templates`                                 | Plantillas de setup, en tabla                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `/app/homes/templates/$templateId`                     | Edición de una plantilla: datos, grupo de presupuesto de sus líneas e ítems                                                                                                                                                                                                                                                                                                                                                       |
+| `/app/homes/catalog`                                   | Catálogo: se llena desde las listas y desde lo escrito a mano en los pedidos sueltos, y admite alta y edición manual                                                                                                                                                                                                                                                                                                              |
+| `/app/homes/orders`                                    | Pedidos de todas las casas, pestaña «En curso»: lo que tiene aviso primero, «Los míos» o «Todos», setup o mantenimiento, «Con aviso», «Pendiente de reembolso» y filtros por casa, proveedor, destino, quién lo lanzó y estado, todo en la URL. El pedido se abre en el mismo panel que en la casa (`&order=<id>`). «Nuevo pedido» arriba, con «¿Para qué casa?»                                                                  |
+| `/app/homes/orders?view=bought&q=<texto>`              | Pestaña «Ya comprado»: busca un producto en lo comprado en cualquier casa, con su casa, fecha, proveedor, precio, referencia, enlace y foto, y «Comprar lo mismo» para otra casa                                                                                                                                                                                                                                                  |
+
+Desde 768 px de ancho, las secciones de Inventario van en una columna a la
+izquierda. En el móvil (menos de 768 px) hay una sola barra abajo, la de Tools,
+con Inicio y las secciones de Inventario (`HomesToolLayout` no pinta su propia
+tira ahí); también están en el menú de arriba. En esa barra caben cuatro
+secciones (Casas, Plantillas, Catálogo y Pedidos): una quinta solo saldría en el
+menú. Por eso las vistas de varias casas van como pestañas dentro de «Pedidos»
+(`OrdersHubTabs`), no como secciones nuevas.
+
+## El modelo en tres reglas
+
+1. **Las líneas llevan copia congelada.** Editar el catálogo o una plantilla
+   nunca reescribe decisiones ya tomadas en una lista. Los punteros (`item_id`,
+   `template_id`, `template_item_id`) son procedencia, no joins vivos.
+2. **Sin columnas de estado.** «Por definir» y «por revisar» se derivan de los
+   datos de la línea (sin datos comerciales; con `check_note` y sin
+   `checked_at`).
+3. **El catálogo nace de las listas y de los pedidos sueltos.** Una línea con
+   proveedor, referencia o enlace se engancha a su producto (identidad:
+   proveedor + referencia normalizados, o nombre sin contradicciones) o lo crea
+   en `items` — la misma tabla de la que cuelgan las guías de electrodomésticos.
+   Lo escrito a mano en un pedido suelto lleva siempre el proveedor del pedido y
+   solo se une a un producto de ese proveedor con un enlace que no choque (ver
+   «Pedidos sueltos y compra en tienda»). También se puede dar de alta un
+   producto a mano desde la vista de catálogo: repetir proveedor + referencia se
+   rechaza con un 409 que nombra al producto existente. No hay deduplicación por
+   nombre ni fusión a mano — limpiar duplicados será automático cuando toque, no
+   una tarea de nadie.
+
+## Qué comparte con el resto de la suite
+
+- **Casas** = `properties` (las sincroniza el panel; la herramienta solo las
+  lee). Habitaciones, plazas y baños corregidos en Inventario van aparte, en
+  `homes_property_params` (ver «Plantillas»): esos campos de `properties` los
+  mantiene el CMS de la web y salen en la ficha pública de vivla.com.
+- **Apartados** = `rooms` (los dormitorios se reconocen por
+  `room_type = 'bedroom'` o por nombre; la expansión de plantillas los resuelve
+  por posición, no por nombre).
+- **Catálogo** = `items`, ampliada con `supplier` y `unit_price_estimate`
+  (migración 282) y con `category` de texto libre (285), el mismo campo que
+  llevan líneas y plantillas; la subcategoría va en `model`. Community sigue
+  usando su `category_id`.
+- Dominio propio (migración 280): `shopping_lists`, `shopping_list_items`,
+  `setup_templates`, `setup_template_items` y
+  `shopping_list_template_applications`.
+- Las tablas propias (esas cinco y las cinco de pedidos del hito 2) llevan Row
+  Level Security con la política «Service role can manage all …», como el resto
+  de la suite: la 364 la pone en las cinco del hito 1, la 365 en las diez, la
+  366 en las dos del resumen de avisos y la 368 en `homes_property_params`. El
+  backend las usa con la clave de service role y con la clave anónima no se
+  pueden leer ni escribir.
+
+## Fotos de producto
+
+La foto es del **producto del catálogo** (`items.main_image_url`, columna que
+`items` ya tenía), no de la línea: a diferencia del resto de datos de producto
+no se congela, porque sirve para reconocer el ítem y no es una decisión de
+compra. La línea la lee en vivo de su producto.
+
+- Se sube con `POST /homes/catalog/images` (multipart, campo `file`, hasta 8
+  MB). El backend la reencoda a WebP de 1600 px como máximo y la sube a
+  Cloudinary en la carpeta `homes/catalog`, con el mismo servicio compartido que
+  usan el resto de herramientas. Devuelve la URL.
+- La URL se guarda al guardar el producto (`imageUrl` en el alta o la edición
+  del catálogo) o desde el diálogo de una línea, que la escribe en su producto.
+  Una línea sin producto ni datos comerciales no ofrece foto: no tendría dónde
+  guardarla.
+- Las miniaturas se piden a Cloudinary ya recortadas a su tamaño.
+- No hace falta migración: la columna existía.
+
+## Presupuesto: mobiliario y amenities
+
+La lista tiene un tope total (`budget_cap`) y, opcionalmente, un tope para
+mobiliario y otro para amenities (`furniture_budget_cap`,
+`amenities_budget_cap`, migración `360_homes_budget_groups`). Como el tope
+total, avisan pero no bloquean.
+
+- Una plantilla puede llevar su grupo (`setup_templates.budget_group`, migración
+  `368_homes_templates_standards_and_house_params`, VIV-2972): sus líneas lo
+  copian al aplicarla en `shopping_list_items.budget_group`, sea cual sea su
+  categoría. Lo de la hoja «01 · FF&E» de la diseñadora es mobiliario y lo de
+  «02 · Equipamiento», amenities (pendiente de validar con ella). Se elige en el
+  editor de cualquier plantilla, también de las hechas a mano.
+- Una plantilla guardada desde una shopping list que mezcla mobiliario y
+  amenities no lleva grupo: cada ítem lleva el de su línea
+  (`setup_template_items.budget_group`, migración
+  `374_homes_template_item_budget_group`, VIV-3127). Al aplicar, manda el de la
+  plantilla; si no tiene, el del ítem; sin ninguno, la categoría.
+- Cambiar el grupo de una plantilla no toca las líneas que ya creó. Si alguna
+  cuenta en el otro grupo, el editor ofrece dárselo a las que aún no están en un
+  pedido lanzado (y a su copia en los borradores); lo ya lanzado es una copia
+  fija y se corrige desde su pedido.
+- Sin grupo en la línea, se deduce de su categoría con `budgetGroupOf`
+  (`@vivla-tools/common`): Textil, Menaje, Baño, Limpieza, Lavandería,
+  Accesorios, Amenities y Servicios cuentan como amenities; el resto, y las
+  líneas sin categoría, como mobiliario. Vale para las líneas que no vienen de
+  una plantilla con grupo.
+- Si una línea no encaja, se elige el grupo a mano en su diálogo. Guardar «según
+  la categoría» lo deja a NULL y vuelve a mandar la categoría.
+
+### Topes frente a lo comprometido y lo real
+
+Hito 2 (VIV-2970), solo frontend. En cuanto la casa tiene algún pedido de setup
+lanzado, el panel de presupuesto de la shopping list compara cada tope también
+con lo comprometido y lo real (`capUsage` en `lib/homes/budget.ts`, sobre
+`houseCosts`):
+
+- Bajo la barra del tope total, una línea con lo comprometido y lo real, cada
+  uno con su porcentaje del tope, cuántos pedidos no cuentan en el real por no
+  tener total y lo pendiente de reembolso de los pedidos de setup.
+- En «Presupuesto de mobiliario» y «Presupuesto de amenities», tres filas con su
+  barra fina: planificado, comprometido y real. Sin pedidos lanzados, solo lo
+  planificado. Sin tope en el grupo, las cifras sin porcentaje.
+- Las tres cifras y la barra del tope total siguen la misma regla: ámbar desde
+  el 85 % (el porcentaje que se lee) y rojo en cuanto pasan del tope, aunque sea
+  por un céntimo y el porcentaje redondeado diga «100 %». Si lo comprometido
+  pasa del tope, se dice en cuánto. No bloquea nada, y «Sin planificar» (antes
+  «Disponible», que se leía como lo que queda por gastar) es el tope menos lo
+  planificado.
+- La lista pide los pedidos con la misma consulta (y la misma caché) que la
+  pestaña Pedidos; si no cargan, el panel enseña solo lo planificado. Un pedido
+  cancelado sin nada pagado no cuenta como empezar a comprar.
+
+En la pestaña Pedidos, el reparto por grupo de cada cifra lleva el porcentaje de
+su tope. Todos los importes de Inventario van con céntimos y con el punto de los
+miles («8.717,20 €», `eur` en `lib/homes/derive.ts`), y llevan el IVA que se
+paga.
+
+## Pedidos
+
+Hito 2 (VIV-2862). Un pedido es **una casa y un proveedor** (`purchase_orders`,
+migración `361_homes_purchase_orders`). Sus líneas (`purchase_order_lines`) son
+una copia de lo pedido: mientras el pedido es borrador siguen a su línea de la
+shopping list y, al lanzarlo, quedan fijas (ver «El borrador sigue a la shopping
+list»). `shopping_list_item_id` es procedencia, no un join vivo.
+
+- **Preparar pedidos** (`POST /homes/shopping-lists/:listId/purchase-orders`):
+  un borrador por proveedor con las líneas que marque quien compra (nada viene
+  marcado; «Marcar todo» y «Quitar todo» para la casa entera). Si la lista ya
+  tiene un borrador de setup sin lanzar de ese proveedor (aunque se escriba
+  distinto), las líneas se suman a él, al más antiguo si hubiera dos, y el
+  diálogo lo dice en ese proveedor («Se suma a su borrador»). Un pedido lanzado
+  no cuenta: lo siguiente de ese proveedor es otro pedido. Se puede pedir menos
+  de lo pendiente, nunca más: el servidor acota cada línea a lo que falta según
+  la lista (lo que pide menos lo pedido, sin lo cancelado ni lo roto dado por
+  perdido, y lo que ya está en borradores). Las líneas por definir no se pueden
+  pedir.
+- **Estado**: `draft`, `placed`, `processing`, `manufacturing` (opcional: lo
+  hecho a medida), `shipped`, `delivered`, `cancelled`. Solo cambia con un paso
+  (`POST /homes/purchase-orders/:id/transitions`, o la recepción que completa el
+  pedido): el estado nuevo, cuándo pasó de verdad (por defecto, ahora; se puede
+  apuntar con fecha pasada, nunca futura ni anterior al paso previo), una nota y
+  los datos de ese momento (al lanzarlo, referencia y total; al enviarse,
+  llegada esperada y seguimiento). Cada paso queda en `purchase_order_events`
+  con `occurred_at` y `note`. `PATCH` ya no cambia el estado. La primera vez que
+  sale del borrador se guardan `ordered_at` y quién lo lanzó (`launched_by`,
+  migración `371_homes_order_launched_by`), aunque no pase por «Pedido»; una
+  compra en tienda nace lanzada por quien la apunta.
+- Se puede volver a un paso anterior para corregir un error (el paso deshecho
+  sigue en el historial) y reabrir un pedido cancelado. A borrador solo se
+  vuelve justo después de lanzarlo, y entonces se quitan `ordered_at` y
+  `launched_by`: un borrador no cuenta como compra lanzada. Un pedido sin líneas
+  no se puede lanzar, pero sí cancelar.
+- Solo un borrador se borra o cambia de líneas; un pedido lanzado se cancela.
+- **Estado de compra de cada línea** de la lista (`purchase` en el payload de la
+  lista): se calcula de sus pedidos no cancelados, no se guarda. Los borradores
+  cuentan como «en carrito» y lo recibido sale de la recepción de cada línea
+  (ver más abajo). PostgREST corta a 1.000 filas sin avisar: lo pedido de cada
+  línea se lee por páginas (`unwrapAll`), y las líneas de la lista se piden como
+  siempre (por `created_at`) y solo si la primera página vuelve llena se leen
+  enteras por páginas, con `id` para desempatar. Al aplicar una plantilla, cada
+  línea nace con su propio `created_at` (el instante de la petición más un
+  microsegundo por línea, `sequentialCreatedAt`), así que el orden de la
+  plantilla se conserva también al paginar.
+- En la casa, la pestaña **Pedidos** (`?tab=orders`) tiene dos modos: lista por
+  urgencia y tablero por estado (el modo elegido se recuerda en el navegador) y
+  filtros por proveedor y estado que valen para los dos. En el tablero, la
+  columna «Entregado» enseña los de los últimos 7 días y los que tienen aviso
+  (un reembolso pendiente); «Ver los N anteriores» enseña todos y «Ver solo los
+  últimos 7 días» los vuelve a ocultar (la elección también se recuerda en el
+  navegador). El pedido se abre en un panel lateral encima de esa pestaña
+  (`?tab=orders&order=<id>`): el Atrás del navegador lo cierra y las flechas
+  recorren los pedidos de la casa en el orden de la lista.
+- Permisos: `tool-homes` editor para crear y mover pedidos; viewer para verlos.
+  A un viewer no se le enseñan las acciones (preparar pedidos, cambiar de
+  estado, editar o borrar); `useCanEditHomes` sigue el mismo criterio que el
+  backend (el permiso guardado en el usuario de tools manda sobre el del token).
+
+### El borrador sigue a la shopping list
+
+VIV-2978, sin migración. Si al montar el carrito algo está agotado, se cambia en
+la shopping list (de ella sale el inventario) y el borrador ya preparado se pone
+al día solo, sin duplicarlo. La regla está en
+`apps/backend/src/homes/purchase-orders/draft-sync.ts` (`planDraftSync`, pura y
+con specs) y la aplican `syncDraftLines` y `removeFromDrafts` del servicio de
+pedidos:
+
+- Mientras el pedido es borrador, cada línea que sale de la lista copia de ella
+  producto, nombre, categoría, grupo, referencia, enlace y precio (las mismas
+  columnas que copia «Preparar pedidos», con `copyFromListLine`). Lo lanzado
+  (cualquier estado que no sea borrador) no cambia nunca desde la lista.
+- La cantidad solo cambia si cambia la de la lista: si el borrador llevaba todo
+  lo que faltaba por pedir (la cantidad menos lo de pedidos lanzados, sin lo
+  cancelado ni lo roto dado por perdido, como la lista), pasa a llevar lo que
+  falta ahora; si llevaba menos a propósito, solo se recorta si la lista pide
+  menos; si lo lanzado ya cubre la lista, la línea sale del borrador. Con la
+  línea en dos borradores, solo se recorta, del más reciente al más antiguo.
+- Si la línea cambia de proveedor, sale del borrador del proveedor anterior y
+  queda por pedir con el nuevo. Un borrador de otra tienda elegido a propósito
+  (un «Nuevo pedido» que la cubre) se queda con ella.
+- Quitar una línea de la lista la quita también de sus borradores. Un borrador
+  que se queda sin líneas no se borra: lo dice y «Preparar pedidos» lo vuelve a
+  usar.
+- `PATCH /homes/shopping-list-items/:id` solo lee los borradores si cambia algo
+  de lo anterior, y devuelve en `draftSync` qué ha pasado en cada uno
+  (`updated`, `removed` con su motivo, `failed`). Poner al día un borrador nunca
+  hace fallar el cambio de la lista: lo que no se pueda escribir se apunta en el
+  log y sale como `failed`. No deja historial.
+- En la lista, al guardar una línea que está en un borrador sale un aviso
+  («Borrador de Kave Home al día»; en rojo si no se pudo), y la confirmación de
+  «Quitar ítem» dice si la línea sale también de su borrador o si ya está
+  pedida.
+- Un sustituto escrito a mano (otro nombre y otra referencia o enlace, sin
+  elegir producto del catálogo) deja de apuntar al producto de antes: se busca o
+  nace el suyo, como una línea nueva. Corregir solo una errata no lo cambia.
+- En el panel de un borrador de setup: «Cambiar en la lista» abre el diálogo de
+  la línea de la lista sin salir del panel; el nombre de cada línea abre la
+  tienda; la referencia se copia con un botón; las líneas del mismo producto
+  (con el mismo nombre, referencia, enlace y precio) de varios apartados salen
+  en una fila con la cantidad sumada y el desglose plegado («80 en 4
+  apartados»), y debajo de las líneas, «Cuando lo lances en la web:» lanza el
+  pedido con nº, total, llegada y destino (el propuesto de la casa), con fecha
+  de hoy. El panel se relee al volver a la ventana.
+
+### Fecha de montaje y avisos
+
+Hito 2 (VIV-2863, migración `362_homes_order_dates`). La shopping list lleva la
+fecha prevista de montaje (`assembly_date`) y cada pedido puede tener la suya
+(`needed_by`); si no la tiene, vale la de montaje. Los pedidos de mantenimiento
+no dependen del montaje: solo cuenta su propia fecha.
+
+Los avisos se calculan al leer con `orderAlerts` (`@vivla-tools/common`), la
+misma función en el backend (contador de la tarjeta de la casa) y en la
+interfaz. No se guardan; una tarea programada los lleva cada mañana a la campana
+de Tools (ver «Avisos en la campana»). Solo avisan los pedidos lanzados que no
+se han entregado ni cancelado, salvo el reembolso pendiente, que vale para
+cualquier pedido:
+
+| Aviso                        | Cuándo                                                                                                                                |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Llega tarde                  | la llegada esperada es posterior a cuando hace falta (grave)                                                                          |
+| Va justo                     | llega con menos de 7 días de margen; en mantenimiento, el día antes o el mismo día                                                    |
+| Retrasado                    | la llegada esperada ya pasó (grave)                                                                                                   |
+| Enviado sin llegada esperada | lleva 7 días o más en «Enviado» sin llegada esperada (grave); en ese pedido sustituye a «Sin fecha»                                   |
+| Sin enviar y sin fecha       | pedido o procesando, sin fecha de llegada y hace falta en 3 semanas o menos (grave); «Sin moverse» si el pedido lleva su propia fecha |
+| Sin fecha                    | no tiene llegada esperada y hace falta en menos de 6 semanas                                                                          |
+| Sin cambios                  | 10 días sin cambiar de estado (no aplica a en fabricación ni a enviado)                                                               |
+| Pendiente de reembolso       | una devolución, rotura, cancelación o descuento lleva 30 días o más sin que vuelva el dinero                                          |
+
+Mantenimiento tiene sus propios márgenes: compra para la casa de la gobernanta,
+no para un almacén antes de un montaje. «Va justo» solo salta si llega el día
+antes o el mismo día en que hace falta (`ORDER_TIGHT_MARGIN_DAYS_MAINTENANCE`),
+y una reposición recién pedida sin llegada esperada no avisa por fechas hasta el
+tercer día desde que se lanzó (`ORDER_MAINTENANCE_GRACE_DAYS`, con `ordered_at`;
+sin esa fecha no hay gracia), salvo que haga falta ese tercer día o antes:
+entonces avisa desde el principio. Setup no cambia. Los días se cuentan con el
+día de España: `orderAlerts` pasa cada instante del pedido (cambio de estado,
+lanzamiento, ajuste) a su día en Madrid con `spainDay`.
+
+Cada aviso de fechas lleva `basis`: con qué fecha se compara, la de montaje
+(`assembly`) o la propia del pedido (`needed_by`). Las etiquetas
+(`orderAlertLabel`) y los consejos (`alertAdvice(kind, origin)`) están en
+common, para que la herramienta y lo que llegue fuera de ella digan lo mismo. Si
+el pedido lleva su propio «Hace falta el», la etiqueta habla de cuándo hace
+falta («Sin moverse y hace falta en 5 días»); si se compara con el montaje, «Sin
+enviar y sin fecha, a 18 días del montaje». Los consejos dependen del historial:
+en setup hablan del almacén y del montaje; en mantenimiento, de la gobernanta y
+de la tienda («Pregunta a la gobernanta si le ha llegado; si no, pregunta a la
+tienda en qué punto está.»).
+
+Los plazos salen de la diseñadora (llamada del 25-sep): la shopping list se hace
+en una semana, la compra en uno o dos días tras la escritura y la recepción
+tarda hasta un mes (seis semanas lo hecho a medida). Ella vigila así: «montaje
+dentro de tres semanas y un pedido que ni se procesa ni se envía: llamo al
+proveedor o retraso el montaje»; de ahí «Sin enviar y sin fecha».
+
+La fecha de montaje se pone y se cambia en la cabecera de «Hasta el montaje», en
+la pestaña Pedidos (un panel desde abajo en el móvil): es la referencia de esa
+línea y al cambiarla se ve al momento qué pedidos dejan de llegar. Sin fecha, la
+tarjeta pide ponerla. En la pestaña Pedidos, «Hasta el montaje» reparte los
+pedidos abiertos por semanas (`buildTimeline`): cada pedido es un punto y solo
+llevan nombre los que llegan tarde o van justos, para que aguante una casa con
+treinta pedidos. En el móvil se ven solo los que tienen problema y el resto se
+despliega; los que tienen aviso van en su propio grupo, arriba, y hay un filtro
+«Con aviso». El panel del pedido explica qué hacer con cada aviso y el diálogo
+de un paso avisa si la llegada que se apunta no llega.
+
+«Hasta el montaje» solo cuenta los pedidos de setup: las reposiciones de
+mantenimiento de una casa en setup no van al montaje. «N por llegar» incluye los
+que no tienen fecha («5 por llegar, 2 sin fecha»), y «Todo lo pedido llega antes
+del montaje» solo sale si no queda ninguno sin fecha ni ninguna llegada después
+del montaje. Los pedidos sin fecha salen en tres grupos: los que no se mueven
+con el montaje encima, los enviados sin llegada esperada (los dos en rojo) y el
+resto.
+
+La tarjeta de cada casa en Casas cuenta sus pedidos con aviso
+(`ordersWithAlert`, con `rowAlerts`), tenga shopping list o no: una casa ya
+activa solo tiene pedidos de mantenimiento. En setup, con el montaje a 21 días o
+menos (`LINES_TO_ORDER_WINDOW_DAYS`) y hasta el mismo día, cuenta también las
+líneas de la lista que nadie ha pedido ni tiene en un borrador
+(`linesToOrderSoon`, sin las líneas por definir;
+`properties/lines-to-order.ts`). Si alguna casa tiene pedidos con aviso, Casas
+lo dice encima de las tarjetas y deja filtrarlas («Con pedidos con aviso», en el
+filtro Lista).
+
+### Recepción, devoluciones y coste real
+
+Hito 2 (VIV-2864, migración `363_homes_receiving_and_costs`). El panel del
+pedido tiene tres bloques más, en el orden en que pasan las cosas:
+
+- **Recepción** (`POST /homes/purchase-orders/:id/receipt`): de cada línea,
+  cuántas unidades llegaron bien (`received_quantity`) y cuántas rotas o
+  equivocadas (`rejected_quantity`), con una nota y la fecha (`received_at`). Se
+  apunta lo recibido hasta ese momento, que sustituye a lo anterior, y lo normal
+  es pulsar «Ha llegado todo bien». No se pueden contar más de las pedidas, y
+  una recepción rechazada no guarda nada. Con todo contado, el pedido pasa solo
+  a entregado, con la fecha de la recepción; corregir después la recepción de un
+  pedido entregado no lo saca de entregado. Si se marca como entregado sin haber
+  apuntado la recepción, lo que faltaba por contar se da por recibido bien. Lo
+  recibido es lo que la shopping list enseña como recibido.
+- **Devoluciones y reembolsos** (`purchase_order_adjustments`): devolución,
+  rotura, cancelación o descuento, de todo el pedido o de una línea, con el
+  importe que debe volver. Se pulsa «Marcar como reembolsado» cuando la tienda
+  confirma el reembolso, en un correo o en su web (`refunded_at`); lo que falta
+  se enseña como «Pendiente de reembolso» y a los 30 días sin volver el pedido
+  avisa. Se pueden marcar como reembolsadas, volver a dejar pendientes o quitar
+  (el importe y la nota solo se corrigen por la API). Lo que llega roto se
+  apunta en la recepción, que pregunta qué pasa con ello (ver «Entregas a medias
+  y lo roto»).
+- **Factura y documentos** (`purchase_order_documents`): PDF o foto, hasta 15
+  MB, en Cloudinary (`homes/purchase-orders`); al quitar un documento se borra
+  también su archivo. Opcional: el coste real sale del total pagado, la factura
+  es el justificante que se pide ante un robo, un seguro o un pedido fallido.
+
+**Coste real** de un pedido: el total pagado menos lo reembolsado; un pedido sin
+total real cuenta 0. En la pestaña Pedidos, el resumen del setup da el
+planificado (la shopping list), el comprometido (lo pedido) y el real, cada uno
+repartido entre mobiliario y amenities (`houseCosts`), y lo que falta por
+reembolsar («Pendiente de reembolso», con los días que lleva el más antiguo).
+Cada pedido se reparte entre los dos grupos según sus líneas
+(`furnitureShareOf`): las que tienen precio pesan lo que valen, y lo que el
+total pagado no explica con ellas se reparte por unidades entre las que no lo
+tienen; sin precios ni total, todo va por unidades. Los borradores no cuentan;
+un pedido cancelado no compromete nada, pero lo que se pagó y no ha vuelto sigue
+siendo coste real.
+
+Lo que esas cifras no dicen solas (`lib/homes/cost-signals.ts`):
+
+- **Pedidos sin total**: un pedido lanzado y no cancelado sin total pagado
+  cuenta 0 en el real. Junto a «Real» (y a «Gastado en …» en mantenimiento, con
+  los del año) sale «Sin contar 3 pedidos sin total (estimado 2.047,77 €)»; al
+  pulsarlo, la lista enseña solo esos, y cada uno lleva la píldora «Sin total».
+- **Diferencia con lo estimado**: en cada pedido con total, lo pagado frente a
+  la suma de sus líneas («+40,00 € sobre lo estimado»), en la lista y en el
+  panel del pedido, y la suma de los pedidos de setup bajo «Comprometido». Solo
+  si todas las líneas llevan precio; si no, el estimado se queda corto.
+
+### Pedidos sueltos y compra en tienda
+
+Hito 2 (VIV-2865). No necesita migración: `purchase_orders.origin` (`setup` o
+`maintenance`) ya existía.
+
+- **Nuevo pedido**, en la pestaña Pedidos
+  (`POST /homes/properties/:propertyId/purchase-orders`): un pedido que no sale
+  de la shopping list. Sus líneas son productos del catálogo (copian sus datos,
+  igual que las de la lista) o escritas a mano, con cantidad y precio. Hay dos
+  formas:
+  - **Pedido a proveedor**: nace en borrador y sigue el circuito de siempre.
+  - **Compra en tienda**: nace entregada y recibida entera, con el total pagado
+    (obligatorio) y la fecha de compra (por defecto, hoy; nunca futura), y el
+    historial la apunta como «Compra en tienda». Después se le sube el ticket.
+- **Setup y mantenimiento** son dos historiales en la misma pestaña, con un
+  selector, y el pedido nuevo va al que se está viendo.
+  - Un pedido suelto de setup (algo que no está en la lista, o una compra en
+    tienda durante el montaje) cuenta en el coste del setup y se apunta a la
+    lista de la casa. Sin shopping list no hay setup al que sumarlo: la API lo
+    rechaza.
+  - Si en setup se compra un producto que la lista aún tiene por pedir, la
+    compra cubre esa línea (`shopping_list_item_id`, con su nombre, su grupo y
+    sus señas): la lista la cuenta como comprada y «Preparar pedidos» no la
+    vuelve a proponer. Cubre como mucho lo que falta (para comprar más se añade
+    el producto otra vez) y la misma línea no puede ir dos veces en un pedido.
+  - En setup, lo que no cubre la lista y no tiene categoría (lo escrito a mano o
+    un producto del catálogo sin ella) pide el grupo, mobiliario o amenities,
+    para repartir el coste.
+  - Mantenimiento no entra en el coste del setup. Tiene su propio resumen: lo
+    gastado en el año, lo que está en camino y lo que falta por reembolsar.
+- Una casa **sin shopping list** también tiene pestaña Pedidos, solo con
+  mantenimiento: una casa que ya funciona compra reposiciones aunque su setup no
+  se hiciera en Tools.
+- Las flechas del panel recorren solo los pedidos del mismo historial.
+- Para el hito 3 queda enganchar cada línea a la pieza del inventario que
+  repone.
+
+**Compra online ya pagada en un paso** (VIV-2975, sin migración). «Nuevo pedido»
+tiene tres modos (`mode` en la API: `draft`, `placed` o `in_store`;
+`inStore: true` sigue valiendo y equivale a `in_store`):
+
+- **Aún sin pedir**: el borrador de siempre, que ya admite destino y «Hace falta
+  el» al crearlo. Botón «Crear borrador».
+- **Pagada online**: nace en «Pedido» con nº de pedido (opcional), total pagado
+  con IVA (obligatorio; si las líneas tienen precio, vale su suma), fecha del
+  pedido (hoy, nunca futura), llegada esperada (nunca anterior al pedido),
+  destino y «Hace falta el». Guarda `ordered_at` y `launched_by` (quien la
+  apunta) y un solo paso en el historial, «Pedido», con la nota «Compra online».
+  Las líneas nacen sin recibir.
+- **Pagada en tienda**: como antes, y además el nº del ticket o del pedido y el
+  destino, opcionales, para no reabrir el pedido.
+- En mantenimiento el diálogo se abre en «Pagada online»; en setup, en «Aún sin
+  pedir». En una casa con shopping list dice arriba a qué historial va («Va a:
+  Mantenimiento | Setup»), y en una casa activa empieza en Mantenimiento, para
+  que una reposición no sume en el coste del setup. El destino propuesto es el
+  de `suggestedDeliverTo` (el más usado de la casa en ese historial; sin
+  pedidos, «Gobernanta» en mantenimiento) y «Proveedor» propone los ya usados en
+  la casa.
+- Avisos que no bloquean: si llegaría después de cuando hace falta, si una
+  reposición con «Hace falta el» va sin llegada esperada (cuándo empezará a
+  avisar, con la gracia de mantenimiento de los avisos) y si va a un almacén sin
+  nº de pedido.
+- **Lo escrito a mano** guarda enlace, referencia del artículo y foto («Enlace,
+  referencia y foto», debajo de la línea) y nace en el catálogo con el proveedor
+  del pedido (`findOrCreateForLine` con `sameSupplier`): solo se une a un
+  producto de ese proveedor cuyo enlace no choque (dominio y ruta, sin «?» ni
+  «#»), nunca a uno heredado de community. La línea guarda su `item_id` y lo que
+  se escribió. La foto va al producto solo si aún no tiene; si falla, el pedido
+  se queda. Así lo comprado en una casa sale al buscarlo en «Nuevo pedido» de
+  otra, con proveedor, precio y foto.
+- El diálogo admite valores de partida y, sin casa, pregunta «¿Para qué casa?»,
+  para abrirlo desde fuera de la casa.
+- Sin rol de edición, la pestaña Pedidos dice por qué no hay botones: «Para
+  apuntar compras y llegadas necesitas permiso de edición en Inventario.
+  Pídeselo a quien lo administra.»
+
+### Destino, cancelaciones y llegadas confirmadas
+
+Hito 2 (VIV-2973). Sin migración: el destino sigue siendo texto libre
+(`purchase_orders.deliver_to`) y lo cancelado sale de los ajustes.
+
+- **Regla de destinos** (`utils/homes-destinations.ts` en `@vivla-tools/common`,
+  la misma en el backend y en la interfaz): `parseDeliverTo` dice qué clase de
+  sitio es un destino escrito a mano (almacén con su ciudad, la gobernanta de la
+  casa, el estudio, la casa, otro sitio o ninguno) y `canonicalDeliverTo` cómo
+  se guarda. «almacen madrid», «Madrid, almacén» o «Nave Madrid» se guardan
+  «Almacén Madrid»; «gobernanta Ana», «Gobernanta: Ana»; lo que no se reconoce,
+  tal cual y sin espacios de más. `PATCH` del pedido y el paso de lanzarlo
+  guardan siempre esa forma. `destinationKeyOf` da la lista de llegadas a la que
+  va cada pedido: los almacenes son de todas las casas y la gobernanta, de cada
+  una («Gobernanta: Ana» y «gobernanta» en la misma casa son la misma lista).
+  `mightArriveAt` dice qué pedidos sin destino claro podrían ir a una lista.
+- **Campo Destino** (`DeliverToField`): sugerencias con las de la casa en ese
+  historial primero, la forma de guardarlo al salir del campo y una línea que
+  dice en qué lista de llegadas saldrá el pedido (o por qué no saldrá en
+  ninguna, con atajos). Al lanzar un pedido sin destino se pide, con el más
+  usado de la casa ya puesto (`suggestedDeliverTo`; sin pedidos, «Gobernanta» en
+  mantenimiento). No bloquea.
+- **Lo cancelado**: una cancelación de una línea (ajuste `cancellation` con
+  línea y cantidad; `cancelledUnitsByLine`) no se da por recibida al marcar
+  entregado, un pedido con una línea cancelada pasa a entregado cuando llega el
+  resto, y esas unidades vuelven a «por pedir» en la shopping list (sin fecha de
+  llegada), donde «Preparar pedidos» las propone. La cancelación de una línea
+  pide cuántas unidades, nunca más de las que faltan por llegar; una línea que
+  ya llegó entera no se cancela (se apunta como devolución). Un pedido con todo
+  cancelado y nada recibido no pasa a entregado.
+- **Cancelar lo ya pagado**: el diálogo ofrece, marcado si aún no ha llegado
+  nada, apuntar como reembolso pendiente el total pagado menos lo que ya tiene
+  ajustes (`recordRefund` en el paso). Al lanzar sin total, avisa de que no suma
+  en el coste real ni en la cifra del cierre (en mantenimiento, en lo gastado).
+- **En mantenimiento, «Ha llegado…»** es el botón principal de un pedido en
+  marcha (los pasos intermedios quedan en «Cambiar estado»). No guarda sin decir
+  quién lo ha confirmado (la gobernanta, lo he visto yo u otra persona), y la
+  respuesta queda como nota del paso a entregado. Desde ahí se puede avisar a la
+  gobernanta o ir a la recepción por líneas si solo ha llegado una parte. Si la
+  recepción por líneas completa un pedido de mantenimiento, también pregunta
+  quién lo ha confirmado (`note` en `POST /homes/purchase-orders/:id/receipt`).
+- **Avisar a la gobernanta**, en la pestaña Pedidos de una casa (mantenimiento)
+  y en el panel de un pedido con ese destino: un texto para WhatsApp, sin
+  precios, con lo que le va a llegar, para qué casa y para cuándo. Entran los
+  pedidos que la nombran y, para revisar, los que no tienen destino claro (los
+  de mantenimiento, marcados). Pendiente de validar con Diseño antes de
+  mandarlo.
+- **Deshacer un «entregado» por error**: volver atrás compara la fecha con la
+  del último paso que sigue valiendo y queda antes del estado al que se vuelve
+  (`stepBefore` y `effectiveSteps`, en `utils/homes-order-steps.ts`): así vuelve
+  a «enviado» con la fecha real del envío. El diálogo propone esa fecha y
+  ofrece, marcado, poner a cero lo recibido bien (`resetReceipt` en el paso; las
+  rotas y las notas se quedan). Si no hay paso anterior (una compra en tienda
+  con fecha pasada), compara con el paso más antiguo y, sin historial, con la
+  menor entre el alta y el último cambio de estado (`stepBefore`). Al dar por
+  recibido lo que falta, la fecha de una recepción ya apuntada no se pisa. Dos
+  pasos a la vez sobre el mismo pedido: el segundo da 409 y no escribe nada. En
+  el historial, los pasos deshechos quedan marcados como «deshecho».
+- **Reabrir un cancelado** quita el reembolso pendiente que dejó la cancelación
+  (ajustes de cancelación de todo el pedido sin reembolsar), y el diálogo lo
+  dice.
+- Lo cancelado no se puede recibir: la recepción admite como mucho lo pedido
+  menos lo cancelado (o lo que ya estaba contado, si era más).
+- «Marcar como procesando» pide también la llegada esperada.
+
+### Entregas a medias y lo roto
+
+Hito 2 (VIV-2976, migración `373_homes_adjustment_writes_off`). Un pedido que
+llega en varias entregas o con algo roto se sigue desde su recepción:
+
+- **Lo que falta**: al guardar una recepción que deja el pedido a medias, el
+  diálogo «Queda a medias (faltan N)» pregunta «¿Cuándo llega lo que falta?». La
+  fecha pasa a ser la llegada esperada del pedido (`expectedAt` en
+  `POST /homes/purchase-orders/:id/receipt`), nunca antes del día de la entrega;
+  en blanco, se sigue esperando la que tenía y desde el día siguiente sale como
+  retrasado. Si la recepción completa el pedido, la fecha no se toca.
+- **En la pestaña Pedidos**, la fila de un pedido abierto con algo ya recibido y
+  algo por llegar lo dice: «13 de 32 recibidas · lo que falta llega el 8 oct»
+  (`partialReceiptText`). La recepción de ese pedido enseña primero lo que falta
+  («Faltan 12 de 16», con «falta 1» en cada línea) y deja plegado lo ya
+  recibido, también en el móvil.
+- **Lo roto o equivocado** (`rejected_quantity`) se sigue esperando: el
+  proveedor lo repone. Al apuntar rotas nuevas, la recepción pregunta «¿Qué pasa
+  con lo roto?»: «El proveedor lo repone» (sigue por llegar), «Lo abonan» (deja
+  de esperarse y queda una rotura pendiente de reembolso, por su precio o el
+  importe que se diga) o «Ni se repone ni se abona» (deja de esperarse; una
+  rotura de importe 0). Va en cada línea del DTO (`brokenOutcome` y
+  `refundAmount`); sin decirlo, se repone. Una línea no puede ir dos veces en la
+  misma recepción.
+- **Solo deja de esperarse lo que se dice**: la rotura o devolución que lo marca
+  (`purchase_order_adjustments.writes_off`, migración
+  `373_homes_adjustment_writes_off`), con sus unidades y nunca más de lo roto
+  que se esperaba (`writtenOffUnitsByLine` y `writeOffUnitsFor`, en common). Las
+  marca la recepción al elegir «Lo abonan» o «Ni se repone ni se abona», y
+  «Devoluciones y reembolsos» cuando, en una línea con algo roto por reponer, se
+  contesta «Sí: ya no lo reponen» a «¿Es eso?» (`writesOff` en
+  `POST /homes/purchase-orders/:id/adjustments`; sin unidades, todo lo que se
+  esperaba). Con «No: es algo que llegó bien» (o en una línea sin nada por
+  reponer), la rotura o devolución no cambia lo que falta. «¿Ya no la reponen?»,
+  en la línea de la recepción, abre ese formulario con el «Sí» marcado.
+- **Lo que deja de esperarse vuelve a «por pedir»** en la shopping list y en la
+  tarjeta de la casa, como lo cancelado (`summarizeLinePurchases`,
+  `countLinesToOrder`), para poder comprar otro. Si era lo único que faltaba, el
+  pedido pasa a entregado con la fecha de su última llegada; si ese paso falla,
+  la rotura se queda guardada y el pedido abierto.
+- La recepción guarda primero las líneas y después lo que deja de esperarse; si
+  una rotura no se puede guardar, las líneas vuelven a como estaban y se quitan
+  las roturas ya guardadas en esa recepción, para que al repetirla se vuelva a
+  preguntar qué pasa con lo roto. `expectedAt` es una fecha `YYYY-MM-DD` y
+  `refundAmount` cabe en `NUMERIC(12,2)` (la pantalla lo redondea a céntimos).
+- Si el pedido ya estaba entregado y algo resulta roto y se repone, el pedido no
+  cambia de estado: para seguir la reposición se vuelve a «Enviado», y en ese
+  caso el diálogo deja sin marcar «Poner a cero lo recibido bien».
+- Lo que se espera de una línea es lo pedido menos lo cancelado y lo que ya no
+  se repone (`receiptLineState`). Bien se puede apuntar como mucho eso; rotas,
+  lo pedido menos lo cancelado, porque la reposición puede llegar bien después
+  de haber llegado rota, también en la misma recepción (`receiptLimits`). Lo que
+  deja de esperarse en una recepción tiene que salir de lo que faltaba. Para
+  bajar las rotas por debajo de lo que ya no se espera, primero se quita su
+  rotura; quitarla vuelve a esperar lo roto, pero un pedido ya entregado no
+  cambia de estado. Una rotura de importe 0 sale como «Sin reembolso», sin
+  «Marcar como reembolsado». «Ha llegado todo bien» y marcar el pedido como
+  entregado dan por recibido también lo que repone el proveedor.
+
+### Pedidos que compra un estudio
+
+Hito 2 (VIV-2979, migración `370_homes_purchase_order_buyer`). Con un estudio
+externo (Canica, por ejemplo), la diseñadora le pasa un presupuesto preaprobado
+de mobiliario y el estudio hace la lista, compra, guarda y monta. Su pedido está
+en Tools para que sus líneas cuenten como pedidas, en el coste y en el tope de
+mobiliario, pero quien compra no lo sigue.
+
+- Cada pedido dice quién compra (`purchase_orders.buyer`): `internal` (Vivla,
+  por defecto) o `studio`. Solo un pedido de setup puede ser del estudio; se
+  marca y se desmarca en el panel del pedido, en «Quién compra» («Lo compra y lo
+  monta un estudio externo»), con `PATCH /homes/purchase-orders/:id` y `buyer`.
+- No da avisos de fechas ni de estado: `orderAlerts` solo le deja «Pendiente de
+  reembolso», si se apunta una devolución. No cuenta en la tarjeta de la casa ni
+  en el filtro «Con aviso».
+- Sus líneas cuentan como pedidas: no quedan por pedir ni salen en «Preparar
+  pedidos». Lo que cubre un pedido del estudio lanzado y no cancelado va también
+  en `purchase.studio` de cada línea (`summarizeLinePurchases`), y la lista dice
+  «Compra el estudio» cuando el estudio cubre toda la cantidad; al marcarlo
+  entregado, «Recibida».
+- Cuenta como mobiliario aunque la línea sea de otra categoría o tenga otro
+  grupo elegido a mano (los textiles del estudio no llenan amenities): en lo
+  planificado, las unidades que cubre el pedido del estudio, con
+  `lineFurnitureShare` (`@vivla-tools/common`); en lo comprometido y lo real, el
+  pedido entero, con `furnitureShareOf`. Si el pedido vuelve a borrador o se
+  cancela, sus líneas vuelven a su grupo.
+- En Pedidos lleva la píldora «Estudio» y, sin llegada esperada, «lo compra el
+  estudio» en lugar de «sin fecha» (recibido a medias, «13 de 32 recibidas · lo
+  que falta, lo trae el estudio»; cancelado, «sin fecha»). En «Hasta el montaje»
+  sale aparte («Lo monta el estudio: Canica») y no cuenta en «N por llegar», en
+  «Sin fecha de llegada» ni en «Todo lo pedido llega antes del montaje».
+- El panel del pedido lo explica: «Lo compra y lo monta Canica. Este pedido no
+  da avisos…». Los pasos, la recepción, las devoluciones y los documentos
+  funcionan como en cualquier pedido, pero el diálogo de un paso no avisa de que
+  la llegada no llega al montaje, el pedido no entra en «Avisar a la gobernanta»
+  y su destino no cuenta para proponer el de los demás pedidos de la casa
+  (`suggestedDeliverTo`). Si se lanza sin destino, propone «Estudio», y su campo
+  Destino pone primero «Estudio» y los destinos de los otros pedidos del estudio
+  (`deliverToSuggestions` con `studio`). Al apuntar una entrega a medias, la
+  ayuda de «¿Cuándo llega lo que falta?» no le promete que saldrá retrasado.
+
+La importación del presupuesto del estudio en la shopping list (VIV-2857) se
+pospuso el 4-oct: hoy el pedido se apunta a mano y se marca como del estudio.
+
+### Pedidos de todas las casas
+
+Hito 2 (VIV-2982, sin migración). La sección «Pedidos» del menú
+(`/app/homes/orders`) junta los pedidos de todas las casas para que quien lleva
+varias no tenga que entrar casa por casa: el equipo de setup, frente al montaje
+de cada casa, y mantenimiento, con lo que tiene en camino, con aviso y pendiente
+de reembolso. Su tira de pestañas (`OrdersHubTabs`) empieza con «En curso»; las
+demás vistas de varias casas se suman ahí.
+
+- Qué entra: los pedidos de las casas que se listan (sin borrar ni archivar) en
+  borrador, pedidos, procesando, en fabricación o enviados; los entregados y
+  cancelados de los últimos 30 días; y, de cualquier fecha, los que tienen algo
+  pendiente de reembolso. Lo entregado hace más tiempo sigue en la pestaña
+  Pedidos de su casa.
+- Los avisos llegan calculados del servidor con `rowAlerts` y la fecha de
+  montaje de la lista de cada casa, igual que la tarjeta de la casa: el número
+  de pedidos con aviso de cada casa es el de su tarjeta (lo comprueba un test).
+  Un borrador no avisa, y un pedido al estudio solo avisa del reembolso.
+- «Los míos» (`mineReasons`): los que creé o lancé y, en mantenimiento, los de
+  las casas de las que soy responsable en Tools. Debajo, las casas que la
+  persona tiene asignadas («Tus casas de mantenimiento en Tools: …») o el aviso
+  de que no figura en ninguna. Sin `scope` en la URL vale lo último elegido en
+  ese navegador y, si no, «Todos», la vista del equipo.
+- Filtros: setup o mantenimiento, «Con aviso», «Pendiente de reembolso», casa,
+  proveedor, destino (agrupado con `destinationKeyOf`: «Gobernanta · Liencres»
+  es de cada casa), «Lanzado por» (con «Sin lanzar»: borradores y lo cancelado
+  sin lanzarse) y estado. Cada filtro ofrece las opciones que dejan los demás,
+  con su número.
+- Arriba, un resumen con los filtros puestos (sin los dos botones): pedidos con
+  aviso y cuántos graves, en camino, borradores y lo pendiente de reembolso de
+  los pedidos lanzados con la antigüedad de lo más antiguo (`pendingRefunds`,
+  como la tarjeta de costes de la casa; un borrador no cuenta).
+- La lista va en el orden de la pestaña de cada casa: con aviso (graves
+  delante), en marcha, borradores, entregados (los de los últimos 30 días y los
+  que esperan un reembolso) y, plegados, los cancelados; con «Pendiente de
+  reembolso», los cancelados que esperan uno se ven sin plegar. Cada fila dice
+  su casa con el historial y la fecha que manda («Setup · montaje 26 oct»), el
+  proveedor, su referencia y su destino, el estado y la llegada, el importe
+  («Sin total» si falta, y lo pendiente de reembolso), el aviso con su consejo
+  al pasar por encima (`alertAdvice` según el historial) y quién lo lanzó («Lo
+  lanzó Irene González · lo preparó María Téllez» en el título). Por debajo de
+  1024 px, una tarjeta por pedido.
+- Cada pedido se abre en el mismo panel que en la casa (`OrderSheet` con
+  `sequence` y `showHouse`): la miga dice «Pedidos › casa › proveedor», el
+  nombre de la casa lleva a su pestaña Pedidos y las flechas recorren lo que se
+  ve, aunque sea de casas distintas. Un pedido abierto por enlace que no está en
+  la vista toma el nombre y la fecha de montaje de su casa. Cualquier cambio del
+  pedido refresca la vista sin bloquear el panel.
+- En la pestaña Pedidos de cada casa, cada fila dice también quién lo lanzó (o,
+  en un borrador, quién lo preparó), y el panel lo dice bajo el título; lo traen
+  `createdByName` y `launchedByName` en cada pedido.
+
+### Avisos en la campana
+
+Hito 2 (VIV-2984, migración `366_homes_order_alert_notices`). Quien compra no
+entra cada día en Tools ni casa por casa: de lunes a viernes por la mañana, una
+tarea programada de Windmill deja en la campana de Tools un solo mensaje por
+persona con los avisos nuevos de sus pedidos, agrupados por casa, con qué hacer
+en cada uno. Sin nada nuevo no llega nada. Los avisos son los de siempre
+(`rowAlerts`, los mismos que la tarjeta de la casa y «Pedidos»); lo nuevo es que
+se mandan. No hay correo ni Slack.
+
+- A quién (`recipientsFor`, en `order-alerts/digest.ts`): en setup, a quien
+  lanzó el pedido (`launched_by`) y, si no consta, a quien lo creó; «Llega
+  tarde» y «Sin moverse» van también a quien creó la shopping list de la casa si
+  es otra persona, porque pueden pedir mover el montaje. En mantenimiento, al
+  responsable de mantenimiento de la casa (`maintenance-leads.ts`), aunque el
+  pedido lo creara otra persona al cubrirla, y, si la casa no tiene, a quien lo
+  creó. A quien está inactivo o suspendido en Tools no le llega nada: le toca a
+  la siguiente persona de la regla. Las líneas de la lista sin pedir con el
+  montaje a 21 días o menos (`loadLinesToOrderSoon`, la cifra de la tarjeta) van
+  a quien creó la lista.
+- Sin repetir (`pickNotices`): cada aviso se dice una vez por persona y por
+  «vez» del aviso (`instance_key`, las fechas que lo provocan). Lo grave («Llega
+  tarde», «Retrasado», «Sin enviar y sin fecha» o «Sin moverse», «Enviado sin
+  llegada esperada») se recuerda cada 7 días mientras siga, con «(ya avisado el
+  …)». «Sin fecha», «Sin moverse» y las líneas sin pedir solo vuelven a avisar
+  si la fecha que manda se adelanta (retrasar el montaje no repite nada); «Va
+  justo», si el margen se estrecha; el resto, si cambian sus fechas. Lo que deja
+  de ser un aviso se olvida: si vuelve, se dice otra vez.
+- El mensaje: título «Avisos de pedidos en {casa}» o «… en N casas», una primera
+  línea que se ve con la tarjeta plegada y, por casa, cada pedido con su
+  proveedor, su nº de pedido, su primera línea, sus avisos y el consejo según el
+  historial (`orderAlertLabel` y `alertAdvice`, de common). Como mucho 8 casas,
+  6 pedidos por casa y unos 2.800 bytes (un mensaje grave sale también como
+  notificación del navegador y del móvil, que cortan hacia los 4 KB); lo demás
+  se resume en una línea y sale otro día.
+- Prioridad alta si trae algo grave (llega como notificación del navegador) y
+  normal en lo demás. Hoy la campana ordena la prioridad como texto
+  (`inbox.repository.ts`): un mensaje de prioridad alta queda detrás de los
+  normales sin leer.
+- «Ver más»: con un solo pedido, su panel (`?tab=orders&order=<id>`); con una
+  casa, su pestaña Pedidos (o la shopping list si solo trae líneas sin pedir);
+  con varias, «Pedidos» con «Los míos» y «Con aviso» y, si trae pedidos que no
+  son «míos» para esa persona (los que le llegan por haber creado la lista),
+  «Todos», «Con aviso» y esas casas; si solo trae líneas sin pedir, Casas.
+- Como mucho un mensaje por persona y día de Madrid: antes de mandar se coge el
+  día en `purchase_order_alert_digests` (`UNIQUE (recipient_id, digest_date)`);
+  si el mensaje falla, se suelta para que otra pasada lo reintente, y uno que se
+  quedó a medias más de 30 minutos (una pasada que se cortó) se puede volver a
+  coger, salvo que su mensaje llegara a salir: entonces el día se da por mandado
+  y se apunta lo que decía ese mensaje. Lo dicho se apunta en
+  `purchase_order_alert_notices` (una fila por persona, tipo de aviso y pedido o
+  casa, con las últimas fechas del aviso). Se mandan cinco personas a la vez.
+- Si las preferencias de la campana de esa persona lo bloquean (notificaciones
+  push apagadas o solo las urgentes), su día queda `suppressed`, no se da por
+  avisado y, mientras sus preferencias lo sigan bloqueando, «Pedidos» se lo dice
+  arriba: «Los avisos de Inventario no te llegan a la campana: en sus
+  Preferencias tienes apagadas las notificaciones push o solo dejas pasar las
+  urgentes.» (`alertDigestBlocked` en `GET /homes/purchase-orders`). Si cambia
+  sus preferencias, una pasada el mismo día le manda el resumen.
+- En la campana los mensajes salen con el origen «Inventario» (`homes` en
+  `MESSAGE_SOURCE_TOOLS`), con su pestaña y el icono de la cesta.
+
+Para encenderlo: la migración 366 antes de desplegar (sin ella el endpoint da
+500 y no manda nada), `HOMES_ORDER_ALERT_DIGEST_ENABLED=true` en el backend (sin
+ella, el envío real da 503 y la prueba funciona igual) y la tarea de Windmill
+`f/vivla_tools/homes/order_alerts_digest` (ver [Windmill](/platform/windmill)),
+que se crea a mano: primero con `dryRun` para revisar lo que recibiría cada
+persona y después encendida, de lunes a viernes a las 8:30.
+
+En el sandbox: `POST /api/homes/order-alerts/digest/send` con `x-api-key`, el
+backend arrancado con `HOMES_ORDER_ALERT_DIGEST_ENABLED=true` y
+`{"dryRun": true, "recipientIds": [...]}` para ver el resultado de unas personas
+sin mandar nada; sin `dryRun`, solo a esas personas. Para simular el día
+siguiente o la semana siguiente, restar días a `digest_date`,
+`first_notified_on` y `last_notified_on` de esas personas.
+
+### Lo ya comprado en cualquier casa
+
+Hito 2 (VIV-2985, sin migración). La pestaña «Ya comprado» de «Pedidos»
+(`/app/homes/orders?view=bought`) busca un producto en las líneas de los pedidos
+de cualquier casa, para comprar lo mismo que ya hay en otra (las sombrillas
+iguales de las tres Taridas) sin acordarse de en qué casa se compró.
+
+- Qué entra: las líneas de los pedidos lanzados (de «Pedido» a «Entregado») de
+  cualquier casa sin borrar, también de las archivadas. Fuera los borradores,
+  que cambian con la lista, y los cancelados, que no llegaron a comprarse; las
+  unidades canceladas de una línea se señalan («1 cancelada») y una línea
+  cancelada entera no sale ni suma su casa.
+- Cómo busca: en el nombre y la referencia de la línea y, para las palabras con
+  números, también en la de su producto del catálogo cuando la línea no tiene
+  (la que se enseña); no en el proveedor (que tiene su filtro). Una referencia
+  escrita sin separadores encuentra la guardada con ellos («60478956» encuentra
+  «604.789.56»). Con todas las palabras, sin tildes ni mayúsculas y en singular
+  («sombrillas» encuentra «Sombrilla», «manteles», «Mantel»; «luz» encuentra
+  también «luces»). Se quitan las palabras vacías («de», «la», «con»…) y las de
+  una letra, y se quedan las cinco más largas (`homes/common/search-words.ts`).
+  Lo de antes de Tools no está: el texto sin resultados lo dice.
+- Cada compra enseña la foto (la de su producto del catálogo), el nombre, la
+  referencia con un botón para copiarla, la casa (y si está archivada), setup o
+  mantenimiento, la fecha (lanzamiento o compra en tienda), el proveedor, quién
+  lo pidió, la cantidad y el precio por unidad al pedirlo y el total pagado del
+  pedido; el estado si aún no se ha entregado y lo roto o cancelado. Si la línea
+  no guardó enlace o referencia, se toman de su producto del catálogo; sin
+  enlace del producto, «Abrir enlace» lleva al pedido en la web del proveedor.
+  «Ver pedido» abre el pedido en el mismo panel que «En curso», encima de la
+  búsqueda (`&order=<id>`; el Atrás lo cierra).
+- «Comprado en Tarida I · Tarida III»: las casas en que se ha comprado el mismo
+  producto entre lo encontrado (mismo producto del catálogo, mismo enlace o
+  mismo nombre y proveedor); con más de tres, «Comprado en 12 casas: … y 9 más».
+- Filtros: setup o mantenimiento, casa y «Solo lo que compré yo» (lo que creé o
+  lancé) van al servidor; el proveedor se aplica sobre lo encontrado. Las
+  opciones de casa y proveedor salen de lo encontrado, con su número; si lo
+  encontrado es solo lo más reciente, se ofrecen también las demás casas. Salen
+  las 100 compras más recientes por fecha de compra; si hay más, lo dice. Lo
+  buscado y los filtros van en la URL. Sin una palabra de dos letras que no sea
+  vacía no se busca.
+
+### Nuevo pedido y «Comprar lo mismo» desde «Pedidos»
+
+Hito 2 (VIV-2991, sin migración). Para apuntar una reposición no hace falta
+entrar antes en la casa, y lo que ya se compró en otra se vuelve a comprar sin
+copiar a mano proveedor, enlace, referencia y precio.
+
+- «Nuevo pedido», arriba en «En curso» y en «Ya comprado», abre el mismo diálogo
+  que la pestaña Pedidos de una casa (`NewOrderDialog`, sin `propertyId`) con un
+  primer campo «¿Para qué casa?»: un desplegable en el que salen primero, en su
+  grupo «Llevas su mantenimiento», las casas de las que quien compra lleva el
+  mantenimiento (`myMaintenanceHouses`), y después «Todas las demás». Elegida la
+  casa, el diálogo se comporta como desde ella: historial según la casa, modo de
+  partida, proveedores y destino propuestos y, en setup, la shopping list de la
+  casa (la lee el propio diálogo), para que lo que se compra cubra sus líneas.
+  Al guardar, el pedido se abre en el panel de la página.
+- «Comprar lo mismo», en cada compra de «Ya comprado», abre ese diálogo con la
+  línea ya puesta (`buyAgainInitial`): el mismo proveedor, el mismo producto del
+  catálogo (con su foto), las unidades que no se cancelaron, el precio por
+  unidad, el enlace, la referencia y el grupo de presupuesto, y la casa por
+  elegir. Lo que es de aquella compra (casa, fechas, total, nº de pedido y
+  destino) no se copia. La línea dice «Lo mismo que en Tarida I». En setup, el
+  grupo de la otra compra sale ya elegido debajo de la línea y se puede cambiar.
+  Como la línea viene puesta y no escrita, al elegir la casa el modo sigue
+  siendo el de la casa: «Pagada online» en mantenimiento, «Aún sin pedir» en
+  setup; si ya se ha escrito o tocado algo, el modo no cambia. Si el producto ya
+  no está en el catálogo (borrado o desactivado), la línea va escrita a mano con
+  su enlace y su referencia; al guardar se une al producto de ese proveedor y
+  referencia que haya en el catálogo (aunque esté retirado, para no duplicarlo)
+  o nace uno nuevo.
+- Lo que cubre la shopping list en «Nuevo pedido» (desde la casa o desde
+  «Pedidos») se calcula en un solo sitio, `reconcileCoverage`, al elegir un
+  producto y cada vez que cambian la casa, el historial o la lista (también al
+  refrescarse): en setup, cada producto del catálogo que la lista aún pide la
+  cubre; al cambiar de casa pasa a cubrir la lista de la nueva; en mantenimiento
+  no cubre nada; deja de cubrir lo que otro pedido ya ha pedido; y al dejar de
+  cubrirla la línea vuelve a su nombre. Solo enlaza: no cambia unidades ni
+  precio, salvo en lo recién elegido del catálogo, que toma lo que falta y el
+  precio de la lista (lo de «Comprar lo mismo» se queda con lo que se compró).
+  Al dejar de cubrirla, lo que puso la lista y nadie tocó vuelve a lo de antes.
+  Si una línea que cubre la lista pide más de lo que falta, no se guarda («Para
+  guardar falta: como mucho 1 de «…» (lo que pide la lista)»): lo de más va en
+  otra línea. Desde «Pedidos», en setup, no se guarda hasta tener la lista de la
+  casa, ni si la casa resulta no tenerla.
+- Un producto del catálogo guarda en el pedido la referencia y el enlace del
+  producto; los de la compra anterior solo cuentan si el producto no los tiene.
+  Una compra anterior escrita a mano sin producto del catálogo vuelve a ir
+  escrita a mano, con su enlace y su referencia.
+- Sin rol de edición no hay «Nuevo pedido» ni «Comprar lo mismo».
+
+### Historial del pedido
+
+Hito 2 (VIV-2980, migración `372_homes_order_event_changes`). El historial del
+pedido dice qué pasó, quién lo hizo y cuándo, también cuando varias personas
+tocan el mismo pedido:
+
+- **Además de los pasos de estado**, `purchase_order_events` guarda lo que
+  cambia sin mover el estado, con su tipo en `kind`: `fields` (llegada esperada,
+  «Hace falta el», destino, nº de pedido, total pagado, seguimiento, notas,
+  proveedor, enlace y quién compra, desde el formulario), `receipt` (una entrada
+  por recepción, también en bloque: lo recibido bien, lo roto, lo que deja de
+  esperarse y la nota de cada línea, y cuándo llega lo que falta), `adjustment`
+  (devoluciones, roturas, cancelaciones y descuentos apuntados, cambiados,
+  reembolsados o quitados) y `note`. Los pasos llevan `status` (el valor por
+  defecto de `kind`); lo demás, no (`status` es null y una restricción lo
+  asegura). `changes` guarda el antes y el después de cada dato
+  (`HomesOrderFieldChange`, en `types/homes-history.ts` de common). Un paso
+  guarda ahí lo que se apuntó con él (la llegada al marcarlo enviado, el total
+  al lanzarlo) y lo que cambia con él: lo que da por recibido «Entregado», lo
+  que se pone a cero al deshacerlo, el reembolso pendiente que deja cancelar lo
+  ya pagado y el que se quita al reabrirlo; esto último se añade al paso cuando
+  ya ha pasado, para que no cuente nada que no llegó a hacerse. Volver a guardar
+  lo mismo no deja entrada; una recepción que solo deja una nota, sí.
+- **Solo los pasos cuentan como movimiento**: los días sin moverse y los avisos
+  salen de `status_changed_at`, que solo cambian los pasos, y el paso anterior
+  al volver atrás lee solo los pasos (`kind = 'status'`). Una nota o un cambio
+  de destino no reinician «Sin cambios desde hace N días». En el detalle del
+  pedido (`GET /homes/purchase-orders/:id`), los pasos siguen en `events` y lo
+  demás va en `activity`.
+- **En el panel del pedido**, el historial junta las dos cosas de lo último a lo
+  primero (`historyRows` en `lib/homes/order-history.ts`): los pasos se ven como
+  siempre y lo demás, más pequeño y en gris («Llegada esperada: 8 oct → 12 oct ·
+  Gaby»). De cada entrada se ven cuatro cambios y el resto con «Ver N más».
+  **Añadir nota** (`POST /homes/purchase-orders/:id/notes`) apunta lo que no
+  cambia ningún dato («Reclamado a Zara Home por teléfono»).
+- **«Marcar como reembolsado» pide la fecha** en que volvió el dinero: hoy por
+  defecto, editable, nunca futura ni anterior a lo más pronto que pudo volver
+  (`earliestRefundAt`, en common: cuando se compró si el pedido se apuntó
+  después, o cuando se creó). El servidor rechaza un día posterior a hoy en
+  España y guarda como «ahora» un instante de hoy que vaya por delante. La del
+  correo de la tienda vale aunque se apunte otro día, y la entrada del historial
+  va en ese día. «Ya está reembolsado», al añadir una devolución, también pide
+  el día: quedan dos entradas, la devolución apuntada hoy y el reembolso en su
+  día.
+- `recordOrderChange` (en `PurchaseOrdersService`) es la forma de apuntar en el
+  historial para lo que escriba en un pedido desde fuera. El cambio ya está
+  guardado cuando se llama: si su entrada no se puede guardar, queda en el
+  registro y no se devuelve error, porque repetir la petición duplicaría un
+  ajuste o una rotura. Los documentos y las líneas de un borrador no dejan
+  entrada.
+
+### Lista de llegadas y recepción en bloque
+
+Hito 2 (VIV-2983, sin migración). El almacén logístico de Madrid y la gobernanta
+de cada casa no tienen cuenta en Tools: necesitan saber qué les llega y de qué
+casa es cada bulto, sin precios, y quien compra apunta de una vez lo que le
+contesten.
+
+- Apartado «Pedidos» del menú (`activeModule="orders"`), con la tira de vistas
+  `OrdersHubTabs` (`components/homes/orders/OrdersHubTabs.tsx`); «Llegadas» vive
+  en `/app/homes/arrivals`, como segunda pestaña después de «En curso».
+- Se eligen el destino (almacenes, la gobernanta de cada casa, lo que no tiene
+  destino claro), las fechas («Esta semana», «Hasta la semana que viene», «Todo
+  lo pendiente»; por defecto, la semana para un almacén y todo para una
+  gobernanta) y, si se quiere, las casas. El último destino se recuerda en el
+  navegador. Lo retrasado y lo que no tiene fecha salen siempre.
+- Entran los pedidos lanzados sin entregar y los entregados en los últimos 60
+  días con algo sin contar (`ARRIVALS_DELIVERED_DAYS`), de casas sin borrar ni
+  archivar; nunca los que compra un estudio. Lo que falta de cada línea es lo
+  pedido menos lo que llegó bien, lo cancelado y lo roto que ya no se repone (lo
+  que repone el proveedor sigue por llegar).
+- Tres secciones: «Debían haber llegado», «Llegan esta semana» (o «hasta el …»,
+  o «Con fecha de llegada») y «Sin fecha de llegada», en el orden de la hoja
+  (`compareArrivalOrders`). Cada pedido dice casa, proveedor, nº de pedido (o
+  «Sin nº de pedido: búscalo por lo que trae»), cuándo llega y lo que trae. Las
+  líneas del mismo producto (mismo producto del catálogo, nombre y referencia)
+  salen en una fila con la cantidad sumada (`groupArrivalLines`): las perchas
+  que vienen en cuatro líneas de 20 son una fila de 80.
+- Lo que podría ir al destino elegido y no lo dice sale aparte, en un aviso
+  ámbar (`mightArriveAt`): un almacén sin ciudad («Nave Kevin») o un pedido de
+  setup sin destino, para cualquier almacén; uno sin destino claro o «Casa»,
+  para la gobernanta de su casa. «Va al Almacén Madrid», «Va a la gobernanta» o
+  «Pasar los N…» le ponen el destino en su forma canónica. Antes de imprimir,
+  copiar o descargar con algo así pendiente, se pregunta; si se sigue, la hoja,
+  el texto y el Excel los sacan al final, aparte («Puede que también lleguen a
+  esta nave · sin destino claro», con el destino tal como está escrito), para
+  que quien recibe no se encuentre un bulto que no está en su lista. Esos
+  pedidos se apuntan cuando se les corrige el destino.
+- Tres formas de pasarla, sin precios ni elementos de marca (pendientes de
+  validar con Diseño antes de dárselas al almacén o a la gobernanta):
+  - la hoja A4 apaisada (`ArrivalsSheet`), que abre el diálogo de imprimir: una
+    banda por pedido con «☐ Ha llegado todo bien» y, por producto, «Por llegar»,
+    una casilla y «Llegan bien», «Rotas o equivocadas» y «Notas» en blanco; cada
+    línea dice de quién es («Mogro · Kave Home · …9225») para la segunda página
+    de un pedido largo; un recuadro «Ha llegado y no está en la hoja» y cómo
+    contar los packs;
+  - el texto para WhatsApp (`arrivalsMessage`): el del almacén por secciones, y
+    el de la gobernanta de una casa como «Avisar a la gobernanta»;
+  - el Excel (`arrivalCsv`, CSV con BOM y `;`), con las columnas de la hoja de
+    almacén de la diseñadora.
+
+  Con una búsqueda escrita, el texto y el Excel llevan solo lo encontrado y lo
+  dicen (el texto empieza por «Solo lo que coincide con…» y el fichero lleva
+  «búsqueda» en el nombre); la hoja impresa lleva siempre la lista entera.
+
+- «Apuntar llegadas» (editor) pone la lista en modo marcar: «Ha llegado todo
+  bien» por pedido, lo que llega bien y lo que llega roto o equivocado por
+  producto, con «¿Qué pasa con lo roto?» como en la recepción de un pedido, y
+  una nota. Lo marcado en una fila se reparte entre sus líneas en orden
+  (`distributeRow`). Lo que llega antes de tiempo está en «Llegan más adelante»,
+  plegado. Al guardar se piden la fecha, quién lo confirmó (ya relleno con el
+  destino) y, de cada pedido que queda a medias, cuándo llega lo que falta; se
+  avisa si un pedido ya tiene una llegada apuntada ese día. Se manda de 50 en 50
+  pedidos y lo que falla se queda marcado para repetir.
+- Desde la casa, en mantenimiento, «Apuntar lo que ha llegado» abre la lista de
+  su gobernanta ya en modo marcar; en setup, «Lista de llegadas» abre la de la
+  casa. Quien solo puede ver lee por qué no tiene botones.
+
+### Cierre de las compras del setup
+
+Hito 2 (VIV-2993, migración `367_homes_setup_closings`). Al entregar la casa,
+quien compra cierra las compras del setup y queda la cifra con fecha para cost
+control, que la junta con el gasto de la reforma. Cerrar no bloquea nada: se
+siguen apuntando reembolsos, facturas y pedidos, y la tarjeta enseña lo que
+cambia después.
+
+- **Dónde**: en la pestaña Pedidos, historial Setup, debajo del resumen de
+  costes (`SetupClosingCard`, en `components/homes/closing/`). Con las compras
+  abiertas, una franja con «Cerrar compras del setup» (solo con rol editor).
+  Cerradas, la tarjeta «Cierre del setup»: quién cerró, cuándo y su nota; la
+  cifra de mobiliario, amenities y total con IVA, cada una «Definitiva» o
+  «Provisional» con el motivo, el porcentaje del presupuesto y lo que quedaría
+  si vuelve lo pendiente; lo señalado al cerrar; «Después del cierre», con lo
+  que ha cambiado pedido a pedido; «Exportar» y «Reabrir». Los cierres
+  reabiertos quedan en «Cierres anteriores».
+- **La cifra** la calcula el backend con las mismas reglas de coste que la
+  pestaña Pedidos, que viven en common (`utils/homes-setup-cost.ts`:
+  `houseCosts`, `furnitureShareOf`, `setupCostSnapshot`; `lib/homes/purchase.ts`
+  las reexporta). `setupCostSnapshot` guarda la foto al céntimo: cada pedido se
+  reparte entre mobiliario y amenities (mobiliario redondeado y amenities lo que
+  falta) y los totales por grupo suman sus pedidos, así que el resumen cuadra
+  con el detalle. Lo reembolsado o pendiente de una línea va entero al grupo de
+  esa línea; lo que no es de ninguna línea (un descuento del pedido) se reparte
+  como el pedido. `houseCosts` sigue la misma regla. Solo cuentan los pedidos de
+  setup; uno sin total pagado no suma en el real (lo ya reembolsado o pendiente
+  de ese pedido solo informa hasta que se apunte lo pagado); un cancelado, por
+  lo pagado y no devuelto. La foto (`snapshot`, JSON con versión) no se
+  recalcula nunca.
+- **Provisional** (`figureStatus`, en `lib/homes/closing.ts`), por grupo: hay
+  pedidos sin total pagado (no suman en el real; se dice su estimado),
+  reembolsos pendientes (cuentan en el real hasta que vuelven), cancelados ya
+  pagados sin ninguna devolución apuntada, o un pedido al estudio con lo pagado
+  por debajo del 95 % de su presupuesto. Los pedidos sin factura (sin un
+  documento «Factura») y los que no se han entregado van como dato y no la
+  cambian.
+- **Al cerrar**, el diálogo enseña las cifras de hoy y lo que conviene revisar,
+  y cada cosa despliega sus pedidos, que se abren en el panel lateral. Se puede
+  cerrar con todo eso pendiente y con ningún pedido (0 €).
+- **Después del cierre** (`closingDrift`): la foto frente a las cifras de hoy,
+  por pedido: pedido nuevo, que ya no cuenta, total apuntado o corregido,
+  reembolso recibido, devolución apuntada, factura subida, entregado, cancelado
+  o cambio del reparto entre grupos. Menos de un céntimo no cuenta.
+- **Exportar** (en el navegador, `closingSummaryRows`, `closingDetailRows` y
+  `reformSheetRows`): «Resumen por grupo (CSV)», dos filas (mobiliario y
+  amenities) que empiezan por casa, grupo, fecha de cierre, coste real con IVA y
+  estado de la cifra (los recuentos de pedidos van en el grupo donde pesa más
+  cada pedido, para que sumar la columna no cuente dos veces uno mixto);
+  «Detalle por pedido (CSV)», una fila por pedido con lo pagado, lo reembolsado,
+  el coste real y su reparto («De mobiliario» y «De amenities» suman el coste
+  real), y al final los pedidos nuevos después del cierre; «Copiar para la hoja
+  de la reforma», esas dos filas sin cabecera y con tabuladores, para pegarlas
+  en Excel o Google Sheets; y «Copiar texto», la cifra en unas líneas con el
+  enlace a la tarjeta. Los CSV van con BOM, «;», coma decimal y saltos CRLF (dos
+  constantes en `closing.ts` por si la hoja va en inglés), un nº de pedido hecho
+  solo de cifras va como `="004512…"` para que la hoja no le quite los ceros ni
+  las últimas cifras, un texto que empieza por `=`, `+`, `-` o `@` lleva un
+  apóstrofo delante y el nombre lleva las dos fechas
+  (`cierre-setup_<casa>_cerrado-<día>_exportado-<día>_resumen.csv`). Llevan
+  también «Coste real a <día> con IVA» y «Cambio desde el cierre» del día en que
+  se exportan, y «Sustituye a» si hubo un cierre antes. Todos los importes, con
+  el IVA que se pagó.
+- **Reabrir** deja el cierre en el historial con quién, cuándo y por qué; volver
+  a cerrar guarda una cifra nueva. Como mucho hay un cierre en vigor por lista
+  (índice único parcial): dos «Cerrar» a la vez dan 409.
+- **Con el setup cerrado**, la pestaña Pedidos de la casa se abre en
+  Mantenimiento si ya tiene algún pedido de mantenimiento
+  (`defaultHouseOrigin`), para que una reposición no sume en el coste del setup;
+  sin ninguno, en Setup, donde está la cifra del cierre. La fecha de montaje
+  pasada deja de salir en rojo.
+- **El grupo de una línea ya lanzada** se corrige desde el panel del pedido
+  («Contar como amenities» o «Contar como mobiliario», solo en pedidos de setup
+  lanzados que no compra un estudio). Cambia cómo se imputa, no lo pedido, y
+  queda en el historial del pedido (`budgetGroup` en `changes`). En un borrador,
+  el grupo sale de su línea de la shopping list.
+- **En el resumen diario de la campana**, si cambia el coste real de una casa
+  cerrada (en total o en su reparto entre mobiliario y amenities), a quien la
+  cerró: «El coste del setup ha cambiado desde el cierre del 12 nov (-19,99 €,
+  con IVA). Si ya se lo pasaste a cost control, mándales la exportación nueva.»
+  Se repite cada vez que vuelve a cambiar y se olvida al reabrir. El enlace abre
+  Pedidos en Setup (`&scope=setup`). La cuenta (`costChangesSinceClosing`) lee
+  solo las cifras de la foto y los pedidos de cada casa cerrada, cuatro casas a
+  la vez, y deja fuera las archivadas. Si los cierres no se pueden leer, el
+  resumen sale sin esa parte.
+
+## Plantillas
+
+Cada ítem de plantilla lleva su **destino** (un apartado con nombre, o cada
+dormitorio) y su **regla de cantidad** (por casa, por habitación, por persona,
+por baño). Al aplicarla sobre una casa, la expansión usa los datos de la casa
+(habitaciones, plazas y baños), crea los apartados que falten y deja registro de
+la aplicación. Aplicar una plantilla nunca toca listas ya hechas; los ítems con
+aviso (`check_note`) entran marcados como pendientes de revisión, y la línea
+copia el grupo de presupuesto de la plantilla, si lo tiene.
+
+Los datos de la casa valen, por este orden: lo corregido en Inventario, lo que
+trae el panel y, si no hay ninguno, 2 habitaciones, 2 plazas por habitación y 1
+baño (un 0 cuenta como vacío). Se corrigen para cada casa desde el diálogo de
+aplicar plantilla («Corregir»), en `homes_property_params` (migración 368), sin
+escribir en `properties`. Lo corregido manda aunque el panel se rellene después;
+si no coinciden, el diálogo lo dice y ofrece «Usar los del panel». Cambiarlos no
+recalcula las líneas ya creadas. Los usan aplicar, la vista previa, la cabecera
+de la casa (que dice con qué datos calculan las plantillas y si se han
+corregido), las tarjetas y el filtro «Faltan habitaciones, plazas o baños»
+(`effectiveHouseData`, en `@vivla-tools/common`).
+
+### Estándares de diseño como plantillas (VIV-2977)
+
+Las dos hojas de estándares de la diseñadora, «01 · FF&E» y «02 · Equipamiento»,
+se cargan como plantillas desde «Importar estándares», en Plantillas (solo admin
+de tool-homes): se suben en CSV, se ve qué se crearía sin escribir nada y se
+crean las plantillas **sin revisar**. Con las hojas de hoy salen 19: 12 de FF&E,
+una por espacio, con grupo mobiliario, y 7 de Equipamiento con grupo amenities
+(«Todas las casas», «Electrodomésticos» y cinco condiciones que se aplican o no:
+barbacoa, chimenea, piscina y playa, sala de cine, txoko u office). La carga no
+usa IA: cada columna se reconoce por su nombre y cada regla es una tabla fija
+(`templates/standards/design-standards.ts`). Solo crea; nunca toca plantillas
+que ya existen. El mismo fichero (mismo sha256) no se carga dos veces sin
+confirmarlo, y un nombre que ya existe lleva la fecha («FF&E · Salón (4-oct)»).
+Si falla una escritura a medias, se quitan las plantillas de esa carga.
+
+Nada de cantidades inventadas. Si la hoja no da un número entero («Según
+espacio», «Según huecos», «1+», «≥4», «1.5», «2 / cama», «—»), el ítem guarda la
+cifra mínima que dice la hoja (o 1) y la **cantidad por decidir**
+(`quantity_note`, «la hoja dice «Según huecos»»); también cuando da un número
+que Tools no sabe repartir (por cama, por cocina, por cuna o TV). Lo que Tools
+no calcula (dormitorio doble o individual, por cama, por cocina, otra base de
+cálculo, condiciones) queda en la fila de origen (`source.modelGaps`) y se ve
+como «Tools no lo calcula». La prioridad del estándar va a `priority`, la
+condición tal cual a `applies_when`, y el estándar, el criterio técnico, las
+medidas y las notas a `notes`. El aviso de revisión (`check_note`) queda para
+las incoherencias de la hoja: dos cifras distintas (cojines y perchas de pinza)
+o un posible repetido en la misma plantilla. Lo que decía la hoja, tal cual,
+está en `source` (hoja, fila, cantidad, prioridad, unidad, base y aplicación).
+
+Apartados. En FF&E, el apartado es el espacio de la hoja (ESTANCIA). En
+Equipamiento, CATEGORÍA agrupa por tipo de cosa, no por espacio: solo Cocina,
+Baño y Dormitorio (cada dormitorio) son espacios de la casa. Electrodomésticos
+va a Cocina (los de txoko u office, a «Txoko / Sala de juegos»; los de
+lavandería, como Lavandería, al «Lavadero» si la casa lo tiene y, si no, a «Toda
+la casa»); Exterior, a «Terraza · exteriores», y el resto (Baby, Audiovisual,
+Chimenea, Limpieza, Seguridad, General, Tecnología, climatización), a un único
+apartado **«Toda la casa»** (`WHOLE_HOUSE_SPACE`). La CATEGORÍA se queda como
+categoría de la línea. Así una plantilla nunca crea en la casa apartados como
+«Electrodomésticos» o «Seguridad».
+
+Efecto en `rooms`: los apartados viven en la tabla compartida `rooms`, que leen
+también el CMS de la web, encuestas, planes de acción, la IA y el health score,
+y que no se borran al quitar una plantilla. Los que crea una plantilla al
+aplicarse (apartados y dormitorios que falten) nacen con
+`is_visible_on_web = false`: una plantilla nunca publica nada en vivla.com. Los
+apartados creados a mano o desde el CMS no cambian.
+
+Al aplicar una plantilla, cada línea copia la cantidad por decidir a
+`shopping_list_items.quantity_note` y nace con la etiqueta ámbar «Cantidad por
+decidir» y la regla debajo del nombre; la etiqueta se quita sola al cambiar la
+cantidad, o con «La cantidad de N ya vale» en el diálogo de la línea. Las notas
+de la línea llevan la prioridad, la condición y las notas del ítem
+(`lineNotes`). El panel de presupuesto cuenta las líneas con la cantidad por
+decidir (y filtra por ellas) solo si hay alguna. «Preparar pedidos» las marca y
+avisa en el pie, sin bloquear: «3 líneas tienen la cantidad por decidir y 1 está
+por revisar: si las pides ahora, van con la cantidad que tienen.»
+
+Revisión: la plantilla cargada enseña arriba qué mirar y «Marcar como revisada»
+(cualquier editor); queda quién y cuándo («Revisada por María Téllez el 5 oct»)
+y se puede volver a «sin revisar». Editar sus ítems no la devuelve a «sin
+revisar». El editor filtra por «Por decidir», «Tools no lo calcula» y «Con
+aviso», y el ítem tiene una sección «Del estándar» (prioridad, aplicación,
+cantidad por decidir, notas y la fila de la hoja de la que sale). Aplicar una
+sin revisar pide confirmación. En la lista de plantillas y al aplicar, las de
+los estándares van agrupadas por hoja y en su orden, después de las hechas a
+mano.
+
+El lector de CSV (`homes/imports/csv.ts`) es propio, sin `xlsx`: comillas,
+saltos de línea dentro de comillas, CRLF y BOM; rechaza bytes nulos, UTF-8 roto,
+más de 1 MB y más de 2.000 filas. Los textos de la hoja son datos: se guardan y
+se enseñan como texto. La evaluación con el juego congelado `b-estandares` da un
+100 % de campos bien (3.709 de 3.709) sin coste.
+
+### Elegir qué va en la casa al aplicar una plantilla (VIV-2981)
+
+Las plantillas con prioridades o condiciones (las de los estándares,
+`templateNeedsPicking`) abren dentro del diálogo el paso «Qué va en esta casa».
+Sale marcado lo obligatorio, preferente y recomendado y lo que va en todas las
+casas; sin marcar lo «según espacio», «según necesidad», «opcional» y lo que
+depende del proyecto (`applies_when`). En las de una condición (barbacoa,
+chimenea, piscina y playa, sala de cine, txoko u office) sale todo marcado: se
+aplican si la casa lo tiene. El FF&E se agrupa por prioridad y el equipamiento
+por apartado («Cocina», «Cada dormitorio»…), cada grupo con su casilla, y hay
+«Todo» y «Nada». Cada ítem enseña su regla («2 en cada dormitorio», «1 por casa
+· por decidir: la hoja dice «1+»»). Lo que la casa ya tiene de esa plantilla
+sale como «Ya en la lista» (si le falta algún dormitorio, «Falta en algún
+dormitorio», y se marca como si no estuviera) y lo quitado a mano, como «Quitado
+de la lista»; ninguno de los dos sale marcado, y lo quitado tampoco se marca con
+«Todo» ni con la casilla del grupo: vuelve solo si se marca uno a uno.
+
+Las que llevan ítems de dormitorio preguntan «¿En qué dormitorios?», con todos
+marcados de entrada: en las de dormitorio doble o individual, «Marca los
+dormitorios de este tipo: Tools aún no sabe cuáles son dobles.». Los dormitorios
+van por posición, como al expandir (los apartados de dormitorio por su orden), y
+cada uno dice lo que ya tiene de esa plantilla o de la del otro tipo («ya tiene
+«FF&E · Dormitorio doble»»), y los que ya tienen la del otro tipo salen sin
+marcar. Si la casa aún no tiene alguno, «se crea al aplicar»; para que las
+posiciones sigan cuadrando, aplicar al dormitorio 4 crea también los anteriores
+que falten. Lo que va una vez por casa dentro de un dormitorio cae en el primero
+de los elegidos; lo de por persona sigue repartido entre todos los de la casa.
+El botón dice qué entra («Aplicar 15 ítems en 3 dormitorios») y, debajo, cuántas
+líneas añade, con la misma expansión y el mismo reparto por apartados que el
+backend (`expandTemplateItems`, en `@vivla-tools/common`, y `bedroomRoomId`).
+
+Nada se repite ni vuelve solo: lo que se aplica desde el paso de elegir no añade
+lo que la casa ya tiene de esa plantilla ni lo quitado a mano (salvo lo que se
+vuelve a marcar uno a uno). Lo de cada dormitorio se mira dormitorio a
+dormitorio (marcar «Dormitorio doble» otra vez con todo marcado solo lo lleva al
+dormitorio que no lo tenía); lo demás, por ítem, aunque se haya movido de
+apartado: un apartado con nombre o lo que va una vez por casa lleva una sola
+línea suya (`templateLineKey`, en `@vivla-tools/common`). Si no falta nada, el
+servidor responde 409 y no registra la aplicación.
+
+Las plantillas sin prioridades ni condiciones, como las hechas a mano, se
+aplican en un clic. Volver a aplicar una que la casa ya tiene avisa antes,
+contando línea a línea (también la de un dormitorio que no la tenía): «Esta
+plantilla ya se aplicó el 3 oct: de sus 90 líneas, 70 ya están en la lista, 16
+las quitaste a mano y faltan 4.», con «Aplicar solo lo que falta», «Añadir
+también lo que quitaste a mano (16)» y «Cancelar». Lo quitado a mano, antes o
+después de este cambio, lo decide la persona: no vuelve con «Aplicar solo lo que
+falta» y vuelve con la otra opción. Si se quitó todo, el aviso lo dice
+(«quitaste a mano todas sus líneas») y ofrece «Añadir lo que quitaste a mano»;
+si no falta nada, solo «Cerrar». En las del paso de elegir, el aviso va arriba
+del paso. El diálogo sigue abierto hasta «Listo», vuelve a la tarjeta de la
+plantilla aplicada y la marca «Aplicada hoy»; mientras la lista se pone al día
+tras aplicar, no deja aplicar otra vez.
+
+`POST /homes/shopping-lists/:id/apply-template` acepta, todos opcionales,
+`itemIds` (solo esos ítems, todos de la plantilla), `bedrooms` (posiciones de 1
+al número de dormitorios de la casa), `skipExisting` (no añade lo que ya está),
+`skipRemoved` (tampoco lo quitado a mano) y `restoreItemIds` (con `skipRemoved`,
+estos ítems sí vuelven). Sin ellos, todo, como antes. Cada aplicación queda
+registrada aunque sea parcial. La vista previa
+(`GET /homes/properties/:propertyId/template-preview`) da por plantilla
+`removedLines`: las líneas quitadas, con su ítem y su apartado.
+
+### Guardar la shopping list como plantilla (VIV-3127)
+
+Es el camino inverso de aplicar una plantilla: quien monta el equipamiento en la
+shopping list de una casa lo reutiliza en otras. En la pestaña «Shopping list»,
+«Guardar como plantilla» (solo editores; en escritorio va a la izquierda de
+«Aplicar plantilla» y en el móvil, debajo, para que los otros botones no se
+muevan) abre dos pasos:
+
+1. **Nombre y apartados.** Salen marcados todos los apartados con líneas; se
+   desmarcan los que no van (el mobiliario, si solo se quiere el equipamiento).
+2. **Cantidades y reglas.** Una fila por línea, agrupadas por apartado en el
+   orden de la lista, con lo que hay en la casa y, al lado, la regla (por casa,
+   por dormitorio, por persona o por baño) y la cantidad por regla. Empieza con
+   la regla y la cantidad del ítem de plantilla del que vino la línea, si sigue
+   existiendo y era del mismo tipo de destino; si no, «por casa» con su número.
+   Al cambiar la regla propone la cantidad con los datos de la casa (8 toallas y
+   8 personas dan 1 por persona), redondeando hacia arriba; la cantidad se puede
+   cambiar a mano y admite decimales. Si la regla no da en esta casa lo que
+   tiene, lo avisa («Con esta regla, esta casa llevaría 9 (tiene 8).»). Arriba
+   dice con qué datos se hacen las cuentas y cuáles son por defecto porque la
+   ficha no los trae. Cada apartado tiene «Todo el apartado: por casa, por
+   dormitorio, por persona o por baño».
+
+Lo que está en todos los dormitorios elegidos que tienen líneas, si son dos o
+más (mismo producto del catálogo o, sin producto, mismo nombre), se junta en
+«Cada dormitorio» (`space_kind = bedroom`), con lo que lleva cada uno y la regla
+por dormitorio o por persona. Un apartado es dormitorio con la misma regla con
+que `applyTemplate` reparte por dormitorios (`room_type = 'bedroom'` o nombre
+que empieza por «Dormitorio»). Lo que solo está en algunos se queda en un
+apartado con su nombre, y lo que no lleva lo mismo en todos va con la cantidad
+mayor; los dos se guardan con aviso de revisión (`check_note`). Con un solo
+dormitorio con líneas no se junta nada: se queda en su apartado y, si la casa
+tiene más dormitorios, con aviso. El aviso de revisión de una línea aún sin
+comprobar y la cantidad por decidir (`quantity_note`) pasan también al ítem.
+
+Guardar crea siempre una plantilla nueva, **sin revisar**, con el nombre, el
+producto (nombre, proveedor, referencia, enlace y categoría), el precio de la
+lista como estimado, el grupo de presupuesto y el orden de la lista, y en
+`setup_templates.source` de dónde sale
+(`{ kind: 'shopping_list', propertyId, propertyName, shoppingListId, savedAt, savedBy, houseParams, assumed }`,
+con `assumed` los datos de la casa que se tomaron por defecto). Al aplicarla, el
+producto del catálogo se vuelve a encontrar por proveedor, referencia y enlace,
+como con cualquier plantilla. Al terminar enseña «Abrir la plantilla»; su editor
+dice de qué casa sale y con qué datos se hicieron las cuentas. La casa y su
+lista no cambian. Quedan fuera las reglas por cama, almohada o cuna y añadir
+líneas a una plantilla que ya existe.
+
+La propuesta es una sola regla para las dos puntas (`proposeListTemplate`,
+`proposeRuleQuantity` y `ruleOnThisHouse` en `@vivla-tools/common`, con la misma
+expansión que al aplicar): el backend la vuelve a calcular y de la petición solo
+toma la regla y la cantidad de cada fila.
+
+## Paridad con el prototipo
+
+La herramienta replica el prototipo validado. Lo que aún NO está, y se decide
+más adelante: elegir apartados y plantillas al dar de alta la casa (aquí las
+casas vienen del panel) y el drawer de alta con buscador primero y multi-añadido
+sin cerrar. Corregir habitaciones, plazas y baños cuando el panel los trae
+vacíos ya se puede (ver «Plantillas»).
+
+## API
+
+Endpoints bajo `/homes`, gateados por `tool-homes` (viewer para leer, **editor
+para toda mutación**). Detalle en `apps/backend/src/homes/`; la lógica de
+expansión y de identidad de catálogo está en funciones puras con specs
+(`templates/expand.ts`, `shopping-lists/apply-plan.ts`,
+`catalog/catalog-match.ts`). El servicio de pedidos tiene los suyos
+(`purchase-orders/purchase-orders.service.spec.ts`) sobre un cliente de Supabase
+falso (`common/fake-supabase.ts`), con Cloudinary simulado. El falso admite
+también `upsert` (con sus opciones) y errores con su código de Postgres
+(`fail(message, code)`).
+
+Grupo de las plantillas y datos de la casa (VIV-2972):
+
+- `PATCH /homes/properties/:propertyId/params` (editor): habitaciones, plazas y
+  baños corregidos (`bedrooms`, `capacity`, `bathrooms`, enteros; sin el campo
+  no cambia y con `null` deja de estar corregido; sin ninguno, se borra la
+  fila). Devuelve lo del panel, lo corregido y lo que vale.
+  `GET /homes/properties` trae lo corregido en `paramsOverride`.
+- `PATCH /homes/templates/:id` acepta `budgetGroup` (`furniture`, `amenities` o
+  `null`).
+- `GET /homes/templates/:id/lines-group` (viewer): cuántas líneas que ya
+  salieron de la plantilla cuentan en otro grupo, sin pedido lanzado (`pending`)
+  y con él (`launched`). `POST` a la misma ruta (editor) les da el grupo a las
+  primeras y a su copia en los borradores.
+
+Estándares de diseño (VIV-2977):
+
+- `POST /homes/templates/import/preview` (admin, multipart, campo `files`, uno o
+  dos CSV): lo que crearía la carga, sin escribir nada (plantillas, por decidir,
+  lo que Tools no calcula, las incoherencias de la hoja con su fila, las
+  plantillas que ya hay y si ese fichero ya se cargó).
+- `POST /homes/templates/import` (admin, el mismo multipart y `allowRepeat`):
+  crea las plantillas sin revisar. El mismo fichero otra vez sin `allowRepeat`
+  da 409.
+- `POST /homes/templates/:id/review` (editor, `{ reviewed }`): la marca revisada
+  (quién y cuándo) o la devuelve a sin revisar. `GET /homes/templates` trae
+  `source`, `reviewedAt`, `reviewedByName` y `reviewPending`, y en cada ítem
+  `priority`, `appliesWhen`, `notes`, `quantityNote` y `source`.
+- `POST /homes/templates/:templateId/items` y `PATCH /homes/template-items/:id`
+  aceptan `priority`, `appliesWhen`, `notes` y `quantityNote` (`null` los
+  quita); `source` no se escribe por la API.
+- `PATCH /homes/shopping-list-items/:id`: cambiar la cantidad quita la cantidad
+  por decidir; `quantityNote: null` la quita sin cambiarla (no admite otro
+  valor). La vista previa de plantillas de una casa trae `toDecide`.
+
+Guardar como plantilla (VIV-3127):
+
+- `POST /homes/shopping-lists/:id/save-as-template` (editor,
+  `{ name, description?, roomIds, rows? }`, con `rows` como
+  `[{ key, quantityPer, quantity }]`): crea la plantilla sin revisar y la
+  devuelve. Con `rows` tienen que venir todas las filas de la propuesta: una que
+  ya no está en la lista, o una línea nueva sin regla, da 409; una regla por
+  casa o por baño en «Cada dormitorio», 400. Si sus ítems no se pueden guardar,
+  borra la plantilla recién creada.
+
+Pedidos de todas las casas (VIV-2982):
+
+- `GET /homes/purchase-orders` (viewer, sin parámetros): los pedidos en curso de
+  todas las casas listadas, cada uno con sus líneas (solo nombre, precio,
+  cantidad y lo recibido) y ajustes, su casa, la fecha de montaje en setup, sus
+  avisos, quién lo creó y quién lo lanzó (`createdById`, `launchedById` y sus
+  nombres) y por qué es «mío» (`mine`); además, `today`, `recentDays` (30) y las
+  casas de las que soy responsable de mantenimiento (`myMaintenanceHouses`). Los
+  filtros se aplican en el navegador. Va en su propio controlador
+  (`purchase-orders/orders-overview.controller.ts`): cualquier
+  `GET /homes/purchase-orders/<palabra>` caería en `purchase-orders/:id`.
+- `GET /homes/properties/:propertyId/purchase-orders` y
+  `GET /homes/purchase-orders/:id` traen también `createdByName` y
+  `launchedByName`.
+
+Avisos en la campana (VIV-2984):
+
+- `POST /homes/order-alerts/digest/send` (admin de `tool-homes` o `x-api-key`):
+  manda el resumen del día a cada persona, o lo simula con `dryRun: true`
+  (devuelve `preview`, sin escribir nada). `recipientIds` (opcional, hasta 100
+  ids) lo limita a esas personas, para probar. Devuelve los recuentos de la
+  pasada (pedidos con aviso, sin destinatario, personas, avisos nuevos y
+  recordatorios, mandados, ya mandados hoy, bloqueados por las preferencias y
+  fallidos). Un `dryRun` que no es booleano da 400; el envío real sin
+  `HOMES_ORDER_ALERT_DIGEST_ENABLED=true`, 503. Va en su propio controlador
+  (`order-alerts/order-alert-digest.controller.ts`) con `Auth0OrApiKeyGuard`:
+  los demás controladores de homes llevan `Auth0AuthGuard`, que solo deja pasar
+  la clave con `DEV_AUTH_BYPASS` (en producción, Windmill recibiría un 401).
+  Idempotente por día.
+
+Lo ya comprado en cualquier casa (VIV-2985):
+
+- `GET /homes/purchase-order-lines?q=…` (viewer; `origin`, `propertyIds` (hasta
+  50, separadas por comas), `mine` y `limit` de 1 a 100, 50 por defecto): las
+  líneas de los pedidos lanzados que tienen todas las palabras de `q` en el
+  nombre o la referencia, de la más reciente a la más antigua por fecha de
+  compra, con su pedido, su casa, la foto y quién lo pidió, y `truncated` si hay
+  más. Cada palabra va al filtro de PostgREST como una expresión sin tildes
+  (`imatch`) hecha solo de letras y números; sin ninguna palabra de dos
+  letras, 400. Antes se leen los productos del catálogo cuya referencia tiene
+  todas las palabras con números y, aparte, cada trozo que parece una referencia
+  («4415/044»), hasta 20 en cada lectura; sus líneas sin referencia propia
+  entran en el filtro de esas palabras (`item_id.in.(…)`). Va en su propio
+  controlador (`purchase-orders/purchased-lines.controller.ts`).
+
+Comprar lo mismo (VIV-2991):
+
+- `POST /homes/properties/:propertyId/purchase-orders`: una línea con producto
+  del catálogo (`itemId`) admite `reference` y `url`, los de la compra anterior;
+  la línea guarda los del producto y estos solo si el producto no los tiene. Una
+  línea de la shopping list sigue sin admitirlos (400) y la foto (`imageUrl`)
+  sigue siendo solo de lo escrito a mano.
+- `GET /homes/purchase-order-lines` trae también la categoría (`category`) y el
+  grupo de presupuesto (`budgetGroup`) de cada línea, el nombre de su producto
+  (`productName`, el que usa «Comprar lo mismo») y `productRetired` si su
+  producto del catálogo ya no está.
+
+Llegadas (VIV-2983), en `ArrivalsController`, con el permiso en cada método:
+
+- `GET /homes/arrivals` (viewer, `?destinations=&properties=&window=`): los
+  destinos con su número de pedidos y cómo están escritos, las casas, los
+  pedidos de los destinos elegidos (`orders`), los que podrían ir a ellos
+  (`review`) y los que llegan después de las fechas (`later`). Ninguna lectura
+  pide precios ni importes. «Destino no válido» o «Alguna casa no es válida»
+  dan 400.
+- `POST /homes/arrivals/receipts` (editor,
+  `{ orders, receivedAt?, confirmedBy? }`, hasta 100 pedidos): lo que llega en
+  esta entrega se suma a lo ya apuntado, por la recepción de cada pedido (con
+  `brokenOutcome`, `refundAmount` y `expectedAt`, como en `/receipt`). Todo se
+  comprueba antes de escribir (un 400 que nombra cada pedido); después, si uno
+  falla al escribir, va a `failed` y se sigue con los demás. «Llegada confirmada
+  por …» queda en el paso a entregado y la nota de cada línea se suma a la que
+  tenía.
+- `PATCH /homes/arrivals/deliver-to` (editor, `{ orderIds, deliverTo }`): el
+  mismo destino, en su forma canónica, para varios pedidos.
+
+Cierre del setup (VIV-2993), en `SetupClosingsController`, con el permiso en
+cada método:
+
+- `GET /homes/properties/:propertyId/setup-closing` (viewer): el cierre en vigor
+  (`current`), los reabiertos (`history`, del más reciente al más antiguo) y las
+  cifras de hoy (`live`), con el nombre de la casa. Sin shopping list, 404.
+- `POST /homes/properties/:propertyId/setup-closing` (editor, `{ note? }`, hasta
+  1.000 caracteres): guarda las cifras de hoy. Con un cierre en vigor, 409.
+- `POST /homes/setup-closings/:closingId/reopen` (editor, `{ note? }`): reabre
+  ese cierre; si ya se reabrió, 409. Calcula las cifras de hoy antes de
+  escribir: si no puede, no reabre nada.
+- `PATCH /homes/purchase-orders/:id/lines/:lineId/budget-group` (editor,
+  `{ budgetGroup }`): el grupo de una línea de un pedido de setup ya lanzado; en
+  un borrador, en mantenimiento o en un pedido al estudio (cuenta entero como
+  mobiliario), 409.
+
+Lo que necesitan varias lecturas está en `apps/backend/src/homes/common/`, con
+sus specs, para que todas cuenten lo mismo:
+
+- `today.ts`: el día de hoy en España (`todayInSpain`), con el que se calculan
+  los avisos. El día cambia a medianoche en Madrid, no en UTC.
+- `order-alerts.ts`: los avisos de una fila de `purchase_orders` (`rowAlerts`,
+  sobre `orderAlerts`) y las columnas que hay que leer para calcularlos
+  (`ALERTABLE_ORDER_COLUMNS`, con `buyer`). Es lo que usa el contador de la
+  tarjeta de la casa.
+- `maintenance-leads.ts`: el responsable de mantenimiento de cada casa
+  (`property_agent_assignments` con `assignment_type = 'maintenance'`,
+  VIV-2754), en los dos sentidos: el de cada casa (`loadMaintenanceLeads`, de
+  100 en 100 casas) y las casas de una persona (`loadLeadPropertyIds`). Si una
+  lectura falla, da 500 en vez de una respuesta a medias.
+- `ownership.ts`: por qué un pedido es «mío» (`mineReasons`): lo creé yo, lo
+  lancé yo (`launched_by`) o es un pedido de mantenimiento de una casa de la que
+  soy responsable; pueden darse las tres. Un pedido de setup de esa casa no es
+  mío si no lo creé ni lo lancé.
+- `user-name.ts`: el nombre de una persona tal como se enseña (`userName`), sin
+  la parte que llegue vacía.
+- `search-words.ts`: las palabras de una búsqueda listas para un filtro
+  (`searchWords`: sin tildes, en singular, sin palabras vacías, solo letras y
+  números) y su expresión sin tildes (`accentInsensitivePattern`).

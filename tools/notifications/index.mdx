@@ -1,0 +1,191 @@
+---
+title: "Notificaciones"
+description: "Plataforma multi-canal con builder de automaciones event-driven, templates, email y analytics"
+---
+
+# Notificaciones
+
+El módulo de Notificaciones soporta:
+
+- **Envío manual** con audiencias segmentadas (push, in_app, email).
+- **Automaciones event-driven** con builder visual y eventos de dominio. Ver [Automaciones](/notifications/automations).
+- **Email** transaccional vía SMTP2GO con preheader, List-Unsubscribe (RFC 8058), UTM injection, Schema.org y open/click tracking. Ver [Email](/notifications/email).
+- **Preferencias y opt-outs** por destinatario consultados antes de cada send. Ver [Preferences & unsubscribe](/notifications/preferences).
+- **Templates** multi-idioma reutilizables.
+- **Analytics** vía PostHog (`notification.sent`, `event.ingested`, etc.) + tabla `notification_email_events` (delivered/opened/clicked/bounced/spam/rejected/unsubscribed).
+
+## Dashboard
+
+Ruta: `/app/notifications/dashboard`
+
+Panel de métricas principales:
+
+| Métrica | Icono | Descripción |
+|---------|-------|-------------|
+| Total enviadas | Bell | Cantidad total de notificaciones enviadas |
+| Tasa de entrega | CheckCircle | Porcentaje de entrega exitosa |
+| Templates activos | FileText | Cantidad de templates disponibles |
+| Programadas | Clock | Notificaciones pendientes de envío |
+
+Incluye indicadores de tendencia semanal y timeline de actividad reciente.
+
+## Funcionalidades
+
+### Envío manual
+
+Ruta: `/app/notifications/send`
+
+Crear y enviar notificaciones manualmente con:
+- Título y mensaje personalizado
+- Contenido enriquecido e imagen/video
+- Selección de audiencia (filtros)
+- Estimación de audiencia antes del envío
+- Opción de programar para envío futuro
+- Envío de test a usuarios específicos
+
+#### Seleccionar la audiencia filtrada completa
+
+La tabla de audiencia muestra 50 usuarios por página. El checkbox de la
+cabecera marca **solo esa página**.
+
+Para enviar a todos los usuarios que cumplen el filtro (por ejemplo los 590
+con el chat deshabilitado), marca la página y pulsa **"Seleccionar los N que
+coinciden con el filtro"** en la banda que aparece encima de la tabla. El
+contador del panel derecho pasa a mostrar el total real.
+
+Con esa opción activa, el envío no manda los ids de la página: recorre
+`/chat/users/audience` con los mismos filtros y término de búsqueda y resuelve
+los destinatarios reales. Por eso el número que confirmas es el número que
+sale.
+
+### Templates
+
+Ruta: `/app/notifications/templates`
+
+Librería de templates reutilizables con:
+- Categorías: `reminder`, `announcement`, `feedback`, `promotional`
+- Título, mensaje, contenido, imagen y video
+- Asociación con deep links
+- Contador de uso
+- Duplicar templates existentes
+
+### Historial
+
+Ruta: `/app/notifications/history`
+
+Registro de todas las notificaciones enviadas con:
+- Estado: `draft`, `scheduled`, `sending`, `sent`, `failed`
+- Estadísticas de entrega por notificación
+- Detalle de recipients y su estado individual (`pending`, `sent`, `failed`, `opened`, `clicked`)
+
+### Deep Links
+
+Ruta: `/app/notifications/deep-links`
+
+Configuración de deep links para que las notificaciones abran pantallas específicas en la app mobile:
+- Nombre y patrón del deep link
+- Parámetros configurables (JSON)
+- Estado activo/inactivo
+
+## Canales de entrega
+
+Las notificaciones se pueden enviar por:
+
+| Canal | Tecnología | Audiencia |
+|-------|------------|-----------|
+| `push` | Expo Server SDK | Notificaciones push nativas (iOS/Android) a end-users de la mobile app |
+| `in_app` | Firestore `vivla-notifications` collection + tabla `app_inbox_messages` | Buzón in-app de la mobile app — cohome owners, guests |
+| `tools_inbox` | Tabla `inbox_messages` (Supabase) | Centro de notificaciones del backoffice — CX, community managers, ops |
+| `email` | SMTP2GO | Email transaccional (ver [Email](/notifications/email)) |
+| `chat` | Stream Chat | Tickets internos a equipos (ej. CX en NPS bajo) — TODO |
+
+Todos los canales son seleccionables tanto desde el envío manual como desde el [step builder de automaciones](/notifications/automations).
+
+### Qué hace que una in-app se pueda abrir
+
+La app móvil abre una notificación del buzón **solo si trae `content` o una
+`navigation` válida**. `NotificationCard.handlePress` ignora el toque cuando
+faltan las dos, y la tarjeta de la lista pinta únicamente el título y la hora
+— nunca la descripción.
+
+Una notificación con solo `description` quedaba así en un callejón sin salida:
+el propietario veía el título, tocaba y no pasaba nada, y el texto no se leía
+en ninguna pantalla.
+
+Por eso, al escribir en `app_inbox_messages`, cuando un mensaje no trae
+`content` ni `navigation` su descripción **se mueve** (no se copia) al campo
+`content` — ver `resolveInboxBody` en `notifications/utils/inbox-body.ts`. No
+se copia porque los dos bottom sheets de la app pintan `description` y debajo
+`content`: con ambos rellenos, el propietario leería el mismo texto dos veces.
+
+Los mensajes con deep link o con cuerpo extendido no se tocan: ya se abren.
+
+<Note>
+  Es un apaño mientras el arreglo real no esté en la app (que la tarjeta pinte
+  la descripción y el toque abra con ella). Cuando eso se publique, esta
+  redirección se puede quitar.
+</Note>
+
+### Idioma del propietario
+
+Todo mensaje automático a un propietario sale en su idioma. La fuente de verdad
+es la columna `users.language` (`'es'` por defecto): el motor la resuelve **una
+vez** por destinatario con `resolveMessageLanguage`
+(`common/message-language.util.ts`) y es **español-first** — solo manda inglés
+cuando el valor guardado empieza por `en`; cualquier otra cosa (incluido sin
+valor) se queda en español. La misma regla la usan chat y email, así que nunca
+discrepan sobre en qué idioma lee un propietario.
+
+Cómo se localiza cada canal:
+
+- **Templates push / in-app / chat:** el `channel_payload` guarda las dos
+  copias, `{ "es": {…}, "en": {…} }` (migración 220). `pickLocalizedPayload`
+  devuelve la copia del idioma pedido y cae a `es` si falta el inglés. Una fila
+  que siga plana (forma antigua, solo español) se sirve tal cual en cualquier
+  idioma, así que la migración y el lector son independientes: ninguno se rompe
+  si el otro aún no está.
+- **Quick replies de chat** (primer mensaje del canal, seguimiento a 7 días y
+  nota de llegada — se leen en vivo por slug para que CX edite sin deploy): el
+  inglés vive en una fila paralela con el slug + `-en`
+  (`localizedQuickReplySlug`, migración 221). El envío busca primero la fila
+  `-en` y cae al slug español cuando CX aún no ha escrito la variante, de modo
+  que un propietario nunca se queda sin mensaje.
+- **Fechas interpoladas:** al interpolar las variables del template
+  (`{{startDate}}`, `{{endDate}}`, etc.), cualquier valor que sea una fecha/hora
+  ISO se formatea a fecha de calendario **en el idioma del destinatario**
+  (`formatLocalizedDate`, `common/interpolation.ts`): `"14 de junio de 2027"` en
+  español, `"14 June 2027"` (en-GB) en inglés. El motor y la API pública pasan
+  el idioma ya resuelto, así que un propietario inglés deja de ver la frase en
+  inglés con la fecha en español (VIV-2259). Sigue por defecto en español para
+  no cambiar el comportamiento de los llamadores existentes.
+
+<Note>
+  `users.language` la mantiene al día el cron diario
+  [`owner_language_refresh`](/platform/windmill#idioma-de-propietarios-refresco-diario):
+  pesa las palabras funcionales de lo que cada propietario ha escrito en el chat
+  y corrige la columna sin modelo ni llamadas externas.
+</Note>
+
+## API endpoints
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| POST | `/api/notifications` | Crear notificación |
+| GET | `/api/notifications` | Listar notificaciones (filtros: status, type, page, limit) |
+| GET | `/api/notifications/:id` | Obtener notificación por ID |
+| GET | `/api/notifications/:id/recipients` | Recipients de una notificación |
+| GET | `/api/notifications/:id/stats` | Estadísticas de entrega |
+| POST | `/api/notifications/audience/estimate` | Estimar tamaño de audiencia |
+| POST | `/api/notifications/audience/resolve` | Resolver IDs de audiencia |
+| PUT | `/api/notifications/:id` | Actualizar notificación (solo draft) |
+| DELETE | `/api/notifications/:id` | Eliminar notificación (solo draft) |
+| POST | `/api/notifications/:id/duplicate` | Duplicar notificación |
+| POST | `/api/notifications/:id/send` | Enviar notificación |
+| POST | `/api/notifications/:id/test` | Envío de test |
+| POST | `/api/notifications/batch/send` | Envío batch (admin) |
+| POST | `/api/notifications/scheduled/send` | Enviar programadas pendientes (admin) |
+| POST/GET | `/api/notifications/templates` | CRUD de templates |
+
+<Note>
+  Los usuarios no-admin solo pueden ver sus propias notificaciones. Los endpoints de envío batch y programado requieren rol de administrador.
+</Note>

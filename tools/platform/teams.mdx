@@ -1,0 +1,70 @@
+---
+title: "Equipos"
+description: "Personas, equipos, dispositivos y el ciclo de vida de cada alta"
+---
+
+# Equipos
+
+El tool **Equipos** unifica las antiguas herramientas de *teams* e *identidad* en una sola (claim `tool-equipos`). Centraliza las personas de la empresa, su organización en equipos, los dispositivos asignados y el ciclo de vida de cada alta.
+
+## Interfaz
+
+Ruta: `/app/equipos`
+
+La home arranca con un saludo según el perfil del usuario y una tarjeta **Por hacer** con las tareas pendientes (altas en curso, dispositivos sin asignar, etc.). Debajo hay un juego de pestañas:
+
+### Personas
+
+Tabla de personas con buscador y un segmentado para filtrar por estado: **Todos**, **Incorporándose** y **Con algo pendiente**. Cada fila lleva a la ficha de la persona (`/app/equipos/personas/:personId`). Para perfiles de RRHH y admin se muestran además los datos sincronizados desde Factorial.
+
+### Equipos
+
+Rejilla de equipos (`EquiposGrid`). Un *manager* ve solo el equipo o equipos que gestiona; admin ve todos y puede crear equipos nuevos. Cada equipo lleva a su detalle en `/app/equipos/equipos/:teamId`.
+
+### Dispositivos
+
+Tabla de dispositivos (`DispositivosTable`) con contadores por tipo (portátiles, móviles, libres, por caducar). Permite asignar dispositivos a personas e **Importar dispositivos** de forma masiva.
+
+### Quién ve qué
+
+Matriz de accesos por herramienta (`QuienVeQueMatrix`). Solo visible para el perfil admin.
+
+Las acciones **Dar de alta** (manager/admin) e **Importar dispositivos** (RRHH/admin) están disponibles desde la cabecera según el perfil.
+
+## Perfiles
+
+El acceso dentro del tool depende del perfil del usuario, no de un único flag de admin:
+
+| Perfil | Alcance |
+|--------|---------|
+| `companero` | Solo su propia ficha ("mi ficha") |
+| `manager` | Las personas y dispositivos de su(s) equipo(s); puede dar de alta |
+| `hr` | Todas las personas y dispositivos de la empresa |
+| `admin` | Toda la empresa, equipos, dispositivos y la configuración (Quién ve qué) |
+
+Las listas (`/people`, `/teams`, `/todos`, `/devices`) se recortan en el servidor según quién hace la petición, así que un manager ya recibe solo las filas de su equipo sin filtrar por `teamId` en cliente.
+
+<Note>
+  Cualquier persona con el claim `tool-equipos` ve la herramienta; un `companero` entra pero queda limitado a su propia ficha. La gestión de equipos, dispositivos y permisos requiere perfil RRHH o admin.
+</Note>
+
+## API
+
+Equipos se sirve desde el servicio dedicado de **Identidad** (`apps/identity`). Principales grupos de endpoints:
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| GET | `/teams` | Listar equipos (recortado por el que llama) |
+| GET | `/teams/:id` | Obtener equipo |
+| POST | `/teams` | Crear equipo |
+| PATCH | `/teams/:id` | Actualizar equipo |
+| DELETE | `/teams/:id` | Eliminar equipo |
+| GET | `/teams/:id/package` | Paquete (apps y accesos) del equipo |
+| POST | `/teams/:id/roles` | Crear rol del equipo |
+| POST | `/teams/:id/package/items` | Añadir ítem al paquete |
+| DELETE | `/teams/:id/package/items/:itemId` | Quitar ítem del paquete |
+| GET | `/roles/:roleId` | Obtener rol |
+| PATCH | `/roles/:roleId` | Actualizar rol |
+| GET | `/app-catalog` | Catálogo de apps disponibles |
+
+Además, la home consume endpoints de lectura (`/people`, `/devices`, `/todos`) y el ciclo de altas se apoya en los correos de bienvenida (`/welcome-emails`, `/teams/:id/welcome-emails`).
