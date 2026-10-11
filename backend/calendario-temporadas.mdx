@@ -59,4 +59,4 @@ Las horas de entrada y salida por defecto son ahora **columnas del propio calend
 
 ## Tipos y estados de casa
 
-Los tipos de casa (`HomeType`) son `ski`, `beach`, `city`; los estados (`HomeStatus`) son `inactive`, `pre-active`, `active` (`src/common/database/v2/entities/homes/home.entity.ts:27`). El estado condiciona qué reservas se permiten (ver [Operativa](/operativa/index)).
+Los tipos de casa (`HomeType`) son `ski`, `beach`, `city`; los estados (`HomeStatus`) son `inactive`, `pre-active`, `active` (`src/common/database/v2/entities/homes/home.entity.ts:27`). El estado condiciona qué reservas se permiten (ver [Operativa](/operativa/index)). El listado admin de propiedades (`GET /v2/admin/properties`, `read:homes`) admite filtrar por `status` con uno de esos valores.

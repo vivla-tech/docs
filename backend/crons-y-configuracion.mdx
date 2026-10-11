@@ -71,7 +71,7 @@ Solo se listan los **nombres**; sus valores son secretos de despliegue y no se d
 | `DB_POOL_IDLE_TIMEOUT_MS` | Tiempo que una conexión inactiva permanece abierta antes de cerrarse, en ms (por defecto **30000**). |
 
 <Note>
-  **Variables ahora inertes en el código.** Con la retirada de v1, el código ya **no** lee `NEW_EXCHANGE_SYSTEM`, `NEW_EXCHANGE_SYSTEM_ENABLED_USERS`, `RENTALS_URL` ni `VIVLA_USER` (siguen apareciendo en `.env.example`, pero ninguna ruta las consulta). La configuración de Hostaway se lee ahora de la tabla `configurations` (`hostaway_api_url`, `hostaway_token`, `cron_hostaway_sync`), no de `.env`.
+  **Variables ahora inertes en el código.** Con la retirada de v1, el código ya **no** lee `NEW_EXCHANGE_SYSTEM`, `NEW_EXCHANGE_SYSTEM_ENABLED_USERS`, `RENTALS_URL` ni `VIVLA_USER`; ninguna ruta las consulta y ya se han retirado de `.env.example` (junto con `DEFAULT_LOCATION_PICTURE`). La configuración de Hostaway se lee ahora de la tabla `configurations` (`hostaway_api_url`, `hostaway_token`, `cron_hostaway_sync`), no de `.env`.
 </Note>
 
 <Warning>

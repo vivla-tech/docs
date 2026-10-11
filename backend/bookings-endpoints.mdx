@@ -43,7 +43,7 @@ Referencia de la superficie de reservas de `vivla-api`. Todas las rutas son **v2
 
 | Método | Ruta | Acceso | Qué hace |
 |--------|------|--------|----------|
-| GET | `/v2/admin/bookings` | `read:bookings` | Listado de reservas con filtros (`approval` entre ellos) y paginación. |
+| GET | `/v2/admin/bookings` | `read:bookings` | Listado de reservas con filtros (`approval` y `season` —temporada de los slots ocupados por la reserva— entre ellos) y paginación. |
 | GET | `/v2/admin/bookings/:id` | `read:bookings` | Detalle de una reserva. |
 | POST | `/v2/admin/bookings/register` | `edit:bookings` | Registra una reserva manualmente (disfrute, alquiler, intercambio, ThirdHome). |
 | POST | `/v2/admin/bookings/debug/register` | `edit:bookings` | Alta de reservas pasadas para depuración (no disponible en producción). |
