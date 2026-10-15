@@ -51,6 +51,8 @@ El importe se fija al alquilar, pero el equipo también puede **editarlo despué
 
 Las casas alquilables pueden tener una ficha en **Hostaway** (el motor de alquiler externo). Ya no es solo un enlace: VIVLA **sincroniza automáticamente** hacia Hostaway el estado de alquiler de la semana (abre, reserva o libera las noches en el calendario de Hostaway según avanza la reserva). Es una sincronización **en un solo sentido** (de VIVLA a Hostaway) y solo para reservas de alquiler de casas con ficha de Hostaway configurada; los precios los sigue fijando el equipo a mano.
 
+Si el equipo **cambia las fechas** de una estancia ya alquilada, la sincronización las traslada a la reserva de Hostaway. Al cerrar una semana, VIVLA solo cancela en Hostaway **sus propias reservas**: si en esas noches hay una venta de otro canal, no la toca y la deja para revisión. Además, cada mañana corre una **auditoría automática** que compara VIVLA con Hostaway y avisa por Slack de las incoherencias (posibles overbookings, ventas sin registrar, semanas abiertas que no deberían estarlo, etc.). El detalle técnico está en [Alquiler (Vivla API)](/backend/alquiler#hostaway).
+
 ---
 
 ## Quién hace qué

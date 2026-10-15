@@ -12,6 +12,7 @@ Los crons viven en `src/common/scheduled-jobs/scheduled-jobs.service.ts`. Todos 
 | Horario | Tarea | Referencia |
 |---------|-------|------------|
 | **00:00 diario** | Limpia caché completo y, si `cron_homes_cache=enabled`, refresca la caché de casas. | `scheduled-jobs.service.ts:32` |
+| **07:00 diario** | **Auditoría diaria Vivla ↔ Hostaway**, si `cron_hostaway_audit=enabled`. | `scheduled-jobs.service.ts:74` |
 | **12:00 diario** | Si `cron_homes_cache=enabled`, refresca la caché de casas. | `scheduled-jobs.service.ts:103` |
 | **23:30 diario** | Comprueba la **caducidad de llaves** (`KeyExpiresCommand`). | `scheduled-jobs.service.ts:72` |
 | **Cada 5 min** | Envía la **cola de eventos** pendientes (`sendEvents`), si `cron_send_events=enabled`. Incluye las notificaciones del nuevo sistema y la sincronización con Hostaway. Usa un advisory lock para no solaparse. | `scheduled-jobs.service.ts:141` |
@@ -28,7 +29,11 @@ Los crons viven en `src/common/scheduled-jobs/scheduled-jobs.service.ts`. Todos 
 
 ### Envío de la cola de eventos (cada 5 min)
 
-El nuevo sistema de eventos encola movimientos (reservas, llaves, Hostaway) en la tabla `events` y `EventManagerService.sendEvents()` los procesa en lotes: envía las notificaciones a la plataforma de ingesta y ejecuta la sincronización con Hostaway de las reservas de alquiler (solo en producción y si `cron_hostaway_sync=enabled`). Ver [Alquiler](/backend/alquiler#hostaway).
+El nuevo sistema de eventos encola movimientos (reservas, llaves, Hostaway) en la tabla `events` y `EventManagerService.sendEvents()` los procesa en lotes: envía las notificaciones a la plataforma de ingesta y ejecuta la sincronización con Hostaway de las reservas de alquiler. El flag que la habilita depende del entorno: `cron_hostaway_sync` en producción y `cron_hostaway_sync_non_prod` (apagado si no existe) fuera de ella (`event-manager.service.ts:162`); fuera de producción solo se escribe en los listings de prueba. Ver [Alquiler](/backend/alquiler#hostaway).
+
+### Auditoría diaria Vivla ↔ Hostaway (07:00)
+
+`HostawayAuditService.handleDailyAudit()` corre a las 07:00 solo si `cron_hostaway_audit=enabled` (`src/common/hostaway/hostaway-audit.service.ts:146`). **Solo lee**: compara el calendario y las reservas de Hostaway de cada listing enlazado con las semanas de Vivla, aplicando las mismas reglas que la sync, y cuenta las incoherencias por categoría (posible overbooking, noches abiertas de semanas que no se ofrecen, ventas de otros canales sin registrar, alquileres a la venta cerrados, estancias sin reserva, reservas descuadradas, etc.). El informe **se envía por Slack** —no a Sentry— con el bot de `hostaway_audit_slack_token` al canal `hostaway_audit_slack_channel`; si falta alguno de los dos, no se envía. El informe solo lleva ids, casa y fechas: nunca datos de huéspedes.
 
 ### Bono anual (31-dic)
 
@@ -44,7 +49,11 @@ Parámetros de negocio en la tabla `configurations` (Postgres), con estructura `
 | `cron_homes_cache` | `enabled`/`disabled`: activa el refresco de la caché de casas (00:00 y 12:00). | `scheduled-jobs.service.ts:245` |
 | `cron_send_events` | `enabled`/`disabled`: activa el envío de la cola de eventos (cada 5 min). | `scheduled-jobs.service.ts:249` |
 | `cron_transfer_users` | `enabled`/`disabled`: activa la transferencia de usuarios (cada 15 min). | `scheduled-jobs.service.ts:253` |
-| `cron_hostaway_sync` | `enabled`/`disabled`: habilita las escrituras de sincronización con Hostaway. | migración `1790170270240-AlterBookingsTables.ts` |
+| `cron_hostaway_sync` | `enabled`/`disabled`: habilita las escrituras de sincronización con Hostaway **en producción**. | `src/common/v2/event-manager.service.ts:162` |
+| `cron_hostaway_sync_non_prod` | `enabled`/`disabled`: habilita el sync **fuera de producción** (apagado si no existe; solo escribe en los listings de prueba). | `src/common/v2/event-manager.service.ts:162` |
+| `cron_hostaway_audit` | `enabled`/`disabled`: activa la auditoría diaria Vivla ↔ Hostaway (07:00). | `src/common/hostaway/hostaway-audit.service.ts:146` |
+| `hostaway_audit_slack_token` | Token del bot de Slack (`xoxb-…`, permiso `chat:write`) por el que se envía la auditoría diaria. | `src/common/hostaway/hostaway-audit.service.ts:152` |
+| `hostaway_audit_slack_channel` | Id del canal (o usuario) de Slack al que se envía la auditoría diaria. | `src/common/hostaway/hostaway-audit.service.ts:155` |
 | `hostaway_api_url` | URL base de la API de Hostaway que usa el cliente de sincronización. | `src/common/hostaway/hostaway.service.ts` |
 | `hostaway_token` | Token Bearer de la API de Hostaway. | `src/common/hostaway/hostaway.service.ts` |
 | `default_checkin_hour` / `default_checkout_hour` | Hora de check-in / check-out por defecto (`16:00:00` / `10:00:00`). | migración `1779351647973-CreateCalendarTables.ts` |
