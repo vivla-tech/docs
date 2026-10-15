@@ -83,7 +83,7 @@ Hubo una regla de lanzamiento **con fecha fija en el código**: hasta el **15/03
 
 Al registrar un intercambio desde la app o el panel, el coste en llaves se calcula **siempre en el momento de validar los slots**, haya o no una estancia asociada a la reserva (`src/bookings/v2/admin/bookings.admin.service.ts:630`; `src/bookings/v2/apps/bookings.apps.service.ts:1134`). El coste es:
 
-- **Última hora → 1 llave fija** (`bookings.apps.service.ts:1279`; `bookings.admin.service.ts:630`).
+- **Intercambio de última hora → 1 llave fija** (`bookings.apps.service.ts:1279`; `bookings.admin.service.ts:630`). El disfrute de última hora en la propia casa no es un intercambio y no gasta llaves.
 - **Resto de intercambios →** coste de la temporada de la casa × número de slots. El coste por temporada sale de la tabla de equivalencias de la casa (`calculateSlotKeys`, `src/bookings/v2/bookings.common.repository.ts:629`).
 
 Si la casa **no tiene coste en llaves configurado** para esa temporada, `calculateSlotKeys` devuelve 0 y el registro del intercambio se rechaza con el error `KEYS_NOT_CONFIGURED` ("No hay un coste en llaves configurado para la temporada de la casa seleccionada") (`bookings.apps.service.ts:1140`; `bookings.admin.service.ts:637`). Es una salvaguarda para no crear intercambios de 0 llaves.

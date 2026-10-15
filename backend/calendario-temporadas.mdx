@@ -41,7 +41,7 @@ Qué fechas caen en qué temporada **no está en el código**: es dato en Firest
 
 El coste en llaves de reservar un intercambio depende de la casa y la temporada (`src/bookings/calendars/v1/calendars.repository.ts:1079`; también `src/bookings/v1/bookings.repository.ts:1999`):
 
-1. **Última hora → 1 llave fija** (`bookings.repository.ts:2001`).
+1. **Intercambio de última hora → 1 llave fija** (`bookings.repository.ts:2001`). El disfrute de última hora en la propia casa no gasta llaves.
 2. Si existe un registro en la tabla `home_exchange_keys` para esa casa + temporada, se usa su valor (`calendars.repository.ts:1091`). Esta tabla se gestiona con el endpoint admin `POST /v2/admin/bookings/keys/home/:homeId/set`.
 3. Si no existe, se usa el **fallback** de la variable de entorno `DEFAULT_KEYS`, un CSV con el orden `[alta, media, baja]` (`calendars.repository.ts:1109`). Pico usa el mismo índice que alta.
 
