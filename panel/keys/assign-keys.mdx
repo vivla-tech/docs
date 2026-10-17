@@ -1,0 +1,127 @@
+---
+title: "Asignar llaves a un usuario"
+description: "Cómo registrar un movimiento manual de llaves para un propietario desde Sistema de llaves y dónde comprobar el resultado"
+---
+
+# Asignar llaves a un usuario
+
+Esta guía explica cómo registrar un movimiento de llaves a mano para un propietario: un ajuste, un bono o una penalización, por ejemplo. Lo haces desde la sección **Asignación de llaves** de [Sistema de llaves](/panel/keys).
+
+Qué conceptos existen y cuándo se usa cada uno es operativa de producto. Lo tienes en [Llaves e intercambio](/operativa/intercambio-keys) y en [Vivla API](/backend/keys-exchange).
+
+## Antes de empezar
+
+Necesitas dos permisos:
+
+| Permiso | Para qué |
+|---------|----------|
+| `read:exchanges` | Entrar en **Sistema de llaves** |
+| `edit:exchanges` | Ver la sección **Asignación de llaves** y registrar el movimiento |
+
+Si entras en **Sistema de llaves** y no ves **Asignación de llaves**, te falta `edit:exchanges`. Ver [Permisos](/panel/platform/permissions).
+
+Ten a mano:
+
+- El propietario al que vas a asignar las llaves.
+- El concepto del movimiento.
+- La cantidad de llaves.
+- El número de la reserva, si el concepto lo pide (ver [Conceptos](#conceptos)).
+
+## Pasos
+
+<Steps>
+  <Step title="Abre Sistema de llaves">
+    Pulsa **Sistema de llaves** en el menú lateral. Es la home del panel (ruta `/`).
+  </Step>
+  <Step title="Ve a la sección de asignación">
+    Baja hasta **Asignación de llaves**. Trabajarás en el bloque **Nueva operación de llaves**.
+  </Step>
+  <Step title="Elige el propietario">
+    Abre **Selecciona un propietario** y búscalo por nombre o por email. Debajo de cada nombre ves su email: úsalo para no confundirte entre homónimos.
+  </Step>
+  <Step title="Elige el concepto">
+    Abre **Concepto** y elige el tipo de movimiento. Si el concepto va ligado a una reserva, aparece el campo **Número de reserva**.
+  </Step>
+  <Step title="Escribe la cantidad">
+    Escribe las llaves en **Cantidad de llaves**. Tiene que ser un número entero mayor o igual que 1, sin signo. El signo lo pone el concepto.
+  </Step>
+  <Step title="Escribe el número de reserva (si aparece)">
+    Escribe el id numérico de la reserva en **Número de reserva**. La reserva tiene que existir en vivla-api.
+  </Step>
+  <Step title="Añade el motivo">
+    Explica el porqué en **Motivo (Opcional)**. No es obligatorio, pero es lo que verá el equipo en el histórico.
+  </Step>
+  <Step title="Revisa el resumen">
+    Comprueba **Resumen de la operación**, a la derecha: **Propietario:**, **Concepto:**, **Cantidad:** con su signo (`+` o `-`), **Número de reserva:** si aplica y **Motivo:** si lo has escrito.
+  </Step>
+  <Step title="Confirma">
+    Pulsa **Confirmar operación**. En el diálogo **Confirmación de la operación**, pulsa **Confirmar**. Mientras se envía, el botón muestra **Ejecutando operación...**.
+  </Step>
+</Steps>
+
+<Warning>
+  El panel no permite deshacer ni editar un movimiento ya registrado. Revisa bien el resumen antes de confirmar.
+</Warning>
+
+<Tip>
+  **Confirmar operación** sigue desactivado hasta que el formulario es válido: propietario, concepto, una cantidad correcta y, si aplica, un número de reserva numérico.
+</Tip>
+
+## Conceptos
+
+Todos los tipos de movimiento están disponibles en **Concepto**. Algunos piden número de reserva y algunos restan llaves. El resumen muestra el signo según el concepto, y vivla-api aplica el mismo criterio.
+
+| Concepto | Pide **Número de reserva** | Signo |
+|----------|:--------------------------:|:-----:|
+| **Traspaso inicial** | No | `+` |
+| **Regalo de bienvenida** | No | `+` |
+| **Bonificación fidelización** | No | `+` |
+| **Estancia reservada** | Sí | `-` |
+| **Estancia cancelada** | Sí | `+` |
+| **Intercambio de estancia** | Sí | `+` |
+| **Intercambio de estancia inmediata** | Sí | `+` |
+| **Expiración** | No | `-` |
+| **Bonus por referido** | No | `+` |
+| **Penalización** | No | `-` |
+| **Estancia reservada en última hora** | Sí | `-` |
+| **Ajuste manual** | No | `+` |
+
+<Note>
+  Como la cantidad siempre va sin signo, **Ajuste manual** solo suma. Para restar llaves necesitas uno de los conceptos con signo `-`.
+</Note>
+
+## Qué ves después
+
+Si todo va bien:
+
+- Aparece el aviso **Movimiento registrado correctamente**.
+- El formulario se vacía para la siguiente operación.
+- Se refrescan **Histórico de movimientos**, **Métricas de llaves** y las gráficas.
+
+En **Histórico de movimientos** tienes la nueva fila. Así se reparte lo que has enviado:
+
+| Lo que rellenaste | Dónde sale en el histórico |
+|-------------------|----------------------------|
+| Concepto | Columna **Tipo** |
+| Motivo | Columna **Concepto** |
+| Cantidad | Columna **Cantidad**, con su signo |
+| Número de reserva | Columnas **Reserva** y **Nombre de la casa** |
+| — | **Saldo en cuenta**: saldo del propietario tras el movimiento |
+
+También puedes ver el saldo en la ficha del usuario, en [Usuarios](/panel/users), sección **Llaves de intercambio**.
+
+<Note>
+  Registrar el movimiento no refresca el saldo de la ficha del usuario. Si la abriste hace menos de un minuto, puede mostrar el valor anterior. Recarga la página para ver el saldo nuevo.
+</Note>
+
+## Si algo falla
+
+| Qué ves | Qué pasa |
+|---------|----------|
+| **El valor debe de ser un número** | La cantidad no es un número |
+| **La cantidad mínima es 1 llave** | La cantidad es 0 o negativa |
+| **La cantidad no puede tener decimales** | La cantidad lleva decimales |
+| **El booking debe de ser un número** | El número de reserva no es numérico |
+| Aviso con un error de vivla-api | La API ha rechazado la operación. Por ejemplo, la reserva no existe o el propietario no tiene llaves suficientes para un concepto que resta |
+
+Si la API rechaza la operación, el diálogo de confirmación sigue abierto y el formulario conserva lo que escribiste. Cierra el diálogo, corrige el dato y vuelve a confirmar.

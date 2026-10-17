@@ -1,0 +1,235 @@
+---
+title: "Documento de check-in"
+description: "Workbench de /homes/:id/checkin-doc: plantilla del documento de bienvenida, datos que lo alimentan, placeholders, idiomas, imágenes de acceso y exportación a PDF"
+---
+
+# Documento de check-in
+
+El documento de check-in es la guía de bienvenida que recibe quien llega a una casa. Reúne en una página la portada, las fechas, la dirección, los códigos de acceso, el wifi, la alarma, el home manager, los amenities, las normas y los pasos del check-out.
+
+CX lo prepara en dos sitios:
+
+- En `/homes/:id/checkin-doc`, el **workbench** de la casa. Aquí mantienes los datos que alimentan el documento y ves la plantilla con placeholders.
+- En el detalle de una [reserva](/panel/bookings/manage), con **Generar documento de Check in**. Ahí el documento se rellena con los datos de esa reserva y puedes retocar los textos antes de descargarlo.
+
+Las dos vistas usan el mismo componente (`PlanningDocument`) y descargan el mismo PDF.
+
+## Rutas
+
+| Ruta | Qué hay | Permiso |
+|------|---------|---------|
+| `/homes/:id/checkin-doc` | Workbench: panel de datos a la izquierda y vista previa a la derecha | `edit:homes` |
+| `/homes/:id?section=checkinDoc` | Redirige a `/homes/:id/checkin-doc` | `read:homes` |
+
+Llegas desde el selector de sección del [detalle de casa](/panel/homes/details), con la opción **Documento de Check in**. Sin `edit:homes`, esa opción no aparece.
+
+## Qué genera
+
+El documento sigue siempre este orden. La tabla indica de dónde sale cada bloque.
+
+| Bloque | De dónde sale |
+|--------|---------------|
+| Portada y saludo | Portada de la casa. El saludo usa los nombres de los huéspedes si hay reserva |
+| Intro | Texto fijo de plantilla |
+| **Ver guía de la casa** | Primer PDF de **Guía de la casa**. Si no hay, el botón no sale |
+| **Llegada** y **Salida** | Fechas y horas de la reserva |
+| Dirección y **Abrir en Google Maps** | Dirección y URL de Maps de la casa |
+| Indicaciones e imágenes de acceso | Indicaciones de llegada e imágenes de acceso de la casa |
+| Tabla de llegada | **Cajetín**, **Acceso**, **Parking** y **Acceso parking**, desde los datos de acceso y los parkings |
+| Wifi | Redes y claves de la casa |
+| Alarma | Códigos de alarma y coacción, más una imagen del dispositivo |
+| Home manager | Agente CX asignado a la casa, con su teléfono y email |
+| Amenities | Lista fija de plantilla. Las casas de esquí tienen la suya |
+| Normas esenciales | Lista fija de plantilla, con foto del dispositivo |
+| Check-out | Pasos fijos de plantilla. El paso de la basura lleva su nota y admite además la URL de Maps de los contenedores |
+| Despedida | Firmada con el nombre del home manager |
+
+<Note>
+  La alarma solo aparece por defecto si la casa tiene código de alarma o de
+  coacción. En una reserva puedes ocultarla con **Ocultar sección** o añadirla
+  con **Añadir sección Alarma**.
+</Note>
+
+## Workbench de configuración
+
+La columna izquierda se titula **Contenido del documento**. Es un acordeón con los datos de la casa que alimentan el documento. Cada apartado muestra **Guardado** si ya tiene datos o **Sin dato** si falta algo.
+
+### Contenido del documento
+
+| Apartado | Qué editas | Se guarda en |
+|----------|------------|--------------|
+| **Portada** | El mismo editor de fotos del detalle (portada y recorrido) | Fotos de la casa |
+| **Guía de la casa** | PDFs de la guía (**Añadir documento**) | Documentos de la casa |
+| **Dirección y llegada** | **Dirección**, **Ciudad**, **Código postal**, **URL de Google Maps** e **Indicaciones de llegada** | Ficha de la casa |
+| **Códigos de acceso** | **Código de acceso**, **Código de la alarma** y **Código coacción** | Datos de acceso de la casa |
+| **Parking** | Plazas y códigos de parking | Parkings de la casa |
+| **Wifi** | Redes y claves, con el mismo editor del detalle: diálogos para añadir y editar, y confirmación para eliminar | Datos de acceso de la casa |
+| **Home manager** | Agente CX de la casa (**Selecciona home manager**) | Agente CX de la casa |
+
+Todo lo que guardas aquí se guarda en la ficha de la casa. Lo verás también en el [detalle](/panel/homes/details) y en los documentos de todas sus reservas.
+
+<Tip>
+  Dirección, ciudad y código postal también se corrigen desde **Información de
+  la casa**, en el [detalle](/panel/homes/details).
+</Tip>
+
+### Contenido de plantilla
+
+Debajo del acordeón, el bloque **Contenido de plantilla** lista lo que no depende de la casa: **Intro**, **Normas esenciales**, **Amenities**, **Check-out**, **Alarma (texto e imagen)** y **Despedida**.
+
+"Estos valores solamente se pueden modificar dentro de una reserva concreta." En el workbench la vista previa es de solo lectura para los textos.
+
+## Vista previa
+
+La columna derecha muestra el documento tal y como saldrá en el PDF. Se regenera cada vez que cambian los datos de la casa.
+
+### Placeholders
+
+En el workbench no hay reserva, así que los datos que dependen de ella salen como chips:
+
+| Placeholder (ES) | Placeholder (EN) | Se sustituye por |
+|------------------|------------------|------------------|
+| **Nombres de los huéspedes** | **Guest names** | Nombres de los huéspedes de la reserva |
+| **fecha de llegada** | **arrival date** | Fecha y hora de llegada |
+| **fecha de salida** | **departure date** | Fecha y hora de salida |
+| **código del propietario** | **owner's code** | Código personal del propietario, si aplica |
+
+### Código del propietario
+
+Si algún propietario de la casa tiene [código de acceso personal](/panel/homes/details), la fila **Acceso** de la plantilla muestra el chip **código del propietario**. Así sabes que ese valor cambia según la reserva.
+
+En el documento de una reserva:
+
+- En una reserva de **Disfrute**, la fila **Acceso** usa el código personal del propietario. Si no tiene, usa el código de acceso de la casa.
+- En **Alquiler**, **Intercambio** y **Thirdhome** nunca se muestra el código personal. Quien llega no es el propietario.
+
+### Imágenes de acceso
+
+Las imágenes de acceso se gestionan directamente sobre la vista previa, en el bloque de llegada:
+
+- **Añadir imagen**: sube JPG, PNG o WebP de hasta 10 MB, con un máximo de 10 por tanda. Se añaden al final.
+- Arrastra una imagen para cambiar el orden.
+- Arrastra el tirador para ajustar el tamaño. Doble clic lo restablece.
+- Escribe en **Título de la imagen…** para renombrarla.
+- **Eliminar imagen** pide confirmación antes de borrar; **Cancelar** cierra el diálogo sin borrar.
+
+Todo se guarda en la casa al momento, sin botón de guardar. Ordenar, redimensionar, renombrar y borrar se reflejan antes de que responda la API. Si la petición falla, la imagen vuelve a su estado anterior.
+
+<Note>
+  El borrado de una imagen de acceso usa el mismo endpoint que el de las fotos
+  de la galería (`DELETE /v2/admin/properties/images/:imageId/delete`).
+</Note>
+
+## Idiomas
+
+El documento existe en español y en inglés. Cambia de idioma con el conmutador **ES / EN** de la barra de la vista previa. Por defecto se abre en español.
+
+- Los textos de plantilla de cada idioma viven en `src/features/checkinDocs/locales/es.tsx` y `en.tsx`, no en los JSON de i18n del panel.
+- Las fechas se formatean con el locale de cada idioma (`dateLocales.ts`).
+- La imagen por defecto de la alarma cambia según el idioma.
+
+<Warning>
+  Las indicaciones de llegada solo se precargan en español. La versión en
+  inglés empieza vacía: escríbela a mano en la reserva antes de descargar el
+  PDF en inglés.
+</Warning>
+
+<Note>
+  En una reserva, cada idioma guarda sus propios retoques. Cambiar de idioma no
+  borra lo que escribiste en el otro.
+</Note>
+
+## Exportación a PDF
+
+En el workbench, pulsa **Descargar PDF · ES** (o **· EN**). Mientras se genera verás **Generando…** y el conmutador de idioma queda bloqueado.
+
+- El PDF se genera en el navegador con `html2pdf.js`, en A4 vertical.
+- Antes de rasterizar, el panel espera a que carguen todas las imágenes y fuerza la carga de las tipografías del documento. Sin eso, el PDF saldría con fuentes de reserva.
+- Durante la exportación se ocultan los controles de edición (tiradores, botones de añadir o borrar).
+- El archivo se llama `<Casa> · Bienvenida.pdf` en español y `<Casa> · Welcome.pdf` en inglés. Desde una reserva se añade la fecha de llegada (`dd-mm-aaaa`).
+
+## Documento desde una reserva
+
+En el detalle de una reserva, ve a **Comunicación** y busca la **Notificación de Check in**. Pulsa **Generar documento de Check in**. Se abre un diálogo con:
+
+- El documento ya relleno con los nombres, las fechas y el código de acceso que toque.
+- Un enlace a la casa. Con `edit:homes` abre el workbench; sin él, el detalle.
+- El conmutador **ES / EN** y **Descargar PDF**.
+
+Aquí sí puedes retocar los textos: saludo, indicaciones, filas de la tabla de llegada (**Añadir campo**), alarma, amenities, normas y pasos del check-out.
+
+El paso de la basura del check-out tiene dos campos, y el PDF muestra los dos:
+
+- La **nota**, para explicar dónde están los contenedores (por ejemplo, si están dentro del edificio). Sale si tiene texto.
+- La **URL de Google Maps** de los contenedores. Si es un enlace, debajo de la nota sale **Ver ubicación de los contenedores**.
+
+Solo cuenta como enlace si no tiene espacios y lleva un dominio, como `maps.app.goo.gl/…` o `https://www.google.com/maps/…`. Si escribes otra cosa, el campo avisa de que no saldrá en el PDF: pon la explicación en la nota.
+
+<Warning>
+  Los retoques hechos en una reserva no se guardan. Solo viven mientras el
+  diálogo está abierto y van al PDF que descargues. Si quieres que un dato
+  salga en todas las reservas, cámbialo en el workbench de la casa.
+</Warning>
+
+<Note>
+  El diálogo encuentra la casa por su nombre (`useHomeIdByName`), comparando
+  sin mayúsculas ni espacios sobrantes. Si no la encuentra, verás **No se pudo
+  cargar la información de la casa**. El botón **Enviar ahora** está
+  deshabilitado (**Disponible próximamente**).
+</Note>
+
+Más contexto sobre esa pantalla en [Gestionar reservas](/panel/bookings/manage).
+
+## Directorio de agentes CX
+
+El bloque del home manager enseña el nombre, el teléfono y el email del agente CX asignado a la casa. Esos datos vienen de la API.
+
+Si a la API le falta el teléfono o el email, el panel los completa con un directorio local en `src/features/checkinDocs/cxAgents/directory.ts`:
+
+1. `findCxAgent` busca primero por teléfono, comparando solo los dígitos.
+2. Si no hay coincidencia, busca por nombre de pila, sin distinguir mayúsculas.
+3. Si tampoco la hay, el bloque sale sin ese dato.
+
+La despedida firma con el nombre del agente. Si la casa no tiene agente, el bloque del home manager no aparece y la despedida usa una firma genérica.
+
+<Warning>
+  El directorio está escrito a mano en el código. Cuando entra o sale alguien
+  del equipo de CX, o cambia un teléfono, hay que actualizar `directory.ts` y
+  desplegar. Si no, el documento puede salir con un contacto desfasado.
+</Warning>
+
+## Endpoints de vivla-api
+
+| Método | Endpoint | Para qué |
+|--------|----------|----------|
+| `GET` | `/v2/admin/properties/:id` | Datos de la casa que alimentan el documento |
+| `PUT` | `/v2/admin/properties/:id/edit` | Guarda dirección, indicaciones, códigos, parkings, wifi y home manager |
+| `DELETE` | `/v2/admin/properties/parkings/:parkingId/remove` | Borra un parking |
+| `GET` | `/v2/admin/properties/cx-agents` | Lista de agentes para **Home manager** |
+| `GET` | `/v1/upload-url` | URL firmada para subir imágenes y PDFs |
+| `POST` | `/v2/admin/properties/:id/access/images/add` | Añade una imagen de acceso |
+| `PUT` | `/v2/admin/properties/access/images/:imageId/edit` | Cambia título, orden o tamaño de una imagen de acceso |
+| `DELETE` | `/v2/admin/properties/images/:imageId/delete` | Borra una imagen de acceso (o una foto de galería) |
+| `POST` | `/v2/admin/properties/:id/images/add` | Añade una foto desde **Portada** |
+| `PUT` | `/v2/admin/properties/:id/images/:imageId/set-cover` | Marca la portada |
+| `POST` | `/v2/admin/properties/:id/documents/add` | Añade un PDF a **Guía de la casa** |
+| `DELETE` | `/v2/admin/properties/documents/:documentId/delete` | Borra un PDF |
+
+## Código
+
+| Qué | Dónde |
+|-----|-------|
+| Página | `src/pages/CheckinDoc` |
+| Panel de configuración | `src/features/checkinDocs/components/WorkbenchConfigPanel` |
+| Vista previa y descarga | `src/features/checkinDocs/components/CheckinDocPreview` |
+| Documento y sus bloques | `src/features/checkinDocs/components/PlanningDocument` (`sections/`) |
+| Chips de placeholder | `src/features/checkinDocs/components/PlaceholderChip` |
+| Conmutador de idioma | `src/features/checkinDocs/components/LanguageToggle` |
+| Idioma y retoques | `src/features/checkinDocs/context/PlanningLanguageContext.tsx`, `src/features/checkinDocs/context/PlanningEditsContext.tsx` |
+| Exportación a PDF | `src/features/checkinDocs/hooks/usePlanningDocumentPdf.ts` |
+| Textos del documento | `src/features/checkinDocs/locales/` |
+| Directorio de agentes | `src/features/checkinDocs/cxAgents/` |
+| Reglas del código de propietario | `src/core/homes/rules/owner.rules.ts` |
+| Queries de imágenes de acceso | `src/features/homes/queries/` (`uploadAccessImages`, `reorderAccessImages`, `resizeAccessImage`, `updateAccessImageTitle`, `deleteAccessImage`) |
+| Diálogo desde una reserva | `src/features/bookings/components/BookingsDetailsSheet/content/Communications/sections/CheckInMessage/components/PlanningDocumentDialog` |
+| Textos del workbench | `src/assets/locales/es/checkinDocs.json` |

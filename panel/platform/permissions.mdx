@@ -1,0 +1,93 @@
+---
+title: "Permisos"
+description: "Qué permisos de Auth0 existen en el Panel, qué desbloquea cada uno y cómo se comprueban en el código"
+---
+
+# Permisos
+
+El acceso a cada módulo del Panel depende de los **permisos** de tu usuario en Auth0. Hay un permiso de lectura y otro de edición por módulo, más un permiso comodín de acceso total.
+
+El panel no asigna permisos: solo los lee. Viajan en el claim `permissions` del access token que devuelve Auth0 al hacer login. Los roles y permisos se asignan a tu usuario de Auth0. Si ya tenías usuario de correo y contraseña, tu primer login con Google se enlaza a él y los conservas. Si no, se asignan a tu usuario de Google (el que empieza por `google-oauth2|`). Si necesitas más acceso, pídelo a quien administre Auth0.
+
+## Permisos disponibles
+
+| Constante | Valor en Auth0 | Qué te permite |
+|-----------|----------------|----------------|
+| `READ_KEYS` | `read:exchanges` | Ver **Sistema de llaves** (`/`) |
+| `WRITE_KEYS` | `edit:exchanges` | Asignar llaves y editar la valoración |
+| `READ_HOMES` | `read:homes` | Ver **Propiedades** y la ficha de cada casa |
+| `WRITE_HOMES` | `edit:homes` | Crear casas ([desactivado temporalmente](/panel/homes#alta-de-casa)), editar su ficha y generar el documento de check-in |
+| `READ_BOOKINGS` | `read:bookings` | Ver **Reservas** y su detalle |
+| `WRITE_BOOKINGS` | `edit:bookings` | Crear reservas, editarlas y cambiar sus flags |
+| `READ_USERS` | `read:users` | Ver **Usuarios** y su detalle |
+| `WRITE_USERS` | `edit:users` | Crear, editar y borrar usuarios, y editar huéspedes de una estancia |
+| `READ_CALENDAR_MANAGER` | `read:calendar-manager` | Ver **Calendarios** |
+| `WRITE_CALENDAR_MANAGER` | `edit:calendar-manager` | Editar los días del calendario de una casa |
+| `FULL_ACCESS` | `*` | Todo lo anterior. Salta cualquier comprobación |
+
+<Note>
+  El valor de llaves es `exchanges`, no `keys`. Es el nombre que usa la API para el intercambio de llaves.
+</Note>
+
+<Warning>
+  **Calendarios usa nombres distintos en el panel y en la API.** El panel muestra la sección con `read:calendar-manager` y deja editar con `edit:calendar-manager`. En cambio, los endpoints `/v2/admin/calendars` de `vivla-api` exigen `read:calendars` y `edit:calendars`. Para que Calendarios funcione, tu usuario necesita las dos parejas de permisos, o `*`. Con solo `read:calendar-manager` ves la sección, pero la API rechaza las llamadas.
+</Warning>
+
+## Qué desbloquea cada permiso de edición
+
+Los permisos de lectura protegen las rutas y el menú. Los de edición, además, muestran u ocultan botones y controles dentro de las pantallas.
+
+| Permiso | Rutas | Controles en pantalla |
+|---------|-------|-----------------------|
+| `edit:exchanges` | — | Sección de asignación de llaves en `/`, edición en la tabla de valoración |
+| `edit:homes` | `/homes/create` (desactivada temporalmente: redirige a `/homes`), `/homes/:id/checkin-doc` | Botón de alta en el listado (desactivado temporalmente), edición de secciones en la ficha y en la vista previa, edición del documento de planificación desde una reserva |
+| `edit:bookings` | `/bookings/create` | Botón de alta en el listado, edición en el detalle de la reserva, selector de flags en la tabla |
+| `edit:users` | `/users/create`, `/users/:id/edit` | Botón de alta en el listado, acciones del detalle de usuario, activar o desactivar el calendario de una casa del usuario, edición de huéspedes en una estancia |
+| `edit:calendar-manager` | — | Clic en los días del Calendar Manager para editarlos |
+
+<Warning>
+  Ocultar un botón no es seguridad. El panel oculta lo que no puedes hacer para que no lo intentes, pero quien valida de verdad cada operación es `vivla-api` con el mismo token.
+</Warning>
+
+## Cómo se resuelve el acceso
+
+```
+Login con Google → el SDK de Auth0 guarda el access token
+          └─ claim "permissions": ["read:homes", "edit:homes", …]
+                └─ useAuth().permissions
+                      ├─ Sidebar: filterByPermission(navigableRoutes)
+                      ├─ Router: <PermissionGuard requiredPermission=…>
+                      └─ Pantallas: useHasPermission(PERMISSIONS.WRITE_…)
+```
+
+- **Menú lateral**: solo aparecen las secciones cuyo permiso de lectura tienes (`filterByPermission` sobre `navigableRoutes`).
+- **Rutas**: cada ruta va dentro de un `PermissionGuard`. Si no tienes el permiso, `PermissionBasedRedirect` te manda a la primera sección accesible del menú. Si no tienes ninguna, vas a `/unauthorized`.
+- **Controles**: los componentes usan `useHasPermission` o envuelven el control en `<PermissionGuard>` sin fallback, así que simplemente no se pintan.
+
+Un `requiredPermission` puede ser un permiso o una lista. Con una lista basta con tener **uno** de ellos (lógica OR). Para exigir todos a la vez existe `useHasAllPermissions` (lógica AND). En ambos casos `*` da acceso.
+
+## Rol por defecto
+
+Quien entra al panel por primera vez sin ningún permiso del panel recibe el rol **Panel Viewer**: lectura de todas las secciones, sin edición. Lo asigna la Action de Auth0 **Panel: default Panel Viewer role** en el login. No toca a quien ya tiene algún rol o permiso del panel, ni a quien se acaba de enlazar a una cuenta que ya existía.
+
+Si alguien llega sin permisos (por ejemplo, si la Action falla), ve **Aún no tienes acceso**. En cuanto le asignen un rol, le basta con recargar la página: el panel pide un token nuevo cuando el que tiene no trae permisos.
+
+## Cambios de permisos
+
+El panel lee tus permisos del access token cuando arranca con tu sesión. El SDK de Auth0 reutiliza ese token hasta que caduca, así que un cambio de rol en Auth0 no se ve al momento, ni siquiera recargando la página.
+
+<Tip>
+  Si te acaban de dar un permiso y no ves la sección, pulsa **Cerrar sesión** en el menú de la cabecera y vuelve a entrar. El nuevo token ya trae el permiso.
+</Tip>
+
+## Código
+
+| Pieza | Dónde |
+|-------|-------|
+| Constantes de permisos | `src/features/auth/constants/index.ts` |
+| Lectura del claim del JWT | `src/features/auth/utils/jwtUtils.ts` (`extractPermissions`), llamado desde `src/features/auth/providers/AuthProvider.tsx` |
+| Lógica OR / AND y filtrado | `src/features/auth/utils/permissionUtils.ts` |
+| Hooks | `src/features/auth/hooks/usePermissions.ts` (`useHasPermission`, `useHasAllPermissions`) |
+| Guard de componentes y rutas | `src/features/auth/components/PermissionGuard/` |
+| Redirección sin permiso | `src/router/PermissionBasedRedirect.tsx` |
+| Menú y permiso de cada sección | `src/config/routes.ts` |

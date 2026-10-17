@@ -1,0 +1,243 @@
+---
+title: "Sistema de llaves"
+description: "Home del panel: gráficas y métricas de llaves, histórico de movimientos, asignación manual y valor en llaves de cada casa por temporada"
+---
+
+# Sistema de llaves
+
+**Sistema de llaves** es la home del panel y el primer módulo del menú lateral. Lo usa el equipo de CX para seguir la economía de llaves, revisar los movimientos de cada propietario y registrar operaciones manuales.
+
+También reúne el valor en llaves de cada casa por temporada. Puedes consultarlo, calcularlo para unas fechas y, con permiso de edición, cambiarlo. Qué son las llaves y cómo se ganan o se gastan está en [Llaves e intercambio](/operativa/intercambio-keys). El detalle técnico está en [Llaves e intercambio (Vivla API)](/backend/keys-exchange).
+
+## Rutas
+
+| Ruta | Qué hay | Permiso |
+|------|---------|---------|
+| `/` | Gráficas, **Métricas de llaves**, **Histórico de movimientos** y **Valor de las casas** (calculadora y tabla) | `read:exchanges` |
+| `/` · sección **Asignación de llaves** | Formulario para registrar un movimiento manual | `edit:exchanges` |
+| `/` · celdas de temporada en **Valor de las casas** | Editar el valor en llaves de una casa en una temporada | `edit:exchanges` |
+
+<Note>
+  Sin `read:exchanges`, al entrar en `/` el panel te redirige al primer módulo al que tengas acceso: **Propiedades**, **Reservas**, **Usuarios** o **Calendarios**, en ese orden. Si no tienes ninguno, acabas en `/unauthorized`. `edit:exchanges` por sí solo no basta: sin `read:exchanges` no ves la página. El permiso `*` lo abre todo. Ver [Permisos](/panel/platform/permissions).
+</Note>
+
+## Qué hay en la pantalla
+
+La página se titula **Sistema de llaves** y tiene cinco bloques, de arriba abajo:
+
+1. **Gráficas** de llaves por periodo.
+2. **Métricas de llaves**, con filtro de fechas.
+3. **Asignación de llaves** (solo con `edit:exchanges`).
+4. **Histórico de movimientos**, con filtros y export CSV.
+5. **Valor de las casas**: la calculadora y la tabla de valoración, con export CSV.
+
+## Gráficas
+
+El selector **Filtrar por** elige el periodo: **Ultimo mes** (por defecto), **Ultimo trimestre** o **Ultimo año**. Hay cuatro tarjetas:
+
+| Tarjeta | Qué cuenta (según su tooltip) |
+|---------|-------------------------------|
+| **Llaves generadas por vivla** | Llaves nuevas generadas por pagos inmediatos y bonificaciones |
+| **Llaves para bonificaciones** | Llaves otorgadas por referidos, asiduidad o regalo de bienvenida |
+| **Ganadas al instante** | Llaves otorgadas al momento por poner en intercambio estancias a largo plazo |
+| **Ganadas por reservas de otros** | Movimientos de llaves entre usuarios por reservas de estancias |
+
+Cada tarjeta muestra el total del periodo, una gráfica de área y la variación porcentual respecto al periodo anterior. Si no hay periodo anterior con datos, verás **No hay datos previos**. El icono de ayuda de cada tarjeta muestra su tooltip.
+
+## Métricas de llaves
+
+El filtro **Buscar por rango de fecha** acota las métricas. Si eliges solo la fecha de inicio, el filtro se lee como «desde esa fecha en adelante».
+
+| Tarjeta | Formato |
+|---------|---------|
+| **Llaves en circulación, en manos de los propietarios.** | Llaves |
+| **Llaves transferidas entre propietarios** | Llaves |
+| **Llaves emitidas por reservas anticipadas** | Llaves |
+| **Llaves emitidas por Vivla (Bonos, ajustes y referrals)** | Llaves |
+| **Llaves expiradas, eliminadas del sistema al caducar.** | Llaves |
+| **Balance del sistema para saber si la economía está equilibrada.** | Estado |
+| **Semanas disponibles en el pool** | Semanas |
+| **Propietarios que participan en el intercambio** | Porcentaje |
+| **Ratio llaves vs capacidad disponible** | Estado |
+| **Porcentaje de propietarios que van a otras casas de intercambio** | Porcentaje |
+
+Las tarjetas de estado muestran **Equilibrado** con icono de OK, o **Inflación** u **Oferta insuficiente** con icono de alerta.
+
+<Note>
+  Según el tooltip del propio filtro, el rango de fechas solo aplica a las métricas que quedan por encima de la línea separadora. Son las seis primeras de la tabla.
+</Note>
+
+## Asignación de llaves
+
+El bloque **Nueva operación de llaves** registra un movimiento manual para un propietario. Eliges propietario, concepto y cantidad. Según el concepto, también pide el número de reserva. A la derecha, **Resumen de la operación** te enseña lo que vas a enviar. Pulsas **Confirmar operación** y confirmas en un diálogo.
+
+El paso a paso, los conceptos y qué ves después están en la guía [Asignar llaves a un usuario](/panel/keys/assign-keys).
+
+## Histórico de movimientos
+
+Tabla paginada con todos los movimientos de llaves.
+
+### Filtros
+
+- **Selecciona un propietario**: buscador por nombre o email. Muestra el email debajo del nombre.
+- **Buscar por rango de fecha**: no deja elegir fechas futuras.
+- Selector de tipo: **Todos** (por defecto) o uno de los [tipos de movimiento](#tipos-de-movimiento).
+- **Limpiar filtros**: aparece en cuanto hay algún filtro activo.
+
+Los filtros y la paginación viven en la URL. Puedes copiarla para compartir una vista filtrada.
+
+| Parámetro | Qué guarda |
+|-----------|------------|
+| `user` | Email del propietario |
+| `from` / `to` | Fechas del rango, en `yyyy-MM-dd` |
+| `type` | Código del tipo de movimiento, p. ej. `PENALIZATION` |
+| `page` | Página (se omite en la 1) |
+| `pageSize` | Filas por página (se omite en el valor por defecto, 10) |
+
+### Columnas
+
+| Columna | Qué muestra |
+|---------|-------------|
+| **Propietario** | Nombre del propietario. Columna fija con enlace a su ficha en [Usuarios](/panel/users) |
+| **Nombre de la casa** | Casa de la reserva asociada, si la hay |
+| **Reserva** | `#id` de la reserva, con enlace a su detalle en [Reservas](/panel/bookings) |
+| **Email** | Email del propietario, con enlace a su ficha |
+| **Concepto** | El motivo escrito al registrar el movimiento |
+| **Fecha** | Fecha del movimiento |
+| **Tipo** | Tipo de movimiento |
+| **Cantidad** | Llaves del movimiento. Las negativas se resaltan |
+| **Saldo en cuenta** | Saldo del propietario tras el movimiento |
+
+<Note>
+  Ojo con los nombres. La columna **Concepto** muestra el texto libre del campo **Motivo (Opcional)** del formulario. El concepto que eliges en el formulario sale en la columna **Tipo**.
+</Note>
+
+### Exportar a CSV
+
+Pulsa **Exportar a CSV** encima de la tabla. El diálogo trae los filtros de la tabla ya puestos y puedes cambiarlos:
+
+- **Elije el nombre del archivo** (obligatorio; el panel añade `.csv`).
+- **Filtrar por rango de fecha**.
+- **Filtrar por** (tipo de movimiento).
+- **Filtrar por email** (buscador **Buscar usuario**).
+
+El CSV sale con las mismas columnas que la tabla, en UTF-8 y separado por comas. El panel lo genera en tu navegador.
+
+## Valor de las casas
+
+Bloque con dos partes: la calculadora y la tabla de valoración.
+
+### Calculadora de llaves
+
+El bloque **Calcular valor en llaves** te dice cuántas llaves vale una casa en unas fechas.
+
+1. Elige la casa en **Selecciona la casa**. Salen todas las casas, sin filtrar por **Tipo de casa**.
+2. Elige un rango o un solo día en **Elige las fechas**.
+3. Pulsa **Calcular el valor en llaves**.
+
+**Resumen de la operación** lista cada slot del calendario que se solapa con tus fechas. Para cada uno verás **Fechas:**, **Temporada:** (etiqueta con el color de la temporada) y **Valor en llaves:**. Si no hay slots, verás **No hay slots disponibles para este rango de fechas** o **No hay slots disponibles para esta fecha**.
+
+<Note>
+  La calculadora pide el calendario de la casa desde hoy hasta dos años vista. El selector de fechas te deja ir desde diciembre del año anterior hasta tres años vista. Si eliges fechas pasadas o más allá de dos años, verás el mensaje de «no hay slots».
+</Note>
+
+### Tabla de valoración
+
+Filtros:
+
+- **Todos los destinos**: filtra por destino.
+- **Todas las casas**: buscador de casa (**Buscar casa...**).
+- **Tipo de casa**: **Esquí** (por defecto), **Playa** o **Ciudad**. No hay opción para ver todos los tipos a la vez.
+- **Limpiar filtros**: quita destino y casa. El tipo de casa se queda como está.
+
+Columnas:
+
+| Columna | Qué muestra |
+|---------|-------------|
+| **Casa** | Nombre, con enlace a la [ficha de la casa](/panel/homes/details) |
+| **Destino** | Destino de la casa |
+| Una por temporada | Valor en llaves de la casa en esa temporada, o `-` si no tiene. La cabecera lleva el nombre y el color de la temporada |
+
+Las columnas de temporada salen de los calendarios de las casas de la página. Por eso cambian al pasar de página o al filtrar. Cambiar cualquier filtro te devuelve a la página 1. Estos filtros no se guardan en la URL.
+
+<Note>
+  La tabla usa endpoints de otros módulos con sus propios permisos en vivla-api. Las columnas de temporada vienen de `/v2/admin/calendars` y `/v2/admin/calendars/{id}/seasons`, que piden `read:calendars`. Las opciones de destino vienen de `/v2/admin/properties/locations`, que pide `read:homes` o `read:bookings`. Con solo `read:exchanges`, esas partes no cargan.
+</Note>
+
+### Editar el valor de una temporada
+
+Con `edit:exchanges`, pulsa una celda de temporada. Solo son editables las temporadas que pertenecen al calendario de esa casa.
+
+Se abre **Editar valor de llaves** con **Casa:**, **Temporada del año:** y el campo **Valor en llaves:**. Escribe un número entero mayor o igual que 1 y pulsa **Confirmar**. Si todo va bien, verás **Valor actualizado correctamente** y la tabla se refresca.
+
+### Exportar a CSV
+
+Pulsa **Exportar a CSV** encima de la tabla. El diálogo trae los filtros de la tabla y puedes cambiarlos: **Elije el nombre del archivo** (obligatorio), **Selecciona un destino**, **Selecciona una casa** y **Tipo de casa**.
+
+El CSV tiene **Casa**, **Destino** y una columna por cada temporada presente en los datos exportados.
+
+<Warning>
+  Los dos exports piden tantas filas como tiene la tabla con sus filtros actuales. Si en el diálogo amplías los filtros, el CSV se corta en ese número. Para exportar más filas, ajusta primero los filtros de la tabla y luego abre el diálogo.
+</Warning>
+
+## Tipos de movimiento
+
+Los doce tipos aparecen en el filtro del histórico, en el export, en la columna **Tipo** y en el selector **Concepto** del formulario. Qué significa cada uno está en [Vivla API](/backend/keys-exchange).
+
+| Código | Nombre en la UI |
+|--------|-----------------|
+| `INITIAL_ALLOCATION` | **Traspaso inicial** |
+| `WELCOME_GIFT` | **Regalo de bienvenida** |
+| `FIDELIZATION_BONUS` | **Bonificación fidelización** |
+| `STAY_BOOKED` | **Estancia reservada** |
+| `STAY_CANCELLED` | **Estancia cancelada** |
+| `STAY_EXCHANGED` | **Intercambio de estancia** |
+| `STAY_EXCHANGED_IMMEDIATE` | **Intercambio de estancia inmediata** |
+| `EXPIRATION` | **Expiración** |
+| `REFERRAL_BONUS` | **Bonus por referido** |
+| `PENALIZATION` | **Penalización** |
+| `LAST_HOUR_BOOKED` | **Estancia reservada en última hora** |
+| `OTHER` | **Ajuste manual** |
+
+## Endpoints de vivla-api
+
+| Método | Endpoint | Para qué |
+|--------|----------|----------|
+| `GET` | `/v2/admin/bookings/keys/charts` | Datos de las gráficas. Param `period`: `monthly`, `quarterly` o `yearly` |
+| `GET` | `/v2/admin/bookings/keys/metrics` | Métricas de llaves. Params `from`, `to` |
+| `GET` | `/v2/admin/bookings/keys/movements` | Histórico y su export. Params `page`, `limit`, `type`, `user`, `from`, `to` |
+| `POST` | `/v2/admin/bookings/keys/{userId}/register-movement` | Registrar un movimiento. Body `concept`, `amount`, `comment`, `booking`. Exige `edit:exchanges` |
+| `GET` | `/v2/admin/properties/exchange-keys` | Tabla de valoración y su export. Params `page`, `limit`, `type`, `location`, `properties` |
+| `GET` | `/v2/admin/properties/{homeId}/calendar-keys` | Calculadora: slots de la casa con temporada y valor en llaves. Params `from` (hoy), `to` (hoy + 2 años) |
+| `POST` | `/v2/admin/properties/{homeId}/set-keys` | Cambiar el valor de una temporada. Body `season`, `keys`. Exige `edit:exchanges` |
+| `GET` | `/v2/admin/users/list` | Usuarios para los selectores de propietario |
+| `GET` | `/v2/admin/properties/names` | Casas para los selectores de casa |
+| `GET` | `/v2/admin/properties/locations` | Destinos para el filtro de destino |
+| `GET` | `/v2/admin/calendars` | Calendario de cada casa de la página de la tabla de valoración |
+| `GET` | `/v2/admin/calendars/{calendarId}/seasons` | Temporadas que forman las columnas de la tabla |
+
+<Tip>
+  `src/features/keys/` también expone `GET /v2/admin/bookings/keys/wallets` (param `user`), el saldo de un usuario. Esta página no lo usa. Lo usan la ficha de usuario (**Llaves de intercambio**) y los flujos de reservas de intercambio.
+</Tip>
+
+## Código
+
+| Qué | Dónde |
+|-----|-------|
+| Ruta y guard de permisos | `src/router/index.tsx` (ruta índice) |
+| Página | `src/pages/Keys/index.tsx` |
+| Secciones | `src/pages/Keys/sections/` (`KeysCharts`, `KeysMetrics`, `KeysAsignation`, `KeysMovements`, `KeysValuation`) |
+| Llamadas a la API | `src/features/keys/api/request/` |
+| DTOs | `src/features/keys/api/dtos/` |
+| Queries y mutaciones (TanStack Query) | `src/features/keys/queries/` |
+| Filtros del histórico en la URL | `src/features/keys/hooks/useKeysMovementsUrlFilters.ts` |
+| Columnas de temporada | `src/features/keys/hooks/useKeyValuationSeasons.ts` |
+| Formulario de asignación | `src/features/keys/components/KeysAsignationForm/` (conceptos que restan y que piden reserva en `constants.ts`) |
+| Calculadora | `src/features/keys/components/KeyCalculator/` |
+| Tabla de valoración y edición | `src/features/keys/components/KeyValuationTable/` |
+| Exports CSV | `KeyMovementsCSVExportDialog`, `KeyValuationCSVExportDialog` y `src/lib/csvGenerator.ts` |
+| Modelos de dominio | `src/core/keys/models/` (`KeyMovementType`, `KeyMetricPeriod`, `KeyMetricsStatus`…) |
+| Permisos | `src/features/auth/constants/index.ts` (`READ_KEYS`, `WRITE_KEYS`) |
+| Textos de la UI | `src/assets/locales/es/keys.json` |
+
+El módulo envía estos eventos de analítica: `key_movement_register_started`, `key_movement_register_succeeded`, `key_movement_register_failed`, `key_calculator_used`, `key_cost_edited` y `key_data_exported` (con `export_type` `movements` o `valuation`). Ver [Observabilidad](/panel/platform/observability).

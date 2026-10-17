@@ -1,0 +1,386 @@
+---
+title: "Events API"
+description: "Referencia completa de POST /public/events/ingest — cada event_type, payload schema, headers, y ejemplos curl."
+---
+
+# Events API
+
+`POST /api/public/events/ingest` es la **única vía** por la que cualquier sistema (vivla-backend, externos, vivla-tools internos) introduce eventos de dominio en el pipeline de notificaciones.
+
+Características:
+
+- **Envelope v1**: response es `{ object: 'event', id, type, status, created_at }`.
+- **Idempotencia por `Idempotency-Key` header** — repeticiones devuelven mismo `id` con `status: 'idempotent'`.
+- **Validación Zod estricta** por `event_type`. Tipos no registrados → `400 event_type_unknown`.
+- **Rate limit 200 req/min** por IP, exponiendo headers `X-RateLimit-*`.
+- **Logs estructurados** y métricas PostHog.
+
+> Para consumir el **catálogo de tipos en código**, ver `apps/backend/src/notifications/engine/schemas/event-schemas.ts` (Zod schemas — fuente de verdad).
+
+## Request
+
+```http
+POST /api/public/events/ingest
+Content-Type: application/json
+x-api-key: <NOTIFICATIONS_API_KEY>
+Idempotency-Key: <string arbitrario, opcional, recomendado>
+
+{
+  "event_type": "booking.created",
+  "aggregate_id": "booking_abc123",
+  "aggregate_type": "booking",
+  "source": "vivla-backend",
+  "payload": { ... }
+}
+```
+
+| Campo | Tipo | Requerido | Notas |
+|---|---|---|---|
+| `event_type` | string | ✅ | Debe estar en el catálogo (§ Catálogo abajo). |
+| `aggregate_id` | string | ✅ | ID de la entidad principal (ej. `bookingId`, `userId`). |
+| `aggregate_type` | string | ✅ | Categoría (`booking`, `user`, `survey`, `keys`, ...). |
+| `payload` | object | ✅ | Validado contra Zod schema específico de `event_type`. |
+| `source` | string | ❌ | Default `external`. Identificar el emisor (`vivla-backend`, `windmill`, `tools-internal`). |
+
+> **Nota v3.1**: el body field `event_id` fue eliminado. La idempotencia se hace **siempre** vía header `Idempotency-Key`.
+
+## User identity
+
+Los payloads que referencian usuarios (`userId`, `ownerId`, `guestId`, `target` en actions, etc.) deben usar **`users.id` de vivla-tools (UUID v4 de Supabase)**, NO el Firebase UID.
+
+El engine resuelve recipients via:
+
+```sql
+SELECT id, vivla_user_id FROM users WHERE id = <payload.userId>
+```
+
+Si la query no devuelve nada, el engine **intenta un fallback** por `vivla_user_id` (Firebase UID) y logea un warning para que el emisor surface en métricas. Esto sirve solo de safety net mientras vivla-backend migra desde el legacy Firebase UID — **no es un contrato estable**. Los integradores deben enviar el UUID Supabase.
+
+**Cómo obtener el `users.id` correcto desde vivla-backend**:
+- Si tu sistema ya tiene el Firebase UID, mapealo via `SELECT id FROM users WHERE vivla_user_id = $1` antes de emitir.
+- Lo ideal a mediano plazo es que vivla-backend reciba el UUID Supabase en su propio modelo (ya sea propagándolo desde vivla-tools al crear usuarios, o consultando vivla-tools en lookup).
+
+> **Por qué importa**: `notifications.created_by`, `notifications.target_audience.user_ids`, e `inbox_messages.recipient_id` son FKs/constraints a `users.id`. Un Firebase UID en esos campos rompe el insert silenciosamente. El push dispatch además consulta `device_tokens` en la PG de vivla-backend, indexada por `vivla_user_id` — el engine se encarga del mapping, los integradores solo envían `users.id`.
+
+## Headers
+
+| Header | Tipo | Requerido | Notas |
+|---|---|---|---|
+| `x-api-key` | string | ✅ | Valor de `NOTIFICATIONS_API_KEY`. |
+| `Content-Type` | `application/json` | ✅ | |
+| `Idempotency-Key` | string ≤255 | ❌ | Token de idempotencia. Recomendado para retries seguros. Detalle en [idempotency](../api/idempotency). |
+| `X-Request-ID` | string ≤200 | ❌ | Si lo provees, se propaga a logs y respuesta. Si no, el server genera uno. |
+
+## Response
+
+| Status | Significado | Body |
+|---|---|---|
+| `202 Accepted` | Evento aceptado y persistido. Se procesa en próximos ~30s por Windmill. | `{ object, id, type, status: 'pending', created_at, warnings? }` |
+| `200 OK` | Idempotent — la misma `Idempotency-Key` ya fue aceptada. | `{ object, id, type, status: 'idempotent', created_at, warnings? }` |
+| `400 Bad Request` | Validación falló o `event_type` desconocido. | [Error envelope](../api/errors). Incluye `details[]` con cada problema. |
+| `401 Unauthorized` | Falta o inválido `x-api-key`. | Error envelope. |
+| `409 Conflict` | `Idempotency-Key` reutilizada con un body distinto. | Error envelope. |
+| `429 Too Many Requests` | Rate limit. Header `Retry-After` con segundos. | Error envelope. |
+| `500/503` | Bug o dependencia caída. Reintentar con backoff. | Error envelope. |
+
+Headers de respuesta:
+
+| Header | Siempre | Notas |
+|---|---|---|
+| `X-Request-ID` | ✅ | Identificador único de la request. |
+| `X-RateLimit-Limit` | ✅ | 200 |
+| `X-RateLimit-Remaining` | ✅ | Requests restantes en la ventana de 60s. |
+| `X-RateLimit-Reset` | ✅ | Segundos hasta reset. |
+| `Retry-After` | en 429 | Segundos a esperar. |
+
+## Campos vacíos y warnings
+
+Un integrador que manda un campo **opcional** como string vacío o solo espacios (`guestEmail: ""`, `guestId: "   "`) ya no recibe `400`. El ingest **normaliza esos campos a ausentes antes de validar** — solo en campos que el schema declara `.optional()` — y devuelve el detalle en `warnings[]` dentro del `202`/`200`, para que el emisor vea en su propia respuesta qué campo llegó vacío.
+
+```json
+{
+  "object": "event",
+  "id": "ev_550e8400-e29b-41d4-a716-446655440000",
+  "type": "booking.rent_approved",
+  "status": "pending",
+  "created_at": "2026-08-10T09:20:00.000Z",
+  "warnings": [
+    {
+      "path": "guestId",
+      "code": "empty_string_dropped",
+      "message": "\"guestId\" was an empty/blank string on an optional field — dropped before validation"
+    }
+  ]
+}
+```
+
+- `warnings` está **ausente** (no `[]`) cuando no se descartó ningún campo — es aditivo, nadie que ya parsea la respuesta se rompe.
+- Los campos **requeridos** no se tocan: un `bookingId: ""` sigue aceptándose tal cual (siempre lo hizo — un `z.string()` sin refinamiento no rechaza el string vacío), y un campo requerido con refinamiento (p. ej. `user.inactive`'s `userEmail`) sigue devolviendo `400` si llega vacío — normalizarlo endurecería el contrato en vez de rescatarlo.
+- Un email realmente inválido (`"pepe@"`) **no** se rescata: sigue `400 validation_error`. Solo se descarta el string vacío/blanco, nunca un valor con contenido.
+- `domain_events.payload` guarda la versión **normalizada** (sin los campos vacíos) — es la que ven las condiciones de los flows y las plantillas.
+
+## Ejemplo: booking.created
+
+<CodeGroup>
+
+```bash curl
+curl -i -X POST 'https://tools.vivla.com/api/public/events/ingest' \
+  -H 'x-api-key: <NOTIFICATIONS_API_KEY>' \
+  -H 'Idempotency-Key: booking_abc123_created' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "event_type": "booking.created",
+    "aggregate_id": "booking_abc123",
+    "aggregate_type": "booking",
+    "source": "vivla-backend",
+    "payload": {
+      "bookingId": "booking_abc123",
+      "ownerId": "user_xyz",
+      "ownerName": "Juan Pérez",
+      "ownerEmail": "juan@example.com",
+      "propertyId": "prop_001",
+      "propertyName": "Casa del Mar",
+      "propertyLocation": "Ibiza",
+      "startDate": "2026-06-15",
+      "endDate": "2026-06-22"
+    }
+  }'
+```
+
+```ts TypeScript
+const res = await fetch('https://tools.vivla.com/api/public/events/ingest', {
+  method: 'POST',
+  headers: {
+    'x-api-key': process.env.NOTIFICATIONS_API_KEY!,
+    'Idempotency-Key': `booking_${booking.id}_created`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    event_type: 'booking.created',
+    aggregate_id: booking.id,
+    aggregate_type: 'booking',
+    source: 'vivla-backend',
+    payload: {
+      bookingId: booking.id,
+      ownerId: booking.ownerId,
+      ownerName: booking.ownerName,
+      ownerEmail: booking.ownerEmail,
+      propertyId: booking.propertyId,
+      propertyName: booking.propertyName,
+      propertyLocation: booking.propertyLocation,
+      startDate: booking.startDate,
+      endDate: booking.endDate,
+    },
+  }),
+})
+const event = await res.json()
+```
+
+```http Response (202)
+HTTP/1.1 202 Accepted
+Content-Type: application/json
+X-Request-ID: req_a1b2c3d4e5f6
+X-RateLimit-Limit: 200
+X-RateLimit-Remaining: 199
+X-RateLimit-Reset: 60
+
+{
+  "object": "event",
+  "id": "ev_550e8400-e29b-41d4-a716-446655440000",
+  "type": "booking.created",
+  "status": "pending",
+  "created_at": "2026-05-05T10:00:00.000Z"
+}
+```
+
+```http Response (200 idempotent)
+HTTP/1.1 200 OK
+Content-Type: application/json
+X-Request-ID: req_b2c3d4e5f6g7
+
+{
+  "object": "event",
+  "id": "ev_550e8400-e29b-41d4-a716-446655440000",
+  "type": "booking.created",
+  "status": "idempotent",
+  "created_at": "2026-05-05T10:00:00.000Z"
+}
+```
+
+```http Response (400 validation)
+HTTP/1.1 400 Bad Request
+Content-Type: application/json
+X-Request-ID: req_c3d4e5f6g7h8
+
+{
+  "error": {
+    "type": "invalid_request_error",
+    "code": "validation_error",
+    "message": "Payload does not match schema for booking.created",
+    "param": "bookingId",
+    "request_id": "req_c3d4e5f6g7h8",
+    "details": [
+      { "path": "bookingId", "message": "Required" }
+    ]
+  }
+}
+```
+
+</CodeGroup>
+
+## Catálogo de eventos
+
+<Note>
+La tabla siguiente lista los **`event_type` aceptados** y sus campos, y es un **espejo exacto del registro Zod** (`apps/backend/src/notifications/engine/schemas/event-schemas.ts`) que valida el ingest. Campos sin `?` son **requeridos**; con `?` son opcionales pero recomendados — algunos flows los usan en templates (`{{ownerName}}`, `{{propertyName}}`). Los campos numéricos (p. ej. `keysReceived`, `keysCount`, `npsScore`, `remainingStays`) deben enviarse como **número**, no string. Los tipos no listados aquí se rechazan con `400 event_type_unknown` (ver [Eventos descartados](#eventos-descartados-no-emitir)).
+</Note>
+
+### Onboarding
+
+| event_type | Payload |
+|---|---|
+| `user.welcomed` | `userId, userEmail?, userName?, userLang?` |
+| `user.first_login` | `userId, userEmail?, userName?, userLang?` |
+
+### Reservas (vivla-backend)
+
+| event_type | Payload |
+|---|---|
+| `booking.created` | `bookingId, ownerId, ownerEmail?, ownerName?, ownerLang?, propertyId?, propertyName?, propertyLocation?, startDate?, endDate?, duration?, seasonSlug?, isLastHour?` |
+| `booking.info_updated` | `bookingId, ownerId, adults?, kids?, pets?, cleaningRequested?, cribRequested?` |
+| `booking.cancelled` | `bookingId, bookingType?, cancelledByUserId?, cancelledByName?, cancelledRole?, ownerId?, guestId?, propertyId?, propertyName?, startDate?, endDate?, reason?` |
+| `booking.guest_invited` | `bookingId, ownerId, guestId, guestName?, guestEmail?, propertyName?, startDate?, endDate?` |
+| `booking.rent_requested` | `bookingId, originBookingId?, ownerId, ownerEmail?, ownerName?, ownerLang?, guestId, guestName?, guestEmail?, propertyId?, propertyName?, propertyLocation?, startDate?, endDate?` |
+| `booking.rent_approved` | `bookingId, originBookingId?, ownerId, ownerEmail?, ownerName?, ownerLang?, guestId?, guestName?, guestEmail?, isExternalGuest?, guestLang?, propertyId?, propertyName?, propertyLocation?, startDate?, endDate?, finalPrice?, currency?` |
+| `booking.rent_created_by_admin` | `bookingId, originBookingId?, ownerId, ownerEmail?, ownerName?, ownerLang?, guestId?, guestName?, guestEmail?, isExternalGuest?, guestLang?, propertyId?, propertyName?, propertyLocation?, startDate?, endDate?, finalPrice?, currency?` |
+| `booking.exchange_executed` | `bookingId, originBookingId?, originOwnerId, originOwnerName?, originPropertyName?, requesterId, requesterName?, keysReceived, startDate?, endDate?` |
+| `booking.liberated` | `bookingId, ownerId, removedGuestIds?, propertyName?` |
+| `booking.third_home_published` | `bookingId, ownerId, propertyName?, startDate?, endDate?` |
+| `booking.third_home_exchanged` | `bookingId, ownerId, propertyName?, externalGuestName?, externalGuestEmail?, startDate?, endDate?` |
+
+<Note>
+**`booking.exchange_executed` es bidireccional**: notifica al owner (ganó llaves) y al requester (consumió llaves). Por eso `originOwnerId`, `requesterId` y `keysReceived` (número de llaves) son **requeridos** — omitir `keysReceived` devuelve `400 validation_error` con `param: keysReceived`.
+</Note>
+
+<Note>
+**`booking.rent_approved`: `guestId` es opcional.** El huésped puede no tener cuenta Vivla (reserva de Airbnb, alquiler cargado a mano por un admin) — mismo modelo que `booking.rent_created_by_admin`. Con `guestId` presente, el huésped recibe push + in-app; sin `guestId` pero con `guestEmail`, recibe un email branded; sin ninguno de los dos, solo se notifica al propietario, sin error. Ver [Campos vacíos y warnings](#campos-vacíos-y-warnings) — mandar `guestId: ""` (en vez de omitir el campo) también funciona.
+</Note>
+
+### Llaves (vivla-backend, incluye crons internos)
+
+| event_type | Payload |
+|---|---|
+| `keys.recovered` | `userId, userName?, keysReturned, propertyName?, bookingId?, originBookingId?` |
+| `keys.expiring_soon` | `userId, userName?, keysCount, daysUntilExpiry, expiresAt` |
+| `keys.extended` | `userId, userName?, keysCount, expiresAt, previousExpiresAt?` |
+| `keys.fidelity_bonus_credited` | `userId, userName?, keysGranted, yearExchangesCount?, year, expiresAt?` |
+
+### Encuestas (vivla-tools internal)
+
+| event_type | Payload |
+|---|---|
+| `survey.completed` | `responseId, surveyId, surveyType, userId, userName?, userEmail?, userPhone?, propertyId?, propertyName?, bookingId?, npsScore?, comment?, lowestNormalized?, surveyLabel?, breakdownText?, commentDisplay?, scores?` |
+
+<Note>
+`survey.completed` **absorbe** `survey.nps_high` y `survey.nps_low`: el flow ramifica por `lowestNormalized` (la nota más baja normalizada a `/10`), no por `npsScore`. Cada tipo de encuesta puntúa en su propia escala (stay/home-review en 1–5, arrival-review swipe sin nota), así que el emisor normaliza cada respuesta a `/10` y expone `lowestNormalized` como disparador. La rama baja (`lowestNormalized < 8`) dispara la alerta Slack a CX con el desglose pre-renderizado (`breakdownText`) + comentario con guard (`commentDisplay`). `npsScore`/`comment` se mantienen opcionales por compatibilidad. No emitas los `nps_*` por separado.
+</Note>
+
+### Tickets (vivla-tools internal)
+
+Emitidos **in-process** desde el módulo de tickets (mutaciones del dashboard + webhook de Zendesk) por `TicketEventsEmitterService`, con el mismo patrón best-effort que `survey.completed`: si el emit falla nunca rompe ni ralentiza la mutación del ticket. `creatorId`, `assigneeId` y `actorId` son `users.id` (UUID) de personal interno, directamente direccionables por los canales `tools_inbox`/`email` del engine sin mapeo. `actorId` es quién hizo el cambio (`null` = cambio originado en Zendesk sin usuario interno mapeable) y permite a los flows suprimir auto-notificaciones y deduplicar `creator == assignee`.
+
+| event_type | Payload |
+|---|---|
+| `ticket.created` | `ticketId, creatorId?, assigneeId?, title?, actorId?, propertyName?, destination?` |
+| `ticket.updated` | `ticketId, field, previousValue?, newValue?, creatorId?, assigneeId?, title?, actorId?, propertyName?, destination?` |
+| `ticket.assigned` | `ticketId, assigneeId, creatorId?, title?, actorId?, propertyName?, destination?` |
+| `ticket.comment_added` | `ticketId, commentId?, creatorId?, assigneeId?, title?, actorId?, propertyName?, destination?` |
+
+<Note>
+`ticket.updated` lleva `field` como **discriminador** (`status` \| `priority` \| `assignee` \| `title` \| `resolution_team` \| …) para ramificar el flow. `ticket.assigned` solo se emite cuando el nuevo asignado resuelve a un `users.id`; una desasignación (o un asignado sin usuario) degrada a un `ticket.updated` con `field: assignee`. La idempotencia usa `ticket.created:<ticketId>` y `ticket.comment_added:<commentId>` para colapsar el emit de Tools con el eco del webhook de Zendesk.
+</Note>
+
+### Oportunidades (Windmill cron)
+
+| event_type | Payload |
+|---|---|
+| `booking.stays_available_reminder` | `userId, userName?, propertyId, propertyName, remainingStays` |
+
+### Lifecycle de usuario (Windmill cron)
+
+| event_type | Payload |
+|---|---|
+| `user.inactive` | `userId, userEmail, userName?, userLang?, keysCount, propertyName, daysSinceLastKeyUse` |
+
+### Eventos derivados (Windmill cron — reemplazan delays del builder)
+
+| event_type | Payload | Cuándo se emite |
+|---|---|---|
+| `booking.pre_stay_30d_due` | `bookingId, ownerId, ownerEmail?, ownerName?, ownerLang?, propertyId?, propertyName?, propertyLocation?, startDate?, endDate?` | Daily 09:00 — bookings con `startDate = today + 30d` |
+| `booking.pre_stay_7d_due` | `bookingId, ownerId, ownerEmail?, ownerName?, ownerLang?, propertyId?, propertyName?, propertyLocation?, startDate?, endDate?` | **Stand-by** — reactivar cuando esté el chat owner-CX en la app |
+| `booking.pre_stay_3d_due` | `bookingId, ownerId, ownerEmail?, ownerName?, ownerLang?, propertyId?, propertyName?, propertyLocation?, startDate?, endDate?` | Daily 09:00 — bookings con `startDate = today + 3d` |
+| `booking.arrival_review_due` | `bookingId, ownerId, ownerName?, propertyName?` | Daily 10:30 — bookings con `startDate = today - 1d` sin respuesta a `arrival_review` |
+| `booking.stay_review_due` | `bookingId, ownerId, ownerName?, propertyName?` | Daily 10:00 — bookings con check-out de HOY sin respuesta a `stay_review` |
+| `survey.reminder_3d_due` | `surveyId, surveyType, userId, userName?, propertyId?, propertyName?, bookingId?, surveyUrl?` | Daily 10:15 — surveys lanzados hace 3 días sin completar. F032 ramifica por `surveyType` a deep links nativos (`bookingId` en stay/arrival-review, `propertyId=hid` en arrival-review) |
+
+### Eventos descartados (no emitir)
+
+Tras la revisión con CX (jun 2026) estos tipos **no se implementan**. No están en el registro Zod, así que el ingest los rechaza con `400 event_type_unknown`. No los emitas:
+
+| event_type | Motivo |
+|---|---|
+| `booking.listed_for_exchange` | El intercambio va por saldo de llaves de forma automática; los eventos `keys.*` ya cubren los momentos que importan al owner. |
+| `booking.exchange_requested` | Igual: con intercambio automático por llaves no hay "solicitud" formal que notificar. |
+| `booking.exchange_matched` | Feedback negativo sobre matches sugeridos; no proactivar hasta repensar el algoritmo. |
+| `booking.dates_changed` | Sin utilidad operativa; los cambios de fecha los comunica el operador directamente. |
+| `booking.rent_rejected` | Muchos envían solicitudes solo para descubrir precios; notificar cada rechazo sería ruido constante. |
+| `booking.rent_opportunity` | No se emite; sin flow asociado en este lanzamiento. |
+| `user.payment_not_setup` | Sin caso de uso claro para este lanzamiento; vendrá cuando producto defina el flujo de onboarding incompleto. |
+| `survey.nps_high` | Fusionado en `survey.completed` (branching por `lowestNormalized`). |
+| `survey.nps_low` | Fusionado en `survey.completed` (branching por `lowestNormalized` + alerta Slack a CX). |
+
+## Convenciones de naming
+
+- **`*Date`** (ej. `startDate`, `endDate`, `expiresAt`): ISO 8601 — bien `YYYY-MM-DD` (date) o `YYYY-MM-DDTHH:mm:ssZ` (datetime). Los schemas aceptan ambos.
+- **`*At`** (ej. `expiresAt`, `previousExpiresAt`): timestamp con time.
+- **Transiciones**: el field sin prefijo es el valor **actual / efectivo**; `previous*` / `new*` / `old*` describe la transición.
+
+## Listar tipos vía API
+
+```bash
+GET /api/public/events/registered-events
+
+→ {
+  "object": "list",
+  "data": ["user.welcomed", "booking.created", "booking.cancelled", ...]
+}
+```
+
+## Health check
+
+```bash
+GET /api/public/events/health
+
+→ {
+  "object": "health",
+  "stuck_events": 0,
+  "failed_events": 0
+}
+```
+
+`stuck_events` cuenta `domain_events.status = 'pending'` con `created_at < now() - 5 min` — si > 0, el cron de Windmill está caído o hay un bug en el procesamiento. Hay un cron `health_check` cada 5 min que dispara alerta a Slack si el contador no es 0.
+
+## Errores comunes
+
+- **`event_type_unknown`** → revisa la grafía exacta y la versión del catálogo. Lista actualizada vía `GET /public/events/registered-events`.
+- **`validation_error` con `param: aggregate_id`** → falta el field en el payload, o tiene tipo incorrecto.
+- **`429`** con `Retry-After: 12` → has superado 200 req/min. Encadena retries con jitter.
+- **`401 authentication_invalid`** → confirma que estás enviando el header `x-api-key` (no `Authorization: Bearer`) y que el valor es el de la env actual (`NOTIFICATIONS_API_KEY`).
+
+## Referencias
+
+- [Convenciones API](../api/conventions) — envelope, request_id, headers cross-cutting.
+- [Códigos de error](../api/errors) — catálogo completo.
+- [Idempotency](../api/idempotency) — header `Idempotency-Key`.
+- [Automaciones](./automations) — visión general del epic + builder.
+- **Backend handoff**: [`docs/internal/tools/notifications/implementation/epics/notification-automation-system/specs/backend-handoff.md`](https://github.com/vivla-tech/vivla-tools/blob/main/docs/internal/tools/notifications/implementation/epics/notification-automation-system/specs/backend-handoff.md)
+- **Catálogo en código** (Zod schemas, fuente de verdad): `apps/backend/src/notifications/engine/schemas/event-schemas.ts`

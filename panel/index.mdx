@@ -1,13 +1,90 @@
 ---
-title: "Panel CX"
-description: "Backoffice para agentes de atención al cliente"
+title: "Panel"
+description: "Backoffice web de VIVLA para que el equipo de CX gestione llaves, propiedades, reservas, usuarios y calendarios"
 ---
 
-# Panel CX
+# Panel
 
-Backoffice para agentes de CX (customer experience). Conectado a la API principal de Vivla.
+El **Panel** es el backoffice web de VIVLA. Lo usa el equipo de **CX** para operar el día a día. Desde aquí revisas y asignas llaves, mantienes la ficha de cada propiedad, creas y gestionas reservas, das de alta usuarios y ajustas los calendarios de las casas.
 
-## Repositorio
+Es una SPA en React que habla con `vivla-api`, la misma API que usa la app móvil. No tiene base de datos propia: todo lo que ves y editas en el panel vive en la API. La única pieza de servidor propia es una función de Vercel para los reportes de feedback.
 
 - **Repo:** [vivla-tech/vivla-panel](https://github.com/vivla-tech/vivla-panel)
-- **Conexiones:** Consume vivla-api
+- **Conexiones:** `vivla-api` (datos), Auth0 (login y permisos), Sentry (errores), PostHog (analytics), Slack (reportes)
+
+<Note>
+  Las reglas de negocio no viven en el panel: las impone `vivla-api`. Eso incluye qué reservas se permiten, cómo se ganan y gastan las llaves y cómo funcionan las temporadas. Están documentadas en [Operativa](/operativa) y [Vivla API](/backend). Esta sección explica qué hace cada pantalla y dónde está su código.
+</Note>
+
+## Módulos
+
+Cada módulo es una entrada del menú lateral. Solo ves las entradas para las que tienes permiso de lectura (ver [Permisos](/panel/platform/permissions)).
+
+| Módulo | Ruta | Permiso | Qué haces ahí |
+|--------|------|---------|---------------|
+| [**Sistema de llaves**](/panel/keys) | `/` | `read:exchanges` | Métricas, movimientos y valoración de llaves, y asignación manual |
+| [**Propiedades**](/panel/homes) | `/homes` | `read:homes` | Listado de casas, ficha completa, alta de casa (desactivada temporalmente) y documento de check-in |
+| [**Reservas**](/panel/bookings) | `/bookings` | `read:bookings` | Lista y calendario de reservas, detalle, alta y gestión de estancias y huéspedes |
+| [**Usuarios**](/panel/users) | `/users` | `read:users` | Propietarios y visitantes: alta, edición, fracciones y borrado |
+| [**Calendarios**](/panel/calendars) | `/calendars` | `read:calendar-manager` | Calendario de cada casa: slots y tipos |
+
+Además, desde la cabecera cualquier usuario del panel puede enviar un reporte de error o una sugerencia al equipo de producto (ver [Feedback](/panel/platform/feedback)).
+
+## Relación con el resto del ecosistema
+
+```
+┌──────────────────────┐        ┌──────────────────┐
+│   Panel (React SPA)  │───────▶│      Auth0       │  login con Google, tokens,
+│   Vercel             │◀───────│                  │  permisos en el JWT
+└──────┬────────┬──────┘        └──────────────────┘
+       │        │
+       │        │ /api/reports (función de Vercel)
+       │        └──────────────────────────▶ Slack (bot de reportes)
+       │
+       │ Bearer JWT
+       ▼
+┌──────────────────────┐
+│      vivla-api       │  reservas, llaves, casas,
+│   (/v2/admin/*)      │  usuarios, calendarios
+└──────────────────────┘
+
+Transversal: Sentry (errores y releases) · PostHog (eventos de uso)
+```
+
+- **Login**: entras con tu cuenta de Google de Vivla a través del Universal Login de Auth0. El SDK de Auth0 guarda y renueva los tokens. El access token lleva los permisos en el claim `permissions`.
+- **Datos**: todas las llamadas van a `vivla-api` con `Authorization: Bearer <token>`. Casi todas son endpoints de administración bajo `/v2/admin/*`.
+- **Casas compartidas**: las propiedades que creas o editas aquí son las mismas que consumen la app y Vivla Tools.
+
+## Stack
+
+| Capa | Tecnología |
+|------|------------|
+| UI | React 19, React Router 7, styled-components 6 |
+| Estado de servidor | TanStack Query 5 |
+| Estado de cliente | Zustand (sidebar) |
+| Formularios | React Hook Form + Zod |
+| Contratos con la API | Zod 4 (DTOs y mappers) |
+| HTTP | Axios (`src/lib/apiClient.ts`) |
+| Autenticación | Auth0 (`@auth0/auth0-react`) |
+| i18n | i18next (solo `es`) |
+| Componentes base | Radix UI, cmdk, react-day-picker, recharts, dnd-kit |
+| Build | Vite 7 + TypeScript 5.9, Yarn |
+| Hosting | Vercel (SPA + funciones en `api/`) |
+| Observabilidad | Sentry, PostHog |
+
+## Por dónde empezar
+
+<CardGroup cols={2}>
+  <Card title="Primer acceso" icon="key" href="/panel/account-setup">
+    Entra con tu cuenta de Google de Vivla y pide acceso la primera vez.
+  </Card>
+  <Card title="Inicio rápido" icon="rocket" href="/panel/quick-start">
+    Levanta el panel en local contra la API local o staging.
+  </Card>
+  <Card title="Arquitectura" icon="sitemap" href="/panel/architecture">
+    Cómo se organiza `src/` y qué convenciones sigue el código.
+  </Card>
+  <Card title="Permisos" icon="lock" href="/panel/platform/permissions">
+    Qué permiso necesitas para ver o editar cada módulo.
+  </Card>
+</CardGroup>

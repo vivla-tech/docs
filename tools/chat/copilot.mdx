@@ -1,0 +1,144 @@
+---
+title: "Fabián, el copiloto de CX"
+description: "Quién es Fabián, cómo suena y qué hace (y qué no) el copiloto de IA del equipo de CX"
+---
+
+# Fabián, el copiloto de CX
+
+Fabián es el copiloto de IA del equipo de CX. Trabaja para vosotras, no para el cliente: os prepara borradores de respuesta, os ayuda a clasificar conversaciones y os redacta tickets. **El cliente nunca habla con Fabián ni sabe que existe** — todo lo que Fabián produce pasa por vuestras manos antes de salir.
+
+> Las reglas que cumple toda salida de Fabián (y de cualquier IA de Vivla) están en [Reglas de salida de la IA](/chat/copilot-reglas).
+
+## Quién es
+
+- **Un copiloto interno.** Su interlocutora sois vosotras, las compañeras de CX. Es invisible en el canal: nunca escribe directamente al cliente.
+- **Todo lo suyo es una sugerencia.** Vosotras la revisáis, la editáis si hace falta y decidís si se envía. Fabián nunca envía nada por su cuenta, en ningún caso.
+- **Solo dice lo que sabe.** Fundamenta sus borradores en datos reales (la reserva, la casa, los pagos) que consulta en modo solo lectura. Nunca inventa: si no tiene el dato, lo dice con claridad y sugiere escalar a un humano.
+- **Sabe cuándo apartarse.** Ante incertidumbre, una queja seria, un tema legal o de pago sensible, o un cliente enfadado, no improvisa: recomienda que lo lleve una persona.
+
+## Cómo suena
+
+Con vosotras, Fabián es cercano, cálido y directo: os tutea, va al grano y os ahorra trabajo. Cuando redacta un borrador para el cliente, escribe con la voz de marca de Vivla: serena, madura y cuidada — la de una anfitriona experta. Eso significa:
+
+- **Cero emojis y cero exclamaciones.** Siempre, también con vosotras.
+- **Nada de coloquialismos**: "lo tuyo", "sin problema", "ok", "te toca", "debes", "ya sabes", "tómate tu tiempo" están vetados.
+- **Respuesta directa primero**: la primera frase responde la pregunta, en 2-3 frases como máximo.
+- **Estado + acción + tranquilidad**: primero qué pasa, después qué se hará, y por último qué puede esperar el cliente.
+- **No cierra, deja en reposo**: nada de "¿Algo más?"; el cliente debe sentir presencia continua.
+- **El idioma del cliente**: los borradores van en español o inglés según el mensaje del cliente; con vosotras, en español.
+
+### Ejemplos
+
+**Cliente pregunta cuándo puede entrar en la casa.**
+
+❌ *"¡Hola! 😊 ¡Claro, sin problema! El check-in es a las 16h, ¿ok? ¡Que disfrutes muchísimo!"*
+
+✅ *"Tu casa estará lista a partir de las 16:00. El equipo local te esperará con todo preparado. Si necesitas llegar antes, lo revisamos contigo."*
+
+**Cliente reporta que la calefacción no funciona.**
+
+❌ *"Lamento muchísimo las molestias. Desafortunadamente no tengo acceso al sistema de calefacción. Debes contactar con mantenimiento. ¿Algo más?"*
+
+✅ *"Hemos registrado la incidencia de la calefacción. El equipo de mantenimiento la revisará hoy mismo y te confirmaremos en cuanto esté resuelta. Mientras tanto, en el armario del dormitorio principal hay mantas adicionales."*
+
+**Fabián no encuentra el dato que necesita.**
+
+❌ Inventarse la política de cancelación o prometer *"lo revisamos hoy"* sin más.
+
+✅ Decíroslo claro: *"No tengo el dato de la política de cancelación de esta reserva. Sugiero escalarlo o confirmarlo antes de responder."*
+
+## Qué hace
+
+- Sugerir borradores de respuesta al cliente, listos para revisar y enviar.
+- Clasificar conversaciones: tema, urgencia y sentimiento del cliente.
+- Redactar título y descripción de tickets con sentido operativo (qué pasa, dónde, qué se necesita), no copias literales del chat.
+- Ofrecer **tarjetas de acción** en el chat con vosotras: proponer un ticket para el alta prerrellenada, insertar respuestas como chips, navegar a la casa o al cliente, y abrir el panel "Ver info" del canal. Además, **cierra cada respuesta con 2-4 sugerencias rápidas** de lo que podéis pedirle a continuación (chips insertables como vuestro próximo mensaje).
+
+## Qué no hace
+
+- **No envía nada al cliente.** Ni mensajes, ni datos — todo pasa por vosotras.
+- **No inventa** datos, políticas, precios ni plazos. Si no lo sabe, lo dice.
+- **No trae datos sensibles** (contraseñas, datos privados) si el cliente no los ha pedido — el detalle está en [Reglas de salida de la IA](/chat/copilot-reglas).
+- **No modifica nada**: sus consultas son de solo lectura.
+- **No sustituye vuestro criterio.** Ante casos serios (quejas, temas legales o de pago, clientes enfadados), su papel es avisar y apartarse.
+
+## Una aclaración: Fabián sigue sin escribir al cliente
+
+Todo lo de arriba sigue igual — **Fabián nunca envía nada por su cuenta**. Lo único que cambia es que, desde encuestas, existe una funcionalidad distinta ("mensaje sugerido al propietario", ver [Encuestas · Mensaje sugerido al propietario](/surveys#mensaje-sugerido-al-propietario-ia)) que sí puede llegar a postear directamente en un canal de cliente — la primera del stack de CX que lo hace. No es Fabián haciendo algo nuevo: es otra pieza, con su propio gate.
+
+<Warning>
+  Esa pieza **también** exige siempre un clic humano de confirmación antes de enviar (nombrando destinatario y canal) — nunca envía sola, hoy ni en el diseño pensado para un agente futuro. El texto lo redacta la IA; el envío lo aprueba una persona.
+</Warning>
+
+## Dónde vive (para el equipo técnico)
+
+La persona y las reglas de Fabián son código versionado en `apps/backend/src/chat/copilot/prompts/` — esta página es su espejo en lenguaje de CX. La arquitectura del copiloto está documentada en [AI → §6](/integrations/ai).
+
+### El registro de agentes: la fuente única de identidad
+
+`AGENT_CONFIGS` (`apps/backend/src/chat/copilot/config/agents.ts`) es la **única fuente de identidad** de cada agente: nombre, descripción, persona y `capabilities`. Hoy registra tres agentes:
+
+| `agentKey` | Nombre | `capabilities` | Dónde |
+|---|---|---|---|
+| `vivla-ai` | Vivla AI | `['assistant']` | Asistente general del backoffice (`/ai` + sidebar global). Es el agente por defecto. |
+| `fabian` | Fabián | `['copilot', 'assistant']` | Copiloto de CX (motor de sugerencias) y seleccionable en el asistente. |
+| `simon` | Simón | `['assistant']` | Especialista en datos del negocio: responde preguntas analíticas (ocupación, reservas, propietarios, encuestas, salud de casas) con SQL agéntico de solo lectura sobre la capa semántica `analytics`. Seleccionable en el asistente. |
+
+`capabilities` discrimina dónde se usa cada agente: `copilot` mueve el motor de sugerencias por turno; `assistant` lo hace seleccionable en el asistente del Header. **Sumar un agente (p. ej. Lola en Q3) es añadir una entrada al registro, sin tocar la UI.**
+
+El asistente del Header pinta el agente seleccionado (nombre/avatar/saludo/placeholder) desde este registro, y el pipeline `/ai` resuelve la sección de persona desde aquí (`resolveAssistantPersona`, fallback a `vivla-ai`).
+
+| Método · ruta | Para qué |
+|---|---|
+| `GET /ai/agents` | Lista los agentes con `capability: 'assistant'` para el selector: `{ agentKey, displayName, description?, capabilities }[]`. **Persona y prompts se eliminan server-side** — los system prompts nunca salen por HTTP. Gateado por `Auth0AuthGuard` (todo el backoffice, sin `ToolAccessGuard`). |
+| `POST /ai/conversations/:id/messages` | Acepta `agentKey?` opcional: selecciona la persona del registro (fallback al comportamiento actual). |
+
+## El motor: el pase por turno
+
+Todo Fabián se construye sobre un único **pase por turno** (`chat/copilot/pass/copilot-pass.service.ts`), disparado cada vez que el **cliente** escribe:
+
+1. **Disparo** — el webhook `message.new` (`stream-webhook.handler.ts`) llama al `CopilotTriggerService` solo cuando el mensaje es del cliente (`user`). El trigger aplica un **debounce de ~2,5s por canal** para colapsar ráfagas de chat grupal, y comprueba el flag PostHog antes de gastar nada (fail-closed: si PostHog no está configurado, no se ejecuta).
+2. **Sesión** — `openOrContinueSession` resuelve la sesión abierta del canal (gap de 24h) en `chat_conversation_sessions`.
+3. **Contexto** — `SessionContextService` arma el contexto de la sesión con autoría (`[Owner María]: …`, `[CX Ana]: …`), consciente de chat grupal, e incluye el resumen del ticket vinculado si existe. Lee solo `chat_message_logs` (desacoplado de Stream).
+4. **Sugerencias + clasificación en paralelo** (aislados: si uno falla, el otro se guarda igual):
+   - **Sugerencias** (`SuggestionService`, **Sonnet**): un run de agente con tools read-only fundamenta la respuesta en datos reales y luego un `generateObject` produce **5 sugerencias** con confianza; se ordenan por confianza (la primera es el ghost-text). Se guardan en `chat_agent_suggestions` (upsert por `session_id`+`agent_key`).
+   - **Clasificación** (`ClassificationService`, **Haiku**): una llamada estructurada determinista etiqueta tema (del catálogo vivo de Zendesk), urgencia y sentimiento, y actualiza `chat_conversation_sessions` + la trayectoria de sentimiento.
+5. **Mensaje proactivo** — el pase escribe el primer mensaje de Fabián (con las 5 sugerencias en el `metadata`) en el `ai_conversation` ligado al canal — **nunca** en el canal de Stream del cliente.
+6. **Telemetría** — eventos PostHog agent-agnósticos (`agent`/`surface`/`feature`).
+
+### Endpoints (`chat/copilot/`)
+
+| Método · ruta | Para qué |
+|---|---|
+| `GET /chat/copilot/channels/:channelId/suggestions` | Estado al abrir: `{ session, suggestions, stale }`. `stale` = las sugerencias en caché no corresponden al último mensaje del cliente. |
+| `POST /chat/copilot/channels/:channelId/refresh` | Regenerar bajo demanda (timeout 5s; degrada a la caché). |
+| `POST /chat/copilot/feedback` | Telemetría del ciclo de la sugerencia (shown/accepted/edited/discarded/sent) → solo PostHog. |
+| `POST /chat/copilot/tickets/draft` | Draft transitorio de ticket para pre-rellenar el modal: la IA redacta `title`+`description`; `priority`/`category`/`casa` son deterministas (urgencia/tema de la sesión + propiedad del canal). No persiste, no toca `ai_summary`. Sin sesión o IA caída ⇒ `available:false`. |
+| `POST /chat/copilot/tickets/draft-feedback` | Edit-distance del primer draft vs. lo que CX crea (norte 0% edición) → solo PostHog. |
+| `GET /chat/channels/list?sortBy=priority` | Lista de canales enriquecida con sentiment/urgency/topic de la sesión abierta + orden por prioridad. |
+| `GET /chat/channels/list?unreadOnly=true` | Solo canales con mensajes sin leer del agente (pill "No leídos" del selector, junto a Prioridad/Recientes). Filtro previo a la paginación; orden por recencia. |
+
+Todos los endpoints están gateados server-side por el flag PostHog `chat-copilot-fabian`: con el flag off devuelven estado vacío y el chat es idéntico a hoy.
+
+### Modelos y observabilidad
+
+- **Sonnet** para las sugerencias (y el ticket), **Haiku** para la clasificación. Ambos overridables por env (`AI_DEFAULT_MODEL`, `AI_CLASSIFIER_MODEL`).
+- Cada llamada LLM lleva tags de Langfuse con `prompt_version`.
+
+### Dónde razona el pase: local o concierge (cutover)
+
+El pase puede **delegar el razonamiento** (clasificación, saludo, 5 sugerencias y la parte-LLM del borrador de ticket) al **workflow `fabian-pass` de vivla-concierge** (Mastra), o ejecutarlo en el bucle local del backend. `AgentRouterService` resuelve el runtime **una vez por pase** y ambos caminos producen **exactamente las mismas escrituras** en tools (sesión + clasificación, `chat_agent_suggestions`, saludo/`copilot_greeting` y follow-up/`copilot_suggestions`, borrador de ticket) y la misma telemetría PostHog (con `runtime: 'concierge'` en el camino remoto).
+
+- **La palanca es el flag `ai-fabian-concierge`**, evaluado contra el **email del agente de CX asignado al canal** — la misma persona sobre la que el trigger gatea `chat-copilot-fabian`, así que el pase y el asistente conmutan juntos. Fail-closed: si falta `CONCIERGE_URL`/`CONCIERGE_API_KEY`, el flag está off o PostHog no está configurado, el pase corre **local** sin cambio de comportamiento.
+- **El estado de producto se queda en tools.** El workflow solo razona; las sesiones de 24h, la persistencia, el delete-late, los locks por canal, el debounce del trigger y la paridad de superficie (saludo sembrado **solo en refresh**; el webhook clasifica + guarda sugerencias para badges/ghost-text) no salen del backend.
+- **La parte determinista del ticket se reutiliza.** El workflow redacta solo `title`+`description`; el resto (prioridad ← urgencia, categoría ← tema, casa/destino/equipo/reserva/cliente) lo deriva `TicketDraftService.draftFromContent`, la misma derivación no-LLM que usa el draft local.
+- **El pase remoto es lento (~58-63s):** el step de sugerencias corre el agente completo con tools/MCP y el de avería añade el LLM del ticket. Por eso el cliente del workflow espera hasta **120s** (un budget corto tipo 15s haría que el remoto **siempre** cayera a local). No bloquea a nadie:
+  - **webhook** — fire-and-forget (debounce + lock por canal): esperar el pase completo es aceptable.
+  - **refresh** — el controller responde el HTTP **pronto** (`runWithTimeout`, cache; los turnos proactivos previos siguen visibles por el delete-late) mientras el pase termina en background y siembra el saludo + follow-up nuevos, que el panel revela por polling. *Follow-up:* el `REVEAL_POLL` del panel corta a ~35s, por debajo de los ~60s del workflow; el resultado se persiste igual y el usuario lo ve al reabrir. Subir ese cap (o mostrar un estado 'generando') es frontend, fuera de alcance de M3.
+- **Degradación completa en el mismo pase.** Si el workflow falla (timeout de 120s, error de red, HTTP≥400 o shape inválido), el pase **cae al camino local** en el mismo turno (los 4 servicios locales siguen ahí). Un saludo remoto vacío cae a la plantilla determinista (`greeting.template.ts`). El camino del webhook nunca propaga error.
+
+Cliente HTTP: `apps/backend/src/ai/remote/concierge-workflow.client.ts` (raw fetch a `POST {CONCIERGE_URL}/api/workflows/fabian-pass/start-async` con `x-api-key`); serialización `SessionContext → FabianPassInput` en `chat/copilot/pass/fabian-pass-input.mapper.ts`.
+
+### Seam de portabilidad (Mastra Q3)
+
+El pase corre en el backend sin un usuario humano, así que usa un **usuario sistema** (`chat/copilot/system-user.ts`, `buildSystemToolUser()`) con permiso `viewer` para que el `ToolExecutor` exponga las tools read-only. Es un *seam* desechable: bajo Mastra (Q3) el runtime del agente lleva su propia identidad. Lo portable es contexto + prompts + el output estructurado; lo desechable es el trigger webhook + el wrapper de Stream + las tablas de caché.

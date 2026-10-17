@@ -1,0 +1,103 @@
+---
+title: "Dar de alta un propietario o visitante"
+description: "Paso a paso para crear un propietario o visitante de VIVLA desde el panel y qué pasa después"
+---
+
+# Dar de alta un propietario o visitante
+
+Esta guía explica cómo crear en el panel un usuario de VIVLA: un propietario con casas o un visitante sin ellas. El usuario podrá entrar después en la app.
+
+<Note>
+  Esta guía no da acceso al panel. Las cuentas del equipo interno van por Auth0: ver [Primer acceso](/panel/account-setup).
+</Note>
+
+## Antes de empezar
+
+- Necesitas el permiso `edit:users`. Si no ves el botón **Añadir usuario** en **Usuarios**, no lo tienes. Ver [Permisos](/panel/platform/permissions).
+- Ten a mano el nombre, el email y el teléfono del usuario. Los tres son obligatorios.
+- Si es propietario, ten claras sus casas y cuántas fracciones tiene en cada una.
+
+<Tip>
+  Comprueba antes que el usuario no existe. En **Usuarios**, busca su nombre o email en **Todos los usuarios**. vivla-api rechaza un email ya registrado.
+</Tip>
+
+## Pasos
+
+<Steps>
+  <Step title="Abre el formulario">
+    Entra en **Usuarios** desde la barra lateral y pulsa **Añadir usuario**. Llegas a `/users/create`.
+  </Step>
+  <Step title="Rellena la información">
+    En **Información**, completa **Nombre del usuario**, **Dirección email** y **Nº teléfono**. **Apellido/s (opcional)** y la foto (**Subir imagen (Opcional)**, PNG o JPG de hasta 10 MB) son opcionales.
+  </Step>
+  <Step title="Añade sus casas">
+    En **Casas**, elige cada casa en **Añadir casa…**. Ajusta sus fracciones con **−** y **+**. Si te equivocas de casa, pulsa el icono de papelera (**Retirar casa**).
+
+    Si es un visitante, deja esta sección vacía.
+  </Step>
+  <Step title="Revisa el email">
+    Comprueba que el email es correcto. Después no se puede cambiar desde el panel.
+  </Step>
+  <Step title="Guarda">
+    Pulsa **Añadir usuario**. Si todo va bien, verás **Usuario creado correctamente** y el panel abrirá su ficha.
+  </Step>
+  <Step title="Comprueba la ficha">
+    En la ficha, revisa que **Propiedades** muestra sus casas con las fracciones correctas.
+  </Step>
+</Steps>
+
+## Qué pasa después
+
+Al guardar, vivla-api hace esto:
+
+1. Registra al usuario en la autenticación de la app (Firebase Auth), con una contraseña generada.
+2. Le envía un email de verificación.
+3. Da de alta sus fracciones en segundo plano.
+4. Le envía un email de bienvenida con sus datos de acceso a la app, con copia al buzón de CX.
+
+El panel nunca te muestra la contraseña. Si el usuario no recibe los emails, que revise la carpeta de **spam**.
+
+Si le asignaste casas, aparece en la pestaña **Propietarios**. Si no, en **Visitantes**.
+
+<Warning>
+  Las fracciones se crean en segundo plano. Si ese paso falla, el usuario se crea igual pero sin casas, y el panel no muestra error. Si en **Propiedades** falta alguna casa, pulsa **Editar** y añádela.
+</Warning>
+
+## Si algo falla
+
+<AccordionGroup>
+  <Accordion title="El formulario no me deja guardar">
+    Revisa los mensajes bajo cada campo:
+
+    - **El nombre es obligatorio**
+    - **El email no es válido** o **El email es obligatorio**
+    - **El teléfono es obligatorio**
+    - **Las fracciones son obligatorias**
+    - **Esta casa ya está en la lista**: has añadido la misma casa dos veces.
+
+    El selector de fracciones tiene un tope por casa. Al llegar, el formulario te avisa.
+  </Accordion>
+  <Accordion title="Sale un error al guardar">
+    El aviso muestra el mensaje de vivla-api. Por ejemplo, sale error si ya existe un usuario con ese email. En ese caso, búscalo en **Todos los usuarios** y edítalo en lugar de crear otro.
+  </Accordion>
+  <Accordion title="Me he equivocado de email">
+    El panel no permite cambiarlo. En **Editar usuario**, el campo **Dirección email** sale deshabilitado.
+  </Accordion>
+</AccordionGroup>
+
+## Siguientes pasos
+
+<CardGroup cols={2}>
+  <Card title="Usuarios" href="/panel/users">
+    Ficha, edición, bloqueo de calendario y borrado.
+  </Card>
+  <Card title="Crear una reserva" href="/panel/bookings/create-booking">
+    Haz la primera reserva del usuario.
+  </Card>
+  <Card title="Asignar llaves" href="/panel/keys/assign-keys">
+    Dale llaves de intercambio.
+  </Card>
+  <Card title="Operativa" href="/operativa">
+    Reglas de reserva, intercambio y alquiler.
+  </Card>
+</CardGroup>

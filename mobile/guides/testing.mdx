@@ -1,0 +1,152 @@
+---
+title: 'Testing'
+description: 'Configuración de tests y convenciones'
+---
+
+# Testing
+
+Configuración y convenciones de testing para la aplicación.
+
+## Stack
+
+| Herramienta                   | Propósito                              |
+| ----------------------------- | -------------------------------------- |
+| Jest                          | Framework de testing                   |
+| jest-expo                     | Preset para proyectos Expo             |
+| @testing-library/react-native | Utilidades para testing de componentes |
+
+## Configuración
+
+**Archivo:** `jest.config.js`
+
+| Parámetro        | Valor                             |
+| ---------------- | --------------------------------- |
+| Preset           | `jest-expo`                       |
+| Test environment | `node`                            |
+| Transform        | `babel-jest` para TypeScript      |
+| Mock de SVGs     | Tratados como imágenes            |
+| Coverage         | `src/**` excluyendo tests y mocks |
+
+## Ubicación de archivos de test
+
+<Tabs>
+  <Tab title="Directorio raíz">``` tests/ ├── unit/ ├── integration/ └── __mocks__/ ```</Tab>
+  <Tab title="Colocados con el código">
+    ``` src/modules/booking/ ├── components/ │ ├── BookingCard.tsx │ └── __tests__/ │ └──
+    BookingCard.test.tsx └── hooks/ ├── useBooking.ts └── __tests__/ └── useBooking.test.ts ```
+  </Tab>
+</Tabs>
+
+### Patrones reconocidos
+
+| Patrón       | Ejemplo                |
+| ------------ | ---------------------- |
+| `*.test.ts`  | `utils.test.ts`        |
+| `*.test.tsx` | `BookingCard.test.tsx` |
+| `*.spec.ts`  | `apiClient.spec.ts`    |
+| `*.spec.tsx` | `Header.spec.tsx`      |
+
+## Scripts
+
+| Script                  | Descripción                                       |
+| ----------------------- | ------------------------------------------------- |
+| `npm test`              | Ejecuta lint check + jest con `--passWithNoTests` |
+| `npm run test:watch`    | Jest en modo watch (re-ejecuta al guardar)        |
+| `npm run test:coverage` | Jest con reporte de coverage                      |
+| `npm run validate`      | Lint + format + tests (validación completa)       |
+
+## Pre-commit hooks
+
+El proyecto usa **Husky** para ejecutar validaciones automáticas antes de cada commit.
+
+<CardGroup cols={2}>
+  <Card title="Husky" icon="shield">
+    Ejecuta `lint-staged` en el hook `pre-commit`. Esto asegura que todo código commiteado pase las
+    validaciones.
+  </Card>
+  <Card title="lint-staged" icon="code">
+    Aplica **ESLint --fix** y **Prettier** automáticamente a los archivos staged (TS, JS, JSON, MD).
+  </Card>
+</CardGroup>
+
+### Pipeline de pre-commit
+
+```
+git commit
+  → Husky pre-commit hook
+    → lint-staged
+      → ESLint --fix (archivos TS/JS)
+      → Prettier (archivos TS/JS/JSON/MD)
+```
+
+## Exclusión del bundle de producción
+
+Metro está configurado para excluir archivos de test del bundle final.
+
+Los siguientes patrones se excluyen en `metro.config.ts`:
+
+| Patrón       | Descripción          |
+| ------------ | -------------------- |
+| `__tests__/` | Directorios de tests |
+| `*.test.*`   | Archivos de test     |
+| `*.spec.*`   | Archivos de spec     |
+| `mocks/`     | Directorios de mocks |
+
+<Note>
+  Los archivos de test y mocks se excluyen automáticamente del bundle de producción a través de
+  metro.config.ts. No es necesario configurar nada adicional.
+</Note>
+
+### Verificación de exclusiones
+
+```bash
+npm run verify:build-exclusions
+```
+
+Este script valida que los archivos de test no se incluyan en el build de producción. Es útil ejecutarlo antes de generar un release para confirmar que el bundle no contiene código de testing.
+
+<Warning>
+  Si creas archivos de test con patrones no convencionales (por ejemplo, `myTest.ts` sin el sufijo
+  `.test` o `.spec`), no serán excluidos automáticamente del bundle. Usa siempre los patrones
+  estándar.
+</Warning>
+
+## Convenciones
+
+<Tabs>
+  <Tab title="Nombrado">
+    - Archivos de test llevan el mismo nombre que el archivo que testean + `.test` o `.spec`
+    - Ejemplo: `BookingCard.tsx` → `BookingCard.test.tsx`
+    - Mocks en `__mocks__/` dentro del directorio correspondiente
+  </Tab>
+  <Tab title="Estructura">
+    ```typescript
+    describe('BookingCard', () => {
+      // Setup común
+      beforeEach(() => { /* ... */ });
+
+      describe('cuando la reserva está activa', () => {
+        it('muestra el badge de estado', () => {
+          // Arrange, Act, Assert
+        });
+      });
+    });
+    ```
+
+  </Tab>
+  <Tab title="Testing Library">
+    ```tsx
+    import { render, screen, fireEvent } from '@testing-library/react-native';
+
+    it('llama onPress al tocar el botón', () => {
+      const onPress = jest.fn();
+      render(<Button title="Reservar" onPress={onPress} />);
+
+      fireEvent.press(screen.getByText('Reservar'));
+
+      expect(onPress).toHaveBeenCalledTimes(1);
+    });
+    ```
+
+  </Tab>
+</Tabs>

@@ -1,0 +1,85 @@
+---
+title: "Crear una reserva"
+description: "Paso a paso para registrar una reserva desde el panel y qué comprobar después"
+---
+
+# Crear una reserva
+
+Esta guía te lleva por el wizard de **Crear reserva**. Sirve para los cuatro tipos: disfrute, alquiler, intercambio y Thirdhome. El detalle técnico de cada paso está en [Alta de reserva](/panel/bookings/create).
+
+## Antes de empezar
+
+- **Permiso**: necesitas `edit:bookings`. Si no ves el botón **Crear reserva** en **Reservas**, pídelo. Ver [Permisos](/panel/platform/permissions).
+- **Calendario**: la casa debe tener un calendario con slots. Si no, el paso de fechas mostrará **Calendario no disponible**. Se configura en el [Calendar Manager](/panel/calendars).
+- **Reglas**: el panel valida el formulario, pero la API decide si la reserva cabe. Repasa [El ciclo de reserva](/operativa/reservas) y, si aplica, [Reservas de última hora](/operativa/reservas-ultima-hora), [Alquiler](/operativa/alquiler) o [Llaves e intercambio](/operativa/intercambio-keys).
+
+## Pasos
+
+<Steps>
+  <Step title="Abre el wizard">
+    Entra en **Reservas** y pulsa **Crear reserva** en la cabecera.
+  </Step>
+  <Step title="Elige el tipo">
+    Pulsa **Disfrute**, **Alquiler**, **Intercambio** o **Thirdhome**. El wizard pasa solo al siguiente paso. El tipo decide qué pasos verás después.
+  </Step>
+  <Step title="Indica si es de última hora (solo disfrute)">
+    Elige **Reserva normal** o **Última hora**. Si eliges **Última hora**, tendrás que indicar un propietario en el paso siguiente.
+  </Step>
+  <Step title="Elige la casa">
+    Busca la casa por nombre y pulsa su tarjeta.
+  </Step>
+  <Step title="Elige el propietario">
+    Pulsa el propietario al que se imputa la reserva. Si no eliges a nadie, la reserva queda como **Bloqueo a nombre de VIVLA**. En disfrute de última hora el propietario es obligatorio.
+  </Step>
+  <Step title="Selecciona las fechas">
+    Pulsa el día de entrada y después el de salida. Revisa **Resumen de la operación**. Si elegiste propietario, mira también **Reservas disponibles del propietario**.
+  </Step>
+  <Step title="Añade a las personas">
+    Depende del tipo:
+
+    - **Disfrute**: asistentes adicionales (opcional). El propietario ya cuenta como anfitrión.
+    - **Alquiler**: asistentes (opcional). Marca uno como **Principal**.
+    - **Intercambio**: propietario receptor (opcional). Comprueba que su saldo sale como **Suficientes**.
+    - **Thirdhome**: nombre y email del asistente de Thirdhome (opcional).
+
+    Usa **Usuarios Vivla** para buscar a alguien registrado o **Añadir externo** para alguien que no lo está.
+  </Step>
+  <Step title="Registra la oferta (solo alquiler con asistentes)">
+    Elige **Cerrado** si el precio ya está acordado o **Abierto** si la oferta está pendiente. Escribe el **Precio total de la reserva**.
+  </Step>
+  <Step title="Ajusta los detalles de la estancia">
+    Revisa días y horas de entrada y salida. Indica **Adultos**, **Niños** y **Mascotas**. Añade **Notas de la estancia** si hace falta. En alquiler, intercambio y Thirdhome, este paso solo aparece si añadiste a alguien en el paso de personas.
+  </Step>
+  <Step title="Añade notas de la reserva">
+    Opcional. Deja contexto útil para el equipo, por ejemplo quién pidió la reserva y por qué canal.
+  </Step>
+  <Step title="Revisa y confirma">
+    En **Revisa todo antes de confirmar**, usa **Editar** en cualquier bloque para corregir. Mira la tarjeta **Impacto de la operación**. Pulsa **Crear reserva**. Al confirmar se envía un correo a las personas implicadas.
+  </Step>
+</Steps>
+
+<Warning>
+  Si cambias de tipo a mitad del wizard, el formulario conserva lo que ya elegiste. Revisa el resumen con calma antes de confirmar, sobre todo el propietario y si la reserva sale como última hora.
+</Warning>
+
+## Qué comprobar después
+
+Si todo va bien, sale **¡Reserva creada con éxito!** y se abre la hoja de detalle de la nueva reserva. Comprueba:
+
+- **Tipo de reserva**: es el que querías. Si es de última hora, lleva el sufijo **Última hora**.
+- **Fechas de la reserva** y **Estado de la reserva**: coinciden con lo que registraste.
+- **Propietario**: es el correcto. Si lo dejaste vacío, es un bloqueo a nombre de VIVLA.
+- **Detalles de la estancia**: si añadiste personas, están en **Asistentes** y el principal lleva la etiqueta **Principal**. Revisa también fechas, horas y **Viajeros**.
+- **Calendario**: si la reserva tiene propietario, en la vista **Calendario** de **Reservas** su slot muestra el propietario y el tipo.
+
+Para añadir huéspedes, cambiar fechas o cancelar, sigue [Gestión de una reserva](/panel/bookings/manage).
+
+## Si algo falla
+
+| Qué ves | Por qué | Qué hacer |
+|---------|---------|-----------|
+| **Siguiente** está desactivado | Falta un dato obligatorio del paso | Revisa los mensajes en rojo del paso |
+| No puedes pulsar un día del calendario | Es un día pasado, el slot está ocupado o no disponible, o superas 2 slots | Elige otras fechas. Solo un bloqueo de VIVLA en disfrute admite más de 2 slots |
+| **Calendario no disponible** | La casa no tiene calendario configurado | Pide que lo configuren en el [Calendar Manager](/panel/calendars) |
+| Saldo **Insuficientes** en intercambio | El receptor no tiene llaves para esos slots | Elige otro receptor o deja el campo vacío |
+| Aviso de error al pulsar **Crear reserva** | La API ha rechazado la reserva | Lee el mensaje del aviso. Sigues en el wizard con los datos rellenos |

@@ -1,0 +1,137 @@
+---
+title: "Preferences & unsubscribe"
+description: "Tabla de suppressions consultada por el motor antes de cada send + endpoint público RFC 8058 para Gmail/Yahoo one-click."
+---
+
+# Preferences & unsubscribe
+
+Sistema de opt-outs por destinatario. Cubre los canales de notificación (push, email, in_app, tools_inbox, chat) con tres niveles de granularidad (`all`, `category`, `template`). El `AutomationEngineService` consulta esta tabla antes de cada send y skipea con log si el destinatario tiene un opt-out aplicable.
+
+Hace falta para tres cosas:
+
+1. **Compliance** (CAN-SPAM, GDPR): el destinatario debe poder darse de baja con un click.
+2. **Deliverability** (RFC 8058): Gmail/Yahoo exigen `List-Unsubscribe` + `One-Click` para bulk desde feb-2024.
+3. **Higiene** (UX): si alguien dice que no quiere ver un tipo de notificación, no se la mandamos aunque la flow esté activa.
+
+## Tabla `notification_suppressions`
+
+Migración 089. Schema:
+
+| Columna | Tipo | Notas |
+|---------|------|-------|
+| `id` | uuid PK | gen_random_uuid |
+| `user_id` | uuid FK users | ON DELETE CASCADE |
+| `channel` | text | `email` \| `push` \| `in_app` \| `tools_inbox` \| `chat` |
+| `scope` | text | `all` \| `category` \| `template` |
+| `scope_value` | text NULL | category name o template_id |
+| `source` | text | `list_unsubscribe` \| `preferences_ui` \| `manual_admin` (default `list_unsubscribe`) |
+| `reason` | text NULL | libre, opcional |
+| `created_at` | timestamptz | default `now()` |
+
+Índice único en `(user_id, channel, scope, scope_value)` para que reclicks del mismo enlace de unsubscribe no exploten en 23505 — el motor hace upsert.
+
+## Resolución de matches
+
+`PreferencesService.findActiveSuppression(userId, channel, category, templateId)` lookup, en orden:
+
+1. **`scope='all'`** con el canal → bloquea todo. Devuelve esa row.
+2. **`scope='category'`** + `scope_value === category` → bloquea. Devuelve esa row.
+3. **`scope='template'`** + `scope_value === templateId` → bloquea. Devuelve esa row.
+4. Sin match → null. Send procede.
+
+`isSuppressed()` es boolean conveniente sobre lo anterior.
+
+## Endpoints
+
+### Públicos (token-auth)
+
+`POST /v1/notifications/unsubscribe?token=...`
+- Endpoint RFC 8058 One-Click. Mail clients (Gmail, Yahoo) postean aquí con body vacío cuando el usuario clickea Unsubscribe en su inbox.
+- Verifica HMAC del token y upserta el row.
+- Response 200 idempotente. 400 si token inválido (mail clients reintentan en el siguiente click).
+
+`GET /v1/notifications/unsubscribe?token=...`
+- Landing page HTML. Confirma la cancelación + lista las suppressions actuales del usuario + footer con dirección Vivla.
+- También aplica el opt-out (algunos MUAs hacen GET primero como "preview" — tratamos el intent como legítimo, idempotente).
+
+### Autenticados (Auth0)
+
+`GET /v1/notifications/preferences/me`
+- Lista las suppressions del usuario logueado.
+- Envelope v1: `{ object: 'list', data: [...], has_more: false, next_cursor: null }`.
+
+`DELETE /v1/notifications/preferences/me/:id`
+- Re-subscribe: borra una suppression del usuario logueado.
+- 204 No Content.
+
+## Tokens HMAC
+
+Algoritmo: HMAC-SHA256. Formato: `base64url(payload).base64url(signature)`. Sin dep externa.
+
+Payload abreviado para mantener URLs cortas:
+
+```
+uid → user_id (uuid)
+ch  → channel
+sc  → scope
+sv  → scope_value (opcional)
+exp → unix epoch seconds (default 30 días)
+```
+
+Secrets:
+
+- `UNSUBSCRIBE_TOKEN_SECRET` — secret de firma (requerido para emitir headers).
+- `UNSUBSCRIBE_TOKEN_SECRETS_ACCEPTED` — CSV de secrets antiguos que aún verifican durante una rotación. Soporta cero-downtime: emite con el nuevo, acepta con todos.
+
+## Operaciones comunes
+
+**Auditar suppressions de un usuario:**
+
+```sql
+SELECT s.channel, s.scope, s.scope_value, s.source, s.created_at
+FROM notification_suppressions s
+JOIN users u ON u.id = s.user_id
+WHERE u.email = 'foo@example.com'
+ORDER BY s.created_at DESC;
+```
+
+**Re-suscribir manualmente:**
+
+```sql
+DELETE FROM notification_suppressions
+WHERE user_id = (SELECT id FROM users WHERE email = 'foo@example.com')
+  AND channel = 'email'
+  AND scope = 'category'
+  AND scope_value = 'promotional';
+```
+
+**Insertar suppression manual (admin / support):**
+
+```sql
+INSERT INTO notification_suppressions (user_id, channel, scope, scope_value, source, reason)
+VALUES (
+  (SELECT id FROM users WHERE email = 'foo@example.com'),
+  'email',
+  'category',
+  'promotional',
+  'manual_admin',
+  'User requested via support ticket #1234'
+);
+```
+
+## Decisiones de diseño
+
+### Por qué HMAC y no rows en DB
+Cada send firma un token con (uid, ch, sc, sv, exp). Verificar requiere recomputar el HMAC — sin DB lookup. Escalamos sin tocar DB en el path crítico de la inbox.
+
+### Por qué scope=category default
+Cuando alguien clickea unsubscribe en un email de "recordatorio de check-in", su intent es "no más recordatorios", no "no más este template específico". Granularidad por template está soportada (insert manual con `scope='template'`), pero no es el default.
+
+### Por qué redundar GET y POST con el mismo efecto
+RFC 8058 pide POST One-Click. Pero algunos clients (Apple Mail) hacen GET primero a la URL como "preview". Si solo respondieran 200 sin aplicar el opt-out, el usuario vería la landing y luego tendría que clickear otra vez para que se aplique. Aplicarlo en GET también es UX más limpio y cero costo (idempotente).
+
+## Ver también
+
+- [Email](./email) — cómo el motor inyecta los headers `List-Unsubscribe` + `List-Unsubscribe-Post`.
+- [Automations](./automations) — sección "Suppressions (opt-out)" con el flujo del motor.
+- [`apps/backend/src/notifications/preferences/`](https://github.com/vivla-tech/vivla-tools/blob/main/apps/backend/src/notifications/preferences/) — código del módulo.

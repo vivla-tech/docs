@@ -1,0 +1,73 @@
+---
+title: "Cloudinary"
+description: "Servicio de upload, almacenamiento y transformacion de imagenes"
+---
+
+# Cloudinary
+
+Modulo de gestion de imagenes que proporciona upload, almacenamiento, transformacion y eliminacion via Cloudinary SDK.
+
+## Configuracion
+
+| Variable de entorno | Requerida | Descripcion |
+|---------------------|-----------|-------------|
+| `CLOUDINARY_CLOUD_NAME` | Si | Nombre del cloud |
+| `CLOUDINARY_API_KEY` | Si | API key |
+| `CLOUDINARY_API_SECRET` | Si | API secret |
+
+## Servicio
+
+`CloudinaryService` expone los siguientes metodos:
+
+### Upload
+
+| Metodo | Descripcion |
+|--------|-------------|
+| `uploadImage(file, folder, publicId?)` | Upload de buffer a carpeta especifica |
+| `uploadFromUrl(url, folder, publicId?)` | Download + upload desde URL (crop 200x200 para avatars) |
+| `generateSignedUploadUrl(folder)` | URL firmada para upload desde cliente |
+
+### Consulta
+
+| Metodo | Descripcion |
+|--------|-------------|
+| `getOptimizedUrl(publicId, transformation?)` | URL optimizada con transformaciones |
+| `getImageDetails(publicId)` | Metadata de imagen |
+
+### Eliminacion
+
+| Metodo | Descripcion |
+|--------|-------------|
+| `deleteImage(publicId)` | Eliminar imagen |
+| `deleteMultipleImages(publicIds)` | Eliminacion en lote |
+
+## Uso por otros modulos
+
+| Modulo | Uso | Endpoint |
+|--------|-----|----------|
+| Surveys | Upload de imagenes para definiciones de encuestas | `POST /surveys/upload-image` (max 5MB) |
+| Permissions | Upload de imagenes para modulos y grupos | Via `FileInterceptor` |
+| Chat Users | Avatars de usuario (crop 200x200, face-focused) | Sync desde Firebase |
+
+## Transformaciones
+
+Las transformaciones se aplican via URL parameters:
+
+```typescript
+interface CloudinaryTransformation {
+  width?: number
+  height?: number
+  crop?: string       // 'fill', 'fit', 'thumb', etc.
+  gravity?: string    // 'face', 'center', 'auto'
+  quality?: string    // 'auto', number
+  format?: string     // 'webp', 'jpg', 'png'
+}
+```
+
+## Estructura de modulo
+
+```
+apps/backend/src/shared/cloudinary/
+  cloudinary.module.ts    # Standard module (not global)
+  cloudinary.service.ts   # Cloudinary SDK wrapper
+```
