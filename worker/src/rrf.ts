@@ -6,15 +6,13 @@
 // eval set — see _projects/wiki-self-hosted/parity/mcp-parity.md.
 export function reciprocalRankFusion(rankings: string[][], weights: number[], k: number): Map<string, number> {
   const scores = new Map<string, number>();
-  for (let r = 0; r < rankings.length; r++) {
-    const ranking = rankings[r];
+  rankings.forEach((ranking, r) => {
     const weight = weights[r] ?? 1;
-    for (let i = 0; i < ranking.length; i++) {
-      const key = ranking[i];
+    ranking.forEach((key, i) => {
       const contribution = weight / (k + i + 1); // i is 0-indexed; rank is i+1
       scores.set(key, (scores.get(key) ?? 0) + contribution);
-    }
-  }
+    });
+  });
   return scores;
 }
 

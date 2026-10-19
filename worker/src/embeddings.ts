@@ -36,7 +36,7 @@ function getDequantized(): Map<string, Float32Array> {
     const map = new Map<string, Float32Array>();
     for (const [key, q] of Object.entries(embeddingsFile.chunks)) {
       const arr = new Float32Array(q.values.length);
-      for (let i = 0; i < q.values.length; i++) arr[i] = q.values[i] * q.scale;
+      for (let i = 0; i < q.values.length; i++) arr[i] = (q.values[i] ?? 0) * q.scale;
       map.set(key, arr);
     }
     dequantized = map;
@@ -46,7 +46,7 @@ function getDequantized(): Map<string, Float32Array> {
 
 function dot(a: Float32Array, b: Float32Array): number {
   let sum = 0;
-  for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
+  for (let i = 0; i < a.length; i++) sum += (a[i] ?? 0) * (b[i] ?? 0);
   return sum;
 }
 

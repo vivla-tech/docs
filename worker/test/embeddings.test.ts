@@ -10,10 +10,13 @@ describe("embeddingsFile", () => {
 
 describe("rankByCosineSimilarity", () => {
   it("ranks a chunk's own (dequantized) vector as its own best match", () => {
-    const [someKey, someVector] = Object.entries(embeddingsFile.chunks)[0];
-    const dequantized = someVector.values.map((v) => v * someVector.scale);
+    const entry = Object.entries(embeddingsFile.chunks)[0];
+    if (!entry) throw new Error("embeddings.json has no chunks");
+    const [someKey, someVector] = entry;
+    const dequantized = someVector.values.map((v: number) => v * someVector.scale);
     const ranked = rankByCosineSimilarity(dequantized);
-    expect(ranked[0].key).toBe(someKey);
-    expect(ranked[0].score).toBeGreaterThan(0.99); // quantization rounding, not exactly 1
+    const top = ranked[0];
+    expect(top?.key).toBe(someKey);
+    expect(top?.score).toBeGreaterThan(0.99); // quantization rounding, not exactly 1
   });
 });
