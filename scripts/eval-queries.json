@@ -287,5 +287,291 @@
       "tools/api/errors"
     ],
     "confidence": "high"
+  },
+  {
+    "q": "¿Dónde se guarda el histórico de movimientos de llaves de un propietario?",
+    "pages": [
+      "panel/keys/index"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "Si quiero regalarle una semana a otro copropietario, ¿cómo se hace la transferencia de llaves?",
+    "pages": [
+      "operativa/intercambio-keys",
+      "backend/keys-exchange"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué pasa si intento reservar una semana que ya está bloqueada por otra reserva?",
+    "pages": [
+      "backend/reglas-de-reserva"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Cuánto cuesta en llaves alquilar una semana en vez de usarla?",
+    "pages": [
+      "operativa/alquiler",
+      "backend/alquiler"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Hay un límite de reservas de última hora que puedo hacer al mes?",
+    "pages": [
+      "operativa/reservas-ultima-hora"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué fechas de alta y baja guarda el sistema por temporada de cada casa?",
+    "pages": [
+      "backend/calendario-temporadas"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué tareas programadas corren cada noche para sincronizar reservas y calendario?",
+    "pages": [
+      "backend/crons-y-configuracion"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "q": "¿Qué endpoints de reservas, llaves y calendario expone vivla-api, no Tools?",
+    "pages": [
+      "backend/bookings-endpoints"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué rama hay que mergear para que vivla-api llegue a producción?",
+    "pages": [
+      "environments",
+      "backend/index"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "q": "¿Qué campos trae un ticket cuando se sincroniza desde Zendesk?",
+    "pages": [
+      "tools/tickets/fields",
+      "tools/tickets/sync"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Se puede ver el historial de cambios de un ticket, quién lo tocó y cuándo?",
+    "pages": [
+      "tools/tickets/activity"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "Cuando se borra un ticket por error, ¿se elimina de verdad o queda oculto?",
+    "pages": [
+      "tools/tickets/activity"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Cómo se calculan los SLA y el aging en el dashboard de tickets?",
+    "pages": [
+      "tools/tickets/dashboard"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué builder tiene el sistema de notificaciones para crear automatizaciones nuevas?",
+    "pages": [
+      "tools/notifications/automations",
+      "tools/notifications/index"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Cómo puede un propietario darse de baja de los emails de Vivla sin perderse los avisos importantes?",
+    "pages": [
+      "tools/notifications/preferences"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué endpoint hay que llamar para registrar un evento nuevo que dispare notificaciones?",
+    "pages": [
+      "tools/notifications/events-api"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué plantillas de email usa Vivla y con qué proveedor se envían?",
+    "pages": [
+      "tools/notifications/email"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué roles y permisos existen en Tools y qué desbloquea cada uno?",
+    "pages": [
+      "tools/platform/permissions"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Dónde se gestionan los equipos, las personas y los dispositivos de las casas?",
+    "pages": [
+      "tools/platform/teams"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué es el registro de Product Requests y el changelog dentro de Tools?",
+    "pages": [
+      "tools/platform/releases"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Cómo funcionan los reports declarativos de analítica en Tools?",
+    "pages": [
+      "tools/platform/reports"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué puede hacer un admin desde el panel de administración de Tools?",
+    "pages": [
+      "tools/platform/admin"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué pujas o solicitudes del mercado secundario llegan desde el portal público?",
+    "pages": [
+      "tools/secondary-market/index"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué es el portal de acceso para huéspedes y personal de limpieza, y quién puede entrar?",
+    "pages": [
+      "tools/community/portal"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Cómo sube un proveedor una factura y qué hace el OCR con ella?",
+    "pages": [
+      "tools/community/invoices"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué guías de mantenimiento existen y cómo se crean en la herramienta interna?",
+    "pages": [
+      "tools/maintenance/index"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Cómo se integra la app móvil con Stream Chat para la mensajería en tiempo real?",
+    "pages": [
+      "mobile/integrations/chat",
+      "mobile/modules/chat"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "q": "¿Qué eventos de analítica manda la app móvil a PostHog?",
+    "pages": [
+      "mobile/integrations/analytics"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Cómo se capturan los errores de la app móvil con Sentry?",
+    "pages": [
+      "mobile/integrations/error-tracking"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué hooks compartidos hay disponibles en toda la app móvil?",
+    "pages": [
+      "mobile/shared/hooks"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Cómo gestiona la app el estado global, con Zustand o algo más clásico?",
+    "pages": [
+      "mobile/architecture/state-management"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Cómo funciona el login y la gestión de tokens JWT en la app móvil?",
+    "pages": [
+      "mobile/architecture/authentication"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué perfiles de build hay configurados con EAS Build?",
+    "pages": [
+      "mobile/guides/builds"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Cómo se gestionan los deep links y los universal links en la app?",
+    "pages": [
+      "mobile/guides/deep-linking"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué conexión DNS y CDN usa Vivla, y qué hace Cloudflare Access ahí?",
+    "pages": [
+      "infra/cloudflare"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Dónde están desplegados los servicios de Vivla en Railway?",
+    "pages": [
+      "infra/railway"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué formato siguen las notificaciones de deploy que llegan a Slack?",
+    "pages": [
+      "infra/slack-notifications"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Cómo se instala el MCP de la wiki en Claude o en Cursor?",
+    "pages": [
+      "mcp-setup"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué Row Level Security tiene la base de datos de Supabase en Tools?",
+    "pages": [
+      "tools/api/database"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Cómo pagina la API las listas largas, con offset o con cursores?",
+    "pages": [
+      "tools/api/pagination"
+    ],
+    "confidence": "high"
   }
 ]

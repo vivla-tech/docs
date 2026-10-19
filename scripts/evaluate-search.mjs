@@ -1,20 +1,25 @@
 #!/usr/bin/env node
-// Evaluates v1 (BM25-only) and v2 (hybrid: BM25 + dense embeddings fused
-// with RRF) against the live Mintlify MCP server, on the 40-query eval set
-// (scripts/eval-queries.json). Reports two things for each: overlap with
-// Mintlify's own top-5 pages (the original parity metric), and
-// ground-truth hit@3/hit@5 (does the human-expected page show up in the
-// top-3/top-5 *distinct* pages). Tunes the RRF k and per-ranker weights on
-// half the eval set (train), reports the other half (test) plus all 40, to
-// avoid reporting an overfit number.
+// Evaluates v1 (BM25-only), v2 (hybrid: BM25 + dense embeddings fused with
+// RRF) and v3 (v2's candidates reranked with a Workers AI cross-encoder,
+// aggregated to page level) against the live Mintlify MCP server, on the
+// 80-query eval set (scripts/eval-queries.json). Reports two things for
+// each: overlap with Mintlify's own top-5 pages (the original parity
+// metric), and ground-truth hit@3/hit@5 (does the human-expected page show
+// up in the top-3/top-5 *distinct* pages). Tunes the RRF k and per-ranker
+// weights on half the eval set (train), reports the other half (test) plus
+// all 80, to avoid reporting an overfit number. v3 reranks v2's
+// already-tuned candidates — it does not retune the retrieval stage, so
+// reranker scores (precomputed on the Mac, see scripts/run-reranker.mjs)
+// can be passed in without creating a train/test leak.
 //
 // Needs @orama/orama (same BM25 config as worker/src/search.ts) and network
 // access to the live Mintlify server — run on the VPS, not the Mac. Query
-// embeddings are precomputed on the Mac (scripts/embed-queries.mjs, needs
-// `cf` auth) and passed in; this script makes no Cloudflare API calls of
-// its own.
+// embeddings and reranker scores are precomputed on the Mac
+// (scripts/embed-queries.mjs, scripts/export-rerank-candidates.mjs,
+// scripts/run-reranker.mjs — all need `cf` auth) and passed in; this
+// script makes no Cloudflare API calls of its own.
 //
-// Usage: node evaluate-search.mjs --corpus <corpus.json> --embeddings <embeddings.json> --query-embeddings <query-embeddings.json> --service-token-file <path> --out <report.json>
+// Usage: node evaluate-search.mjs --corpus <corpus.json> --embeddings <embeddings.json> --query-embeddings <query-embeddings.json> --rerank-scores <rerank-scores.json> --service-token-file <path> --out <report.json>
 import { readFileSync, writeFileSync } from "node:fs";
 import { Buffer } from "node:buffer";
 import { create, insertMultiple, search as oramaSearch } from "@orama/orama";
@@ -148,6 +153,28 @@ function overlapTop5(pagesA, pagesB) {
   return topA.filter((p) => setB.has(p)).length;
 }
 
+// --- v3: rerank v2's top-N candidates, aggregate to page level --------
+// Best (highest-scoring) chunk per page wins that page's rank; pages with
+// no reranker score (fell outside the exported top-N candidates) sort
+// last, in their v2 fused order, so v3 never returns *fewer* pages than v2.
+function rerankBlend(scoreMap, scoresByKey, docsByKey, topN, alpha) {
+  const ranked = rankFromScores(scoreMap);
+  const top = ranked.slice(0, topN);
+  const rest = ranked.slice(topN);
+  if (top.length === 0) return keysToPages(ranked, docsByKey);
+  const rrfVals = top.map((k) => scoreMap.get(k));
+  const rrfMin = Math.min(...rrfVals);
+  const rrfMax = Math.max(...rrfVals);
+  const rrfNorm = (k) => (rrfMax > rrfMin ? (scoreMap.get(k) - rrfMin) / (rrfMax - rrfMin) : 1);
+  const rerankVals = top.map((k) => scoresByKey[k] ?? 0);
+  const rrMin = Math.min(...rerankVals);
+  const rrMax = Math.max(...rerankVals);
+  const rrNorm = (k) => (rrMax > rrMin ? ((scoresByKey[k] ?? 0) - rrMin) / (rrMax - rrMin) : 0);
+  const blended = top.map((k) => ({ key: k, score: alpha * rrNorm(k) + (1 - alpha) * rrfNorm(k) }));
+  blended.sort((a, b) => b.score - a.score);
+  return keysToPages([...blended.map((b) => b.key), ...rest], docsByKey);
+}
+
 // --- Mintlify fetch ---------------------------------------------------
 async function mintlifySearch(query, clientId, clientSecret) {
   const res = await fetch("https://wiki.vivla.com/mcp", {
@@ -177,6 +204,7 @@ async function main() {
   const corpus = JSON.parse(readFileSync(args.corpus, "utf8"));
   const embeddingsFile = JSON.parse(readFileSync(args.embeddings, "utf8"));
   const queryEmbeddings = JSON.parse(readFileSync(args["query-embeddings"], "utf8"));
+  const rerankFile = args["rerank-scores"] ? JSON.parse(readFileSync(args["rerank-scores"], "utf8")) : null;
   const tokenFileText = readFileSync(args["service-token-file"], "utf8");
   const clientId = tokenFileText.match(/^CF_ACCESS_CLIENT_ID=(.+)$/m)?.[1]?.trim();
   const clientSecret = tokenFileText.match(/^CF_ACCESS_CLIENT_SECRET=(.+)$/m)?.[1]?.trim();
@@ -186,17 +214,20 @@ async function main() {
   console.log(`Dequantizing ${embeddingsFile.chunkCount} dense vectors...`);
   const denseVectors = buildDenseIndex(embeddingsFile);
 
+  const rerankByQuery = new Map();
+  if (rerankFile) for (const r of rerankFile.queries) rerankByQuery.set(r.q, r.scores);
+
   const entries = queryEmbeddings.queries; // [{ q, pages, confidence, vector }]
   console.log(`Fetching Mintlify's live results for ${entries.length} queries...`);
   const perQuery = [];
   for (const entry of entries) {
     const [bm25Keys, mintlifyPages] = await Promise.all([bm25Ranking(db, entry.q), mintlifySearch(entry.q, clientId, clientSecret)]);
     const denseKeys = denseRanking(denseVectors, entry.vector);
-    perQuery.push({ q: entry.q, groundTruth: entry.pages, confidence: entry.confidence, bm25Keys, denseKeys, mintlifyPages });
+    perQuery.push({ q: entry.q, groundTruth: entry.pages, confidence: entry.confidence, bm25Keys, denseKeys, mintlifyPages, rerankScores: rerankByQuery.get(entry.q) ?? null });
   }
 
-  // Deterministic train/test split: alternate so both halves mix the three
-  // query sources (lola-T8, lola-T1/T2, hand-written) evenly.
+  // Deterministic train/test split: alternate so both halves mix the query
+  // sources evenly (original 40 + the 40 added for v3's larger eval set).
   const train = perQuery.filter((_, i) => i % 2 === 0);
   const test = perQuery.filter((_, i) => i % 2 === 1);
 
@@ -225,18 +256,51 @@ async function main() {
   }
   console.log("Best on train:", best);
 
+  // v3's new tunable knobs: how many of v2's fused candidates to send
+  // through the reranker, and how much weight to give the reranker score
+  // vs. the original RRF score when blending (alpha=1 pure reranker,
+  // alpha=0 pure v2 order — a legitimate outcome of this search is "0",
+  // i.e. reranking doesn't help on this corpus). Tuned on train only, same
+  // discipline as the RRF params above.
+  const topNGrid = [5, 10, 15, 20];
+  const alphaGrid = [0, 0.25, 0.5, 0.75, 1.0];
+  let bestRerank = null;
+  for (const topN of topNGrid) {
+    for (const alpha of alphaGrid) {
+      let hit5 = 0;
+      let hit3 = 0;
+      let scored = 0;
+      for (const pq of train) {
+        if (!pq.rerankScores) continue;
+        scored++;
+        const scoreMap = reciprocalRankFusion([pq.bm25Keys, pq.denseKeys], [best.bm25Weight, best.denseWeight], best.k);
+        const pages = rerankBlend(scoreMap, pq.rerankScores, docsByKey, topN, alpha);
+        if (hitAtK(pages, pq.groundTruth, 5)) hit5++;
+        if (hitAtK(pages, pq.groundTruth, 3)) hit3++;
+      }
+      const score = scored ? (hit5 / scored) * 2 + hit3 / scored : 0;
+      if (!bestRerank || score > bestRerank.score) bestRerank = { topN, alpha, score, hit5: hit5 / (scored || 1), hit3: hit3 / (scored || 1) };
+    }
+  }
+  const bestTopN = bestRerank;
+  console.log("Best rerank top-N/alpha on train:", bestRerank);
+
   function reportFor(set, label) {
     const v1 = { hit5: 0, hit3: 0 };
     const v2 = { hit5: 0, hit3: 0 };
+    const v3 = { hit5: 0, hit3: 0 };
     const mintlify = { hit5: 0, hit3: 0 };
     let overlapV1 = 0;
     let overlapV2 = 0;
+    let overlapV3 = 0;
+    let v3n = 0;
     const rows = [];
     for (const pq of set) {
       const v1Pages = keysToPages(pq.bm25Keys, docsByKey);
-      const fused = rankFromScores(reciprocalRankFusion([pq.bm25Keys, pq.denseKeys], [best.bm25Weight, best.denseWeight], best.k));
-      const v2Pages = keysToPages(fused, docsByKey);
+      const scoreMap = reciprocalRankFusion([pq.bm25Keys, pq.denseKeys], [best.bm25Weight, best.denseWeight], best.k);
+      const v2Pages = keysToPages(rankFromScores(scoreMap), docsByKey);
       const mPages = pq.mintlifyPages;
+      const v3Pages = pq.rerankScores ? rerankBlend(scoreMap, pq.rerankScores, docsByKey, bestTopN.topN, bestTopN.alpha) : null;
 
       if (hitAtK(v1Pages, pq.groundTruth, 5)) v1.hit5++;
       if (hitAtK(v1Pages, pq.groundTruth, 3)) v1.hit3++;
@@ -246,6 +310,12 @@ async function main() {
       if (hitAtK(mPages, pq.groundTruth, 3)) mintlify.hit3++;
       overlapV1 += overlapTop5(v1Pages, mPages);
       overlapV2 += overlapTop5(v2Pages, mPages);
+      if (v3Pages) {
+        v3n++;
+        if (hitAtK(v3Pages, pq.groundTruth, 5)) v3.hit5++;
+        if (hitAtK(v3Pages, pq.groundTruth, 3)) v3.hit3++;
+        overlapV3 += overlapTop5(v3Pages, mPages);
+      }
 
       rows.push({
         q: pq.q,
@@ -254,6 +324,7 @@ async function main() {
         mintlifyTop5: dedupe(mPages).slice(0, 5),
         v1Top5: dedupe(v1Pages).slice(0, 5),
         v2Top5: dedupe(v2Pages).slice(0, 5),
+        v3Top5: v3Pages ? dedupe(v3Pages).slice(0, 5) : null,
       });
     }
     const n = set.length;
@@ -262,9 +333,11 @@ async function main() {
       n,
       v1: { hit5: v1.hit5 / n, hit3: v1.hit3 / n },
       v2: { hit5: v2.hit5 / n, hit3: v2.hit3 / n },
+      v3: v3n ? { hit5: v3.hit5 / v3n, hit3: v3.hit3 / v3n, n: v3n } : null,
       mintlify: { hit5: mintlify.hit5 / n, hit3: mintlify.hit3 / n },
       overlapV1Avg: overlapV1 / n,
       overlapV2Avg: overlapV2 / n,
+      overlapV3Avg: v3n ? overlapV3 / v3n : null,
       rows,
     };
   }
@@ -272,19 +345,22 @@ async function main() {
   const report = {
     generatedAt: new Date().toISOString(),
     rrfParams: { k: best.k, bm25Weight: best.bm25Weight, denseWeight: best.denseWeight },
+    rerankTopN: rerankFile ? bestTopN.topN : null,
+    rerankAlpha: rerankFile ? bestTopN.alpha : null,
     train: reportFor(train, "train"),
     test: reportFor(test, "test"),
-    all: reportFor(perQuery, "all-40"),
+    all: reportFor(perQuery, "all-80"),
   };
 
   writeFileSync(args.out, JSON.stringify(report, null, 2), "utf8");
   console.log(`\nWrote ${args.out}`);
   for (const split of [report.train, report.test, report.all]) {
+    const v3line = split.v3 ? `  v3=${(split.v3.hit3 * 100).toFixed(0)}%/${(split.v3.hit5 * 100).toFixed(0)}% (n=${split.v3.n})` : "";
     console.log(
       `\n[${split.label}] n=${split.n}\n` +
-        `  hit@3  mintlify=${(split.mintlify.hit3 * 100).toFixed(0)}%  v1=${(split.v1.hit3 * 100).toFixed(0)}%  v2=${(split.v2.hit3 * 100).toFixed(0)}%\n` +
-        `  hit@5  mintlify=${(split.mintlify.hit5 * 100).toFixed(0)}%  v1=${(split.v1.hit5 * 100).toFixed(0)}%  v2=${(split.v2.hit5 * 100).toFixed(0)}%\n` +
-        `  overlap-with-mintlify (avg/5)  v1=${split.overlapV1Avg.toFixed(2)}  v2=${split.overlapV2Avg.toFixed(2)}`,
+        `  hit@3  mintlify=${(split.mintlify.hit3 * 100).toFixed(0)}%  v1=${(split.v1.hit3 * 100).toFixed(0)}%  v2=${(split.v2.hit3 * 100).toFixed(0)}%${split.v3 ? `  v3=${(split.v3.hit3 * 100).toFixed(0)}%` : ""}\n` +
+        `  hit@5  mintlify=${(split.mintlify.hit5 * 100).toFixed(0)}%  v1=${(split.v1.hit5 * 100).toFixed(0)}%  v2=${(split.v2.hit5 * 100).toFixed(0)}%${split.v3 ? `  v3=${(split.v3.hit5 * 100).toFixed(0)}%` : ""}\n` +
+        `  overlap-with-mintlify (avg/5)  v1=${split.overlapV1Avg.toFixed(2)}  v2=${split.overlapV2Avg.toFixed(2)}${split.overlapV3Avg != null ? `  v3=${split.overlapV3Avg.toFixed(2)}` : ""}`,
     );
   }
 }
