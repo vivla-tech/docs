@@ -5,15 +5,10 @@
 import { env } from "cloudflare:workers";
 import type { Env } from "../src/env";
 
-const MIGRATION_SQL = `
-CREATE TABLE IF NOT EXISTS wiki_feedback (
-  id TEXT PRIMARY KEY,
-  created_at TEXT NOT NULL,
-  path TEXT NOT NULL,
-  feedback TEXT NOT NULL,
-  client_name TEXT,
-  access_identity TEXT
-);
-`;
+// D1's exec() naively splits its input on newlines, which breaks a
+// multi-line CREATE TABLE — use prepare().run() (a real SQL statement)
+// instead, same as the application code does.
+const MIGRATION_SQL =
+  "CREATE TABLE IF NOT EXISTS wiki_feedback (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, path TEXT NOT NULL, feedback TEXT NOT NULL, client_name TEXT, access_identity TEXT)";
 
-await (env as unknown as Env).FEEDBACK.exec(MIGRATION_SQL);
+await (env as unknown as Env).FEEDBACK.prepare(MIGRATION_SQL).run();
