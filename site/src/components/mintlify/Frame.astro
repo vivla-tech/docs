@@ -1,0 +1,35 @@
+---
+// Mintlify <Frame> — a bordered container, usually around an image, with an
+// optional caption. Not used in the content today; wired up defensively,
+// see Info.astro.
+interface Props {
+  caption?: string;
+}
+
+const { caption } = Astro.props as Props;
+---
+
+<figure class="mintlify-frame not-content">
+  <div class="mintlify-frame-content"><slot /></div>
+  {caption && <figcaption>{caption}</figcaption>}
+</figure>
+
+<style>
+  .mintlify-frame {
+    margin: 1rem 0;
+    padding: 0.75rem;
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 0.75rem;
+    text-align: center;
+  }
+  .mintlify-frame-content :global(img) {
+    display: block;
+    margin: 0 auto;
+    border-radius: 0.5rem;
+  }
+  figcaption {
+    margin-top: 0.5rem;
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-3);
+  }
+</style>

@@ -1,0 +1,62 @@
+---
+// Mintlify <Steps>/<Step title>. Starlight's own <Steps> expects a plain
+// Markdown ordered list as its child, so it can't take <Step> components —
+// this is a small custom pair instead, styled to match.
+---
+
+<ol class="mintlify-steps not-content">
+  <slot />
+</ol>
+
+<style is:global>
+  .mintlify-steps {
+    margin: 1rem 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: mintlify-step;
+  }
+  .mintlify-step {
+    position: relative;
+    counter-increment: mintlify-step;
+    padding-inline-start: 2.75rem;
+    padding-bottom: 1.5rem;
+  }
+  .mintlify-step:last-child {
+    padding-bottom: 0;
+  }
+  .mintlify-step::before {
+    content: counter(mintlify-step);
+    position: absolute;
+    inset-inline-start: 0;
+    top: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.875rem;
+    height: 1.875rem;
+    border-radius: 50%;
+    background-color: var(--sl-color-bg-nav);
+    border: 1px solid var(--sl-color-hairline);
+    font-size: var(--sl-text-xs);
+    font-weight: 600;
+  }
+  .mintlify-step:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    inset-inline-start: 0.9375rem;
+    top: 1.875rem;
+    bottom: 0;
+    width: 1px;
+    background-color: var(--sl-color-hairline);
+  }
+  .mintlify-step-title {
+    margin: 0.1rem 0 0.5rem;
+    font-weight: 600;
+  }
+  .mintlify-step-content > :first-child {
+    margin-top: 0;
+  }
+  .mintlify-step-content > :last-child {
+    margin-bottom: 0;
+  }
+</style>

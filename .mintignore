@@ -5,3 +5,9 @@
 # Draft content
 drafts/
 *.draft.mdx
+
+# Self-hosted wiki engine (Astro Starlight site + Cloudflare Worker + MCP).
+# Not wiki content — Mintlify must not try to build these as pages.
+# See _projects/wiki-self-hosted/PLAN.md.
+site/
+worker/

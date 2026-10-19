@@ -1,0 +1,13 @@
+---
+// See Steps.astro.
+interface Props {
+  title?: string;
+}
+
+const { title } = Astro.props as Props;
+---
+
+<li class="mintlify-step">
+  {title && <p class="mintlify-step-title">{title}</p>}
+  <div class="mintlify-step-content"><slot /></div>
+</li>
