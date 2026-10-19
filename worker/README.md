@@ -67,14 +67,43 @@ change — see the PLAN's task breakdown.)
 
 ```bash
 cd worker
-npm install
-npm run typecheck
-npm test
-npm run dev   # wrangler dev
+pnpm install
+pnpm run typecheck
+pnpm test
+pnpm run dev   # wrangler dev
 ```
 
-`npm test` needs `generated/corpus.json` to exist first (see above) — the
+Use `pnpm`, not `npm` — `npm install` hits a real npm 10 bug
+(`TypeError: Cannot read properties of null (reading 'edgesOut')` in
+arborist) on this exact dependency graph; `pnpm` installs cleanly.
+`pnpm test` needs `generated/corpus.json` to exist first (see above) — the
 unit tests exercise the real corpus content, not a synthetic fixture.
+
+### Testing against the real site
+
+`public-placeholder/` is enough for the unit tests, but to check the full
+request pipeline (redirects, asset serving, the Access JWT check) against
+the real Starlight build:
+
+```bash
+# 1. Build the site (feat/starlight-site; see its own site/README.md):
+cd site && pnpm install && VIVLA_DOCS_CONTENT_ROOT=/path/to/docs-branch-checkout pnpm run build
+
+# 2. Point this Worker's wrangler.jsonc assets.directory at that site/dist,
+#    and ACCESS_TEAM_DOMAIN at a local JWKS server serving a key you mint a
+#    matching Cf-Access-Jwt-Assertion token with (jose's generateKeyPair +
+#    SignJWT) — wrangler dev doesn't go through real Cloudflare Access, so
+#    there's no other way to pass the JWT check locally.
+# 3. `wrangler dev` and curl all canonical URLs + redirect sources.
+```
+
+Done this way against the real `site/dist` (PR #11, `feat/starlight-site`,
+built with `VIVLA_DOCS_CONTENT_ROOT` pointed at the aggregated `docs`
+branch): all 121 canonical URLs return 200, all 25 `_redirects` entries
+301 to the right target (confirming `src/redirects.ts` matches
+`site/dist/_redirects` byte for byte — see that file's comment), an
+anonymous request 403s, and `/mcp` answers `initialize` correctly through
+the full pipeline. See the PR description for the exact numbers.
 
 ## Configuration (`wrangler.jsonc`)
 

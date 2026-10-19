@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "version": "0.1.0",
+  "packageManager": "pnpm@9.15.0",
   "description": "Cloudflare Worker serving the self-hosted VIVLA Docs site (Workers Static Assets) and the /mcp endpoint behind Cloudflare Access",
   "scripts": {
     "dev": "wrangler dev",
