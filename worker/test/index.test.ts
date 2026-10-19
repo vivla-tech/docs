@@ -18,18 +18,22 @@ import { exports as workerExports } from "cloudflare:workers";
 const worker = workerExports as unknown as { default: Fetcher };
 
 describe("Worker fetch — no Access JWT", () => {
+  // example.com, not the real wiki.vivla.com: a real routable hostname here
+  // made two of these three calls hang until the 5s test timeout — likely
+  // the local test runtime trying (and failing slowly) to treat it as an
+  // outbound request rather than a worker-binding call tied to this module.
   it("403s a request for the site", async () => {
-    const res = await worker.default.fetch("https://wiki.vivla.com/");
+    const res = await worker.default.fetch("http://example.com/");
     expect(res.status).toBe(403);
   });
 
   it("403s a request for /mcp too — the JWT check runs before routing", async () => {
-    const res = await worker.default.fetch("https://wiki.vivla.com/mcp", { method: "POST", body: "{}" });
+    const res = await worker.default.fetch("http://example.com/mcp", { method: "POST", body: "{}" });
     expect(res.status).toBe(403);
   });
 
   it("403s even a request for a static asset", async () => {
-    const res = await worker.default.fetch("https://wiki.vivla.com/favicon.svg");
+    const res = await worker.default.fetch("http://example.com/favicon.svg");
     expect(res.status).toBe(403);
   });
 });
