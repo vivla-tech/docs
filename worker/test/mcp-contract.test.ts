@@ -71,7 +71,7 @@ describe("query_docs_filesystem_vivla_docs", () => {
     });
     expect(result.content).toHaveLength(1);
     const text = (result.content[0] as { text: string }).text;
-    expect(text).toMatch(/^exit: 2\n--- stdout ---\n\n--- stderr ---\nls: \/nope: No such file or directory\n$/);
+    expect(text).toBe("exit: 2\n--- stderr ---\nls: /nope: No such file or directory\n");
   });
 });
 

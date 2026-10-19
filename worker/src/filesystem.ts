@@ -129,7 +129,11 @@ export async function runFilesystemCommand(command: string): Promise<string> {
   }
 
   const stdout = stripVirtualFsPlumbing(command, result.stdout);
-  let text = `exit: ${result.exitCode}\n--- stdout ---\n${stdout}`;
+  // Confirmed against the live Mintlify server: the "--- stdout ---"
+  // section is omitted entirely when stdout is empty, not shown empty
+  // (e.g. `grep: /tools: Is a directory` has only an exit line + stderr).
+  let text = `exit: ${result.exitCode}`;
+  if (stdout) text += `\n--- stdout ---\n${stdout}`;
   if (result.stderr) text += `\n--- stderr ---\n${result.stderr}`;
 
   if (utf8ByteLength(text) > MAX_OUTPUT_BYTES) {

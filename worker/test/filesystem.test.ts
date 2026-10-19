@@ -30,9 +30,9 @@ describe("runFilesystemCommand", () => {
     expect(out).toContain("> Operativa actual del sistema de reservas de última hora");
   });
 
-  it("reports a missing path like Mintlify's captured sample", async () => {
+  it("reports a missing path like the live Mintlify server does — no empty stdout section", async () => {
     const out = await runFilesystemCommand("ls /nope");
-    expect(out).toBe("exit: 2\n--- stdout ---\n\n--- stderr ---\nls: /nope: No such file or directory\n");
+    expect(out).toBe("exit: 2\n--- stderr ---\nls: /nope: No such file or directory\n");
   });
 
   it("never persists a write across calls", async () => {
