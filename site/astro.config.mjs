@@ -2,7 +2,6 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import mermaid from 'astro-mermaid';
-import AutoImport from 'astro-auto-import';
 import icon from 'astro-icon';
 import starlightLinksValidator from 'starlight-links-validator';
 
@@ -16,34 +15,12 @@ export default defineConfig({
     // light/dark toggle, so no fixed theme needs to be chosen here.
     mermaid({ autoTheme: true }),
 
-    // Must come before `starlight()` so its auto-injected `@astrojs/mdx`
-    // integration sees the imports this adds to every .mdx file — see
-    // astro-auto-import's own README.
-    AutoImport({
-      imports: [
-        { './src/components/mintlify/Note.astro': [['default', 'Note']] },
-        { './src/components/mintlify/Tip.astro': [['default', 'Tip']] },
-        { './src/components/mintlify/Warning.astro': [['default', 'Warning']] },
-        { './src/components/mintlify/Info.astro': [['default', 'Info']] },
-        { './src/components/mintlify/Check.astro': [['default', 'Check']] },
-        { './src/components/mintlify/Danger.astro': [['default', 'Danger']] },
-        { './src/components/mintlify/Card.astro': [['default', 'Card']] },
-        { './src/components/mintlify/CardGroup.astro': [['default', 'CardGroup']] },
-        { './src/components/mintlify/Columns.astro': [['default', 'Columns']] },
-        { './src/components/mintlify/Tabs.astro': [['default', 'Tabs']] },
-        { './src/components/mintlify/Tab.astro': [['default', 'Tab']] },
-        { './src/components/mintlify/Steps.astro': [['default', 'Steps']] },
-        { './src/components/mintlify/Step.astro': [['default', 'Step']] },
-        { './src/components/mintlify/Accordion.astro': [['default', 'Accordion']] },
-        { './src/components/mintlify/AccordionGroup.astro': [['default', 'AccordionGroup']] },
-        { './src/components/mintlify/CodeGroup.astro': [['default', 'CodeGroup']] },
-        { './src/components/mintlify/Frame.astro': [['default', 'Frame']] },
-        // The <CodeGroup> -> <Tabs>/<TabItem> source transform emits
-        // Starlight's own TabItem directly (see scripts/lib/codegroup.mjs).
-        { '@astrojs/starlight/components': ['TabItem'] },
-      ],
-    }),
-
+    // The Mintlify component wrappers (Note, Card, ...) are made available
+    // without an import line in content the same way Mintlify itself needs
+    // none: scripts/lib/inject-imports.mjs prepends real `import` lines to
+    // every copied page. A Vite-transform-based auto-import integration was
+    // tried first but never ran for content-layer-loaded MDX — see that
+    // file's comment.
     icon(),
 
     starlight({

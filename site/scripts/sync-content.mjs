@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import matter from 'gray-matter';
 import { sanitizeMdx } from './lib/sanitize-mdx.mjs';
 import { transformCodeGroups } from './lib/codegroup.mjs';
+import { injectImports } from './lib/inject-imports.mjs';
 
 const SITE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CONTENT_ROOT = process.env.VIVLA_DOCS_CONTENT_ROOT
@@ -24,6 +25,7 @@ const CONTENT_OUT = path.join(SITE_ROOT, 'src/content/docs');
 const DATA_OUT = path.join(SITE_ROOT, 'src/data');
 const ASSETS_OUT = path.join(SITE_ROOT, 'src/assets');
 const PUBLIC_OUT = path.join(SITE_ROOT, 'public');
+const COMPONENTS_DIR = path.join(SITE_ROOT, 'src/components/mintlify');
 
 /** Mintlify page path -> Starlight slug: "tools/chat/index" -> "tools/chat",
  *  "index" -> "" (homepage). Matches how the docsLoader derives slugs from
@@ -89,8 +91,9 @@ function main() {
     totalCodeGroups += transformed.groups;
 
     const destPath = path.join(CONTENT_OUT, `${mintlifySlug}.mdx`);
+    const withImports = injectImports(transformed.output, destPath, COMPONENTS_DIR);
     fs.mkdirSync(path.dirname(destPath), { recursive: true });
-    fs.writeFileSync(destPath, transformed.output);
+    fs.writeFileSync(destPath, withImports);
   }
 
   const tabs = [];
