@@ -4,7 +4,11 @@
 //      Access itself is the primary gate in front of the hostname).
 //   2. /mcp -> the MCP server (search_vivla_docs, query_docs_filesystem_
 //      vivla_docs, submit_feedback — same names/schemas/output as Mintlify).
-//   3. everything else -> the static site (env.ASSETS), falling back to
+//   3. a known long-form path (e.g. /tools/index) -> 301 to its short
+//      Starlight slug (/tools), or a docs.json redirect — see
+//      src/redirects.ts for why this is done here rather than relying on
+//      Workers Static Assets' own _redirects handling.
+//   4. everything else -> the static site (env.ASSETS), falling back to
 //      corpus-rendered /<page>.md, /llms.txt, /llms-full.txt when the
 //      asset bundle doesn't have its own copy yet.
 import { createMcpHandler } from "@modelcontextprotocol/server";
@@ -12,6 +16,7 @@ import { accessDeniedResponse, verifyAccess } from "./access";
 import type { Env } from "./env";
 import { createVivlaDocsServer } from "./mcp";
 import { tryServeGeneratedPage } from "./pages";
+import { resolveRedirect } from "./redirects";
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -27,6 +32,13 @@ export default {
       // concurrent request on the same isolate.
       const handler = createMcpHandler(() => createVivlaDocsServer(env, identity));
       return handler.fetch(request);
+    }
+
+    const redirectTarget = resolveRedirect(url.pathname);
+    if (redirectTarget) {
+      const location = new URL(redirectTarget, url.origin);
+      location.search = url.search;
+      return Response.redirect(location.toString(), 301);
     }
 
     const assetResponse = await env.ASSETS.fetch(request);

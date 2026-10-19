@@ -25,6 +25,19 @@ that.
 - `src/pages.ts` — fallback rendering of `/<page>.md`, `/llms.txt`,
   `/llms-full.txt` from the corpus when the static site doesn't have its
   own copy (yet, or at all).
+- `src/redirects.ts` — 301s for the long Mintlify page path (`/tools/index`)
+  to its short Starlight slug (`/tools`), plus `docs.json`'s own
+  `redirects`. Workers Static Assets' own `_redirects` handling does not
+  apply here — see that file's comment — so this reimplements the exact
+  rule `site/scripts/sync-content.mjs` uses to write `site/dist/_redirects`
+  (confirmed against that script's source on `feat/starlight-site`), computed
+  independently in `scripts/build-corpus.mjs` from `docs.json` rather than by
+  reading that file. **Risk:** if that script's redirect rule ever changes,
+  this one needs updating too — there's no single source of truth. A
+  follow-up could have the Worker's build step read the real
+  `site/dist/_redirects` once the CI job order guarantees the site builds
+  first (see plan `PLAN.md` §4 step (b) before (c)); until then this is
+  validated against it by the URL crawl in the parity report.
 - `src/content.ts` — loads `generated/corpus.json` as a bundled JSON
   module.
 - `migrations/` — D1 schema for `wiki_feedback`.

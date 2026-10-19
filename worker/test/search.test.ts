@@ -14,15 +14,16 @@ describe("searchDocs", () => {
   });
 
   it("links to a bare page URL (no #anchor) for an intro chunk", async () => {
-    // operativa/reservas-ultima-hora.mdx opens with an H1 + blockquote before
-    // its first `## ` heading — that intro text is its own chunk, titled
-    // with the page's frontmatter title (not the in-body H1), no anchor.
-    // Query on its most distinctive phrase: "estado actual" alone is too
-    // common across the corpus to rank this one chunk into the top 10.
-    const results = await searchDocs("No propone cambios ni modificaciones de T&C", "https://wiki.vivla.com");
-    const introHit = results.find((r) => r.startsWith("Title: Reservas de última hora\n"));
+    // tools/chat/copilot.mdx opens with "# Fabián, el copiloto de CX" and a
+    // paragraph before its first `## ` heading — that intro text is its own
+    // chunk, titled with the page's frontmatter title, no anchor. Querying
+    // a rare proper noun (rather than ordinary Spanish words, which Orama's
+    // prefix matching ranks unreliably — see src/search.ts) reliably ranks
+    // this exact chunk first.
+    const results = await searchDocs("Fabián", "https://wiki.vivla.com");
+    const introHit = results.find((r) => r.startsWith("Title: Fabián, el copiloto de CX\n"));
     expect(introHit).toBeDefined();
-    expect(introHit).toContain("Link: https://wiki.vivla.com/operativa/reservas-ultima-hora\n");
+    expect(introHit).toContain("Link: https://wiki.vivla.com/tools/chat/copilot\n");
   });
 
   it("returns the recorded 'no results' sentence for a query that can't match", async () => {

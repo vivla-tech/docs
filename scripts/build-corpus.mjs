@@ -135,6 +135,36 @@ function flattenNav(docsJson) {
   return order;
 }
 
+// --- Site redirects (Mintlify's long-form page path -> Starlight's short
+// slug, plus docs.json's own `redirects` array). This mirrors
+// site/scripts/sync-content.mjs's toStarlightSlug()/toHref() exactly (that
+// script is what actually writes site/dist/_redirects — see worker/README.md
+// for why this is reimplemented here instead of read from that file) so the
+// Worker can 301 the long form the same way Starlight's sibling build does.
+function toStarlightSlug(mintlifySlug) {
+  if (mintlifySlug === "index") return "";
+  if (mintlifySlug.endsWith("/index")) return mintlifySlug.slice(0, -"/index".length);
+  return mintlifySlug;
+}
+
+function toHref(starlightSlug) {
+  return starlightSlug === "" ? "/" : `/${starlightSlug}`;
+}
+
+function buildRedirects(docsJson, nav) {
+  const redirects = new Map(); // from -> to (docs.json entries win over auto /index ones, same order as sync-content.mjs)
+  for (const entry of nav) {
+    const slug = toStarlightSlug(entry.page);
+    const href = toHref(slug);
+    const from = `/${entry.page}`;
+    if (from !== href) redirects.set(from, href);
+  }
+  for (const redirect of docsJson.redirects ?? []) {
+    redirects.set(redirect.source, redirect.destination);
+  }
+  return Object.fromEntries(redirects);
+}
+
 function buildPage(sourceDir, pagePath) {
   const file = join(sourceDir, `${pagePath}.mdx`);
   const raw = readFileSync(file, "utf8");
@@ -204,6 +234,7 @@ function main() {
 
   const llmsTxtTemplate = buildLlmsTxt(nav, pages, siteName, siteDescription);
   const llmsFullTxtTemplate = buildLlmsFullTxt(nav, pages);
+  const redirects = buildRedirects(docsJson, nav);
 
   const corpus = {
     generatedAt: new Date().toISOString(),
@@ -211,6 +242,7 @@ function main() {
     siteDescription,
     nav,
     pages,
+    redirects,
     llmsTxtTemplate,
     llmsFullTxtTemplate,
   };
@@ -230,7 +262,9 @@ function main() {
   }
 
   const chunkCount = Object.values(pages).reduce((n, p) => n + p.chunks.length, 0);
-  console.log(`Built corpus: ${Object.keys(pages).length} pages, ${chunkCount} chunks -> ${out}`);
+  console.log(
+    `Built corpus: ${Object.keys(pages).length} pages, ${chunkCount} chunks, ${Object.keys(redirects).length} redirects -> ${out}`,
+  );
   if (!existsSync(join(source, "docs.json"))) {
     console.error("  Warning: docs.json not found at source — did you pass --source?");
   }

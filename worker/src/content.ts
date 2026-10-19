@@ -35,6 +35,8 @@ export interface Corpus {
   siteDescription: string;
   nav: NavEntry[];
   pages: Record<string, Page>;
+  /** Long Mintlify page path -> short Starlight slug, plus docs.json's own redirects. Absolute paths, no query/hash. */
+  redirects: Record<string, string>;
   llmsTxtTemplate: string;
   llmsFullTxtTemplate: string;
 }

@@ -18,16 +18,19 @@ import { exports as workerExports } from "cloudflare:workers";
 const worker = workerExports as unknown as { default: Fetcher };
 
 describe("Worker fetch — no Access JWT", () => {
-  // example.com, not the real wiki.vivla.com: a real routable hostname here
-  // made two of these three calls hang until the 5s test timeout — likely
-  // the local test runtime trying (and failing slowly) to treat it as an
-  // outbound request rather than a worker-binding call tied to this module.
-  it("403s a request for the site", async () => {
+  // `exports.default.fetch()` is slow to warm up the first couple of times
+  // it's called in a fresh test file (several seconds) regardless of URL —
+  // a rough edge in this very new tooling (@cloudflare/vitest-plugin 1.4.x
+  // on Vitest 4), not something this Worker's code is doing. It resolves
+  // correctly once it does; the generous timeout is for that warm-up, not
+  // because the Worker itself is slow (confirmed separately via `wrangler
+  // dev` + curl in the parity report).
+  it("403s a request for the site", { timeout: 20_000 }, async () => {
     const res = await worker.default.fetch("http://example.com/");
     expect(res.status).toBe(403);
   });
 
-  it("403s a request for /mcp too — the JWT check runs before routing", async () => {
+  it("403s a request for /mcp too — the JWT check runs before routing", { timeout: 20_000 }, async () => {
     const res = await worker.default.fetch("http://example.com/mcp", { method: "POST", body: "{}" });
     expect(res.status).toBe(403);
   });
