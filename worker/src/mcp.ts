@@ -94,14 +94,20 @@ export function createVivlaDocsServer(env: Env, identity: AccessIdentity | null)
     },
   );
 
-  // Kept at its original URI (`mintlify://...`) on purpose: an unused
-  // rename is still a break for anything that reads it by a hardcoded URI
-  // instead of discovering it via resources/list. Rename in a follow-up,
-  // not as a side effect of this migration.
+  // Kept at its original URI and name (`mintlify://...`, "vivla") on
+  // purpose: an unused rename is still a break for anything that reads it
+  // by a hardcoded URI instead of discovering it via resources/list.
+  // Rename in a follow-up, not as a side effect of this migration. The
+  // description is skill-vivla.md's own frontmatter `description` —
+  // verified byte-for-byte against the live resources/list response.
   server.registerResource(
-    "vivla-skill",
+    "vivla",
     "mintlify://skills/vivla",
-    { title: "Vivla skill reference", description: "Product and architecture reference for the Vivla ecosystem.", mimeType: "text/markdown" },
+    {
+      description:
+        "Use when working with Vivla's co-ownership platform: building features for the mobile app, backend API, internal tools, or CX panel; integrating with booking workflows, chat systems, or notifications; configuring environments; understanding the architecture; or troubleshooting issues across the ecosystem.",
+      mimeType: "text/markdown",
+    },
     async (uri) => ({ contents: [{ uri: uri.href, mimeType: "text/markdown", text: skillVivla.content }] }),
   );
 

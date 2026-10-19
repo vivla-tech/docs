@@ -87,10 +87,13 @@ describe("submit_feedback", () => {
 });
 
 describe("resources/list", () => {
-  it("still exposes the vivla skill resource at its original URI", async () => {
+  it("still exposes the vivla skill resource at its original URI and name", async () => {
     const client = await connect();
     const { resources } = await client.listResources();
-    expect(resources.some((r) => r.uri === "mintlify://skills/vivla")).toBe(true);
+    const resource = resources.find((r) => r.uri === "mintlify://skills/vivla");
+    expect(resource).toBeDefined();
+    expect(resource?.name).toBe("vivla");
+    expect(resource?.description).toMatch(/^Use when working with Vivla's co-ownership platform/);
   });
 
   it("serves non-empty markdown for that resource", async () => {
