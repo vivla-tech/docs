@@ -23,11 +23,23 @@ describe("runFilesystemCommand", () => {
     expect(out).toContain("tools");
   });
 
-  it("reads a real page as `# title\\n\\n> description\\n\\n<body>`", async () => {
+  it("reads a real page as `# title\\n\\n> description\\n\\n<body>`, keeping the body's own differently-worded H1", async () => {
+    // Body opens with "# Operativa de reservas de última hora" — different
+    // text from the frontmatter title, so both headings stay (confirmed
+    // against the live Mintlify server).
     const out = await runFilesystemCommand("cat /operativa/reservas-ultima-hora.mdx");
     expect(out).toContain("exit: 0");
-    expect(out).toContain("# Reservas de última hora");
-    expect(out).toContain("> Operativa actual del sistema de reservas de última hora");
+    expect(out).toContain("# Reservas de última hora\n\n> Operativa actual del sistema de reservas de última hora");
+    expect(out).toContain("# Operativa de reservas de última hora");
+  });
+
+  it("drops the body's leading H1 when it exactly repeats the frontmatter title", async () => {
+    // Confirmed against the live Mintlify server: 92 of 121 pages have a
+    // body that opens with "# <exact same title>" — Mintlify renders it
+    // once, not twice.
+    const out = await runFilesystemCommand("cat /tools/api/conventions.mdx");
+    const occurrences = out.split("# Convenciones API").length - 1;
+    expect(occurrences).toBe(1);
   });
 
   it("reports a missing path like the live Mintlify server does — no empty stdout section", async () => {

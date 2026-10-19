@@ -10,6 +10,13 @@ describe("tryServeGeneratedPage", () => {
     expect(text).toContain("> Operativa actual del sistema de reservas de última hora");
   });
 
+  it("drops the body's leading H1 when it exactly repeats the frontmatter title", async () => {
+    const res = tryServeGeneratedPage("/tools/api/conventions.md", "https://wiki.vivla.com");
+    expect(res).not.toBeNull();
+    const text = await res!.text();
+    expect(text.split("# Convenciones API").length - 1).toBe(1);
+  });
+
   it("returns null for a page that doesn't exist", () => {
     expect(tryServeGeneratedPage("/does/not/exist.md", "https://wiki.vivla.com")).toBeNull();
   });

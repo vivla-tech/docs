@@ -177,8 +177,23 @@ function buildPage(sourceDir, pagePath) {
   return { title, description, sidebarTitle, body, chunks };
 }
 
+// Confirmed against the live Mintlify server: when a page's body already
+// opens with an H1 that exactly repeats the frontmatter title (true for
+// 92 of 121 pages today), it renders only one "# <title>" — not the
+// synthetic one followed immediately by the body's own identical copy.
+// Pages whose body opens with a *different* H1 (e.g. frontmatter title
+// "Reservas de última hora", body H1 "Operativa de reservas de última
+// hora") keep both, exactly as before.
+function stripRedundantLeadingHeading(body, title) {
+  const titleLine = `# ${title}`;
+  if (!body.startsWith(titleLine)) return body;
+  const rest = body.slice(titleLine.length).replace(/^\n+/, "");
+  return rest;
+}
+
 function fsBody(page) {
-  return `# ${page.title}\n\n> ${page.description}\n\n${page.body}`;
+  const body = stripRedundantLeadingHeading(page.body, page.title);
+  return `# ${page.title}\n\n> ${page.description}\n\n${body}`;
 }
 
 function buildLlmsTxt(nav, pages, siteName, siteDescription) {

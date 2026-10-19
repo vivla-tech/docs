@@ -43,9 +43,21 @@ export interface Corpus {
 
 export const corpus = corpusData as unknown as Corpus;
 
+// Confirmed against the live Mintlify server: when a page's body already
+// opens with an H1 that exactly repeats the frontmatter title, it renders
+// only one "# <title>" — not the synthetic one immediately followed by the
+// body's own identical copy. Kept in sync with the same function in
+// scripts/build-corpus.mjs.
+function stripRedundantLeadingHeading(body: string, title: string): string {
+  const titleLine = `# ${title}`;
+  if (!body.startsWith(titleLine)) return body;
+  return body.slice(titleLine.length).replace(/^\n+/, "");
+}
+
 /** The just-bash / `/<page>.md` rendering: `# title\n\n> description\n\n<body>`. */
 export function pageFsBody(page: Page): string {
-  return `# ${page.title}\n\n> ${page.description}\n\n${page.body}`;
+  const body = stripRedundantLeadingHeading(page.body, page.title);
+  return `# ${page.title}\n\n> ${page.description}\n\n${body}`;
 }
 
 const templateCache = new Map<string, string>();
