@@ -4,7 +4,7 @@
 // — field for field. This is the one place a hand-typed description or a
 // Zod-generated schema could quietly drift from the recorded contract.
 import { describe, expect, it } from "vitest";
-import { env as workerEnv } from "cloudflare:test";
+import { env as workerEnv } from "cloudflare:workers";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { Client } from "@modelcontextprotocol/client";
 import { createVivlaDocsServer } from "../src/mcp";

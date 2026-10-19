@@ -1,8 +1,8 @@
-// Defensive net around @cloudflare/vitest-pool-workers' own D1 migration
+// Defensive net around @cloudflare/vitest-plugin's own D1 migration
 // auto-apply (configured via `migrations_dir` in wrangler.jsonc): the
 // schema is idempotent (`CREATE TABLE IF NOT EXISTS`), so running it again
-// here is a no-op if the pool already applied it, and a fix if it didn't.
-import { env } from "cloudflare:test";
+// here is a no-op if the plugin already applied it, and a fix if it didn't.
+import { env } from "cloudflare:workers";
 import type { Env } from "../src/env";
 
 const MIGRATION_SQL = `

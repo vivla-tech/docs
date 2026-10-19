@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { env } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { submitFeedback } from "../src/feedback";
 import type { Env } from "../src/env";
 

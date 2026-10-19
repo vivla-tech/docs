@@ -1,12 +1,13 @@
-import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
+import { cloudflareTest } from "@cloudflare/vitest-plugin";
+import { defineConfig } from "vitest/config";
 
-export default defineWorkersConfig({
+export default defineConfig({
   test: {
     setupFiles: ["./test/setup.ts"],
-    poolOptions: {
-      workers: {
-        wrangler: { configPath: "./wrangler.jsonc" },
-      },
-    },
   },
+  plugins: [
+    cloudflareTest({
+      wrangler: { configPath: "./wrangler.jsonc" },
+    }),
+  ],
 });
