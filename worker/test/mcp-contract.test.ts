@@ -95,7 +95,8 @@ describe("resources/list", () => {
     const client = await connect();
     const { contents } = await client.readResource({ uri: "mintlify://skills/vivla" });
     expect(contents).toHaveLength(1);
-    expect(contents[0]?.mimeType).toBe("text/markdown");
-    expect(String(contents[0]?.text).length).toBeGreaterThan(1000);
+    const [content] = contents;
+    expect(content?.mimeType).toBe("text/markdown");
+    expect("text" in (content ?? {}) ? String((content as { text: string }).text).length : 0).toBeGreaterThan(1000);
   });
 });

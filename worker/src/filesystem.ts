@@ -28,7 +28,7 @@ function utf8ByteLength(s: string): number {
 function truncateToBytes(s: string, maxBytes: number): string {
   const bytes = new TextEncoder().encode(s);
   if (bytes.length <= maxBytes) return s;
-  let decoded = new TextDecoder("utf-8", { fatal: false }).decode(bytes.slice(0, maxBytes));
+  let decoded = new TextDecoder("utf-8", { fatal: false, ignoreBOM: false }).decode(bytes.slice(0, maxBytes));
   // A truncation that lands mid-codepoint decodes the dangling bytes as a
   // single U+FFFD — drop it rather than ship a stray replacement glyph.
   if (decoded.endsWith("�")) decoded = decoded.slice(0, -1);
@@ -61,6 +61,7 @@ function isTreeOnRoot(command: string): boolean {
   const positional: string[] = [];
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
+    if (t === undefined) continue;
     if (t === "-L") {
       i++;
       continue;
@@ -89,7 +90,8 @@ function stripTreeRootNoise(stdout: string): string {
       pruning = false;
     }
     const rootEntry = line.match(/^[|`]-- (.+)$/);
-    if (rootEntry && RESERVED_ROOT_ENTRIES.has(rootEntry[1])) {
+    const rootEntryName = rootEntry?.[1];
+    if (rootEntryName !== undefined && RESERVED_ROOT_ENTRIES.has(rootEntryName)) {
       pruning = true;
       pruned = true;
       continue;
