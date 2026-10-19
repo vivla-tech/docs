@@ -48,18 +48,23 @@ describe("search_vivla_docs", () => {
     expect(result.isError).toBe(true);
   });
 
-  it("still returns results for a query with no lexical match — dense retrieval has no 'no match' concept", async () => {
-    // v2 (hybrid): unlike BM25 alone, cosine similarity always has a
-    // nearest neighbor, so a run-on gibberish token still gets ranked
-    // results instead of the old "No results found" sentinel.
+  it("falls back to the recorded 'no results' text when Workers AI is unavailable and BM25 finds nothing", async () => {
+    // This test file's env has no usable AI binding (see test/search.test.ts
+    // for why — no Cloudflare auth on this VPS, by design), so
+    // search_vivla_docs exercises its fallback-to-BM25-only path here.
+    // With a real AI binding, dense retrieval always has a nearest
+    // neighbor and this sentinel doesn't fire — see search.test.ts's
+    // "still returns results for a gibberish query" for that case.
     const client = await connect();
     const result = await client.callTool({
       name: "search_vivla_docs",
       arguments: { query: "xyzzyplughsupercalifragilisticoinexistente" },
     });
-    expect(result.content.length).toBeGreaterThan(0);
+    expect(result.content).toHaveLength(1);
     expect(result.content[0]).toMatchObject({ type: "text" });
-    expect((result.content[0] as { text: string }).text).toMatch(/^Title: .+\nLink: /);
+    expect((result.content[0] as { text: string }).text).toBe(
+      'No results found for "xyzzyplughsupercalifragilisticoinexistente".',
+    );
   });
 });
 
