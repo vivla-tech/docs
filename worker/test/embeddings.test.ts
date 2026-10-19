@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { Buffer } from "node:buffer";
 import { embeddingsFile, rankByCosineSimilarity } from "../src/embeddings";
 
 describe("embeddingsFile", () => {
@@ -13,7 +14,9 @@ describe("rankByCosineSimilarity", () => {
     const entry = Object.entries(embeddingsFile.chunks)[0];
     if (!entry) throw new Error("embeddings.json has no chunks");
     const [someKey, someVector] = entry;
-    const dequantized = someVector.values.map((v: number) => v * someVector.scale);
+    const bytes = Buffer.from(someVector.b64, "base64");
+    const int8 = new Int8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const dequantized = Array.from(int8, (v) => v * someVector.scale);
     const ranked = rankByCosineSimilarity(dequantized);
     const top = ranked[0];
     expect(top?.key).toBe(someKey);

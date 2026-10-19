@@ -5,13 +5,18 @@
 // Chunk embeddings are precomputed at build time (scripts/build-embeddings.mjs,
 // run on the Mac against Workers AI via the `cf` CLI — inference only, no
 // resource created) and bundled as a JSON module, same pattern as
-// corpus.json. Each vector is int8-quantized with a per-vector scale to
-// keep the bundle small; dequantized once per isolate into Float32Array.
+// corpus.json. Each vector is int8-quantized with a per-vector scale,
+// stored base64-encoded (not a JSON array of numbers — that costs ~3-4
+// ASCII chars per value, barely smaller than float32 text; base64 over the
+// raw bytes is ~2.3x smaller in practice) to keep the bundle small;
+// dequantized once per isolate into Float32Array.
+import { Buffer } from "node:buffer";
 import embeddingsData from "../generated/embeddings.json";
 
 export interface QuantizedVector {
   scale: number;
-  values: number[];
+  /** Base64-encoded int8 bytes, `dim` of them. */
+  b64: string;
 }
 
 export interface EmbeddingsFile {
@@ -35,8 +40,10 @@ function getDequantized(): Map<string, Float32Array> {
   if (!dequantized) {
     const map = new Map<string, Float32Array>();
     for (const [key, q] of Object.entries(embeddingsFile.chunks)) {
-      const arr = new Float32Array(q.values.length);
-      for (let i = 0; i < q.values.length; i++) arr[i] = (q.values[i] ?? 0) * q.scale;
+      const bytes = Buffer.from(q.b64, "base64");
+      const int8 = new Int8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      const arr = new Float32Array(int8.length);
+      for (let i = 0; i < int8.length; i++) arr[i] = (int8[i] ?? 0) * q.scale;
       map.set(key, arr);
     }
     dequantized = map;
