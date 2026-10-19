@@ -5,3 +5,10 @@
 # Draft content
 drafts/
 *.draft.mdx
+
+# Self-hosted wiki engine (see _projects/wiki-self-hosted/PLAN.md, decision
+# D7). Mintlify keeps serving from docs.json + the *.mdx content until
+# cutover; none of this is content for it to build.
+site/
+worker/
+scripts/
