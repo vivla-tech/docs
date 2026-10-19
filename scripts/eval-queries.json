@@ -1,0 +1,291 @@
+[
+  {
+    "q": "¿Qué es el buzón de la app? Me sale un icono con un numerito y no sé qué es.",
+    "pages": [
+      "tools/chat/inbox"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "q": "¿Cómo cambio el email de mi cuenta de Vivla?",
+    "pages": [
+      "mobile/modules/profile",
+      "mobile/modules/auth"
+    ],
+    "confidence": "low"
+  },
+  {
+    "q": "How do I turn push notifications on or off on my phone?",
+    "pages": [
+      "mobile/integrations/push-notifications"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "Me llegan demasiados correos de Vivla, ¿cómo me doy de baja de esos emails sin dejar de recibir lo importante?",
+    "pages": [
+      "tools/notifications/preferences"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "Quiero cambiar la contraseña de la app, ¿dónde lo hago?",
+    "pages": [
+      "mobile/modules/auth"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "q": "¿Qué diferencia hay entre una notificación normal y una urgente? Es que a veces me suena el móvil aunque tenga el modo no molestar puesto.",
+    "pages": [
+      "tools/notifications/index"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "q": "¿Dónde puedo ver el inventario de mi casa, electrodomésticos, ropa de cama y todo eso?",
+    "pages": [
+      "tools/homes/index"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Puedo añadir una tarjeta de crédito nueva para pagar la cuota desde la app?",
+    "pages": [
+      "tools/community/invoices"
+    ],
+    "confidence": "low"
+  },
+  {
+    "q": "No em recordo com es fa servir la vitroceràmica d'inducció de la casa, hi ha alguna guia?",
+    "pages": [
+      "tools/maintenance/index"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Se pueden consultar los planos de la casa desde la app?",
+    "pages": [
+      "panel/homes/details",
+      "mobile/modules/property"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "q": "I'd like my partner to also have access to the app with their own login. How do I set that up?",
+    "pages": [
+      "mobile/modules/invitations"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "He visto que mencionáis un programa de Home Excellence, ¿qué es exactamente?",
+    "pages": [
+      "tools/community/home-excellence"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "No encuentro la sección de reservas en la app, ¿dónde está exactamente?",
+    "pages": [
+      "mobile/modules/booking"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "Abrí un ticket la semana pasada por el aire acondicionado, ¿dónde veo en qué estado está?",
+    "pages": [
+      "tools/tickets/index",
+      "tools/tickets/dashboard"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "q": "¿Puedo adjuntar fotos cuando reporto una incidencia?",
+    "pages": [
+      "tools/tickets/attachments"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Se puede borrar la cuenta de Vivla completamente desde la app?",
+    "pages": [
+      "mobile/modules/profile"
+    ],
+    "confidence": "low"
+  },
+  {
+    "q": "¿Qué es la encuesta que me llega justo después de cada estancia?",
+    "pages": [
+      "tools/surveys/index"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "Todas las semanas recibo un resumen de NPS o algo así por email, ¿cómo dejo de recibirlo?",
+    "pages": [
+      "tools/surveys/weekly-nps-report"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "q": "Is the app the same on Android and iPhone? Is there a desktop version?",
+    "pages": [
+      "mobile/index"
+    ],
+    "confidence": "low"
+  },
+  {
+    "q": "¿Puedo configurar un horario en el que no me llegue ninguna notificación, tipo horas de sueño?",
+    "pages": [
+      "tools/notifications/preferences"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "q": "How do I turn on dark mode in the app?",
+    "pages": [
+      "mobile/shared/components"
+    ],
+    "confidence": "low"
+  },
+  {
+    "q": "¿Desde la app puedo hablar directamente con el personal de limpieza o mantenimiento que va a mi casa?",
+    "pages": [
+      "tools/chat/index"
+    ],
+    "confidence": "low"
+  },
+  {
+    "q": "¿Se puede exportar mi historial de reservas a PDF para mis archivos?",
+    "pages": [
+      "panel/bookings/index"
+    ],
+    "confidence": "low"
+  },
+  {
+    "q": "¿Cómo me llegan los avisos si hay, por ejemplo, una alerta de reposición de algo en la comunidad?",
+    "pages": [
+      "tools/notifications/automations",
+      "tools/community/index"
+    ],
+    "confidence": "low"
+  },
+  {
+    "q": "¿Puedo cambiar el idioma de la app a inglés aunque mi cuenta esté en español?",
+    "pages": [
+      "mobile/guides/i18n"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Hay algún checklist de qué dejar hecho antes de irnos de la casa?",
+    "pages": [
+      "panel/homes/checkin-doc",
+      "tools/maintenance/index"
+    ],
+    "confidence": "low"
+  },
+  {
+    "q": "oye cómo reservo desde la app? no encuentro el botón",
+    "pages": [
+      "mobile/modules/booking"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "What's the process to book a week through the app?",
+    "pages": [
+      "mobile/modules/booking"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué pasos tengo que seguir en la app para reservar una semana?",
+    "pages": [
+      "mobile/modules/booking",
+      "operativa/reservas"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "q": "no encuentro dónde ver mis reservas en la app",
+    "pages": [
+      "mobile/modules/booking",
+      "mobile/modules/stays"
+    ],
+    "confidence": "medium"
+  },
+  {
+    "q": "¿Cómo funciona el sistema de llaves para intercambios entre casas?",
+    "pages": [
+      "operativa/intercambio-keys",
+      "backend/keys-exchange"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué repos están en producción según la página de repositorios?",
+    "pages": [
+      "repositories"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Cómo se hace el deploy del panel de CX?",
+    "pages": [
+      "panel/platform/deploy"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué pasa si Windmill falla en un sync programado?",
+    "pages": [
+      "tools/platform/windmill"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Cómo se sincronizan los tickets con Zendesk?",
+    "pages": [
+      "tools/tickets/sync"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué endpoints tiene la Tools API para idempotencia?",
+    "pages": [
+      "tools/api/idempotency"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Cómo se despliega la app móvil a producción?",
+    "pages": [
+      "mobile/guides/deployment"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué es el copiloto Fabián y qué hace?",
+    "pages": [
+      "tools/chat/copilot"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Cómo funcionan los permisos en el panel de CX?",
+    "pages": [
+      "panel/platform/permissions"
+    ],
+    "confidence": "high"
+  },
+  {
+    "q": "¿Qué código de error se usa cuando se reutiliza una idempotency key con un body distinto?",
+    "pages": [
+      "tools/api/idempotency",
+      "tools/api/errors"
+    ],
+    "confidence": "high"
+  }
+]
