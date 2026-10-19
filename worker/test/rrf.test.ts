@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { reciprocalRankFusion, rankFromScores } from "../src/rrf";
+import { reciprocalRankFusion, rankFromScores, blendRerank } from "../src/rrf";
 
 describe("reciprocalRankFusion", () => {
   it("ranks an item #1 in both lists above everything else", () => {
@@ -41,5 +41,61 @@ describe("reciprocalRankFusion", () => {
       ["mid", 0.5],
     ]);
     expect(rankFromScores(scores)).toEqual(["high", "mid", "low"]);
+  });
+});
+
+describe("blendRerank (search v3 — reranks the head of an RRF fusion)", () => {
+  it("alpha=0 leaves the RRF order of the top-N window untouched", () => {
+    const fused = new Map([
+      ["a", 0.9],
+      ["b", 0.5],
+      ["c", 0.1],
+    ]);
+    const rerank = new Map([
+      ["a", 0.01], // reranker disagrees with everything...
+      ["b", 0.5],
+      ["c", 0.99],
+    ]);
+    expect(blendRerank(fused, rerank, 3, 0)).toEqual(["a", "b", "c"]); // ...but alpha=0 ignores it
+  });
+
+  it("alpha=1 reorders the top-N window by the reranker score alone", () => {
+    const fused = new Map([
+      ["a", 0.9],
+      ["b", 0.5],
+      ["c", 0.1],
+    ]);
+    const rerank = new Map([
+      ["a", 0.01],
+      ["b", 0.5],
+      ["c", 0.99],
+    ]);
+    expect(blendRerank(fused, rerank, 3, 1)).toEqual(["c", "b", "a"]);
+  });
+
+  it("only reorders the top-N window — items beyond it keep their RRF order and position", () => {
+    const fused = new Map([
+      ["a", 0.9],
+      ["b", 0.5],
+      ["c", 0.1],
+      ["d", 0.05],
+    ]);
+    const rerank = new Map([
+      ["a", 0.01],
+      ["b", 0.99],
+      // "c" has no reranker score at all — never submitted as a candidate
+      // (e.g. topN cut it off before reranking ran).
+    ]);
+    const result = blendRerank(fused, rerank, 2, 1);
+    expect(result).toEqual(["b", "a", "c", "d"]); // only a/b (the top 2) got reordered
+  });
+
+  it("a candidate missing from the reranker's response doesn't crash — it just scores as the weakest", () => {
+    const fused = new Map([
+      ["a", 0.9],
+      ["b", 0.5],
+    ]);
+    const rerank = new Map([["a", 0.5]]); // "b" has no entry
+    expect(blendRerank(fused, rerank, 2, 1)).toEqual(["a", "b"]);
   });
 });

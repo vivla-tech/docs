@@ -11,7 +11,8 @@
 import { create, insertMultiple, search as oramaSearch, type Orama } from "@orama/orama";
 import { corpus, type Page } from "./content";
 import { chunkKey, rankByCosineSimilarity } from "./embeddings";
-import { reciprocalRankFusion, rankFromScores } from "./rrf";
+import { reciprocalRankFusion, rankFromScores, blendRerank } from "./rrf";
+import { rerankCandidates } from "./rerank";
 import type { Env } from "./env";
 
 const schema = {
@@ -83,6 +84,19 @@ const CANDIDATE_POOL = 40;
 // the stronger signal for this corpus/query mix — BM25 still matters: it's
 // what makes rare proper nouns and exact technical terms win outright.
 export const RRF_PARAMS = { k: 60, bm25Weight: 0.2, denseWeight: 1.0 };
+
+// v3: reranks the top `topN` of the RRF fusion with a cross-encoder
+// (src/rerank.ts), blended back in at weight `alpha` (see
+// `blendRerank()` in src/rrf.ts). Both tuned by scripts/evaluate-search.mjs
+// on half the 80-query eval set, held out the other half — a wide,
+// hard-override rerank (topN=20, alpha=1) measurably hurt the held-out
+// split, this conservative blend is what survived that test. See the
+// parity report §2ter: it ties v2 on hit@5 and improves hit@3 slightly: a
+// real but modest gain, not the fix that closes the gap to Mintlify.
+export const RERANK_PARAMS = { topN: 5, alpha: 0.75 };
+// How much chunk text goes into each reranker candidate — plenty for the
+// cross-encoder's context window without ballooning the call's token cost.
+const RERANK_CANDIDATE_CHARS = 600;
 
 // Orama matches by prefix by default (not full-text exact), so a short
 // grammatical word in a natural-language query — "de", "el", "se" — matches
@@ -156,15 +170,30 @@ export async function searchDocs(env: Env, query: string, baseUrl: string): Prom
   const bm25 = await bm25Ranking(query);
 
   let fusedKeys: string[];
+  let fusedScores: Map<string, number> | null = null;
   try {
     const queryVector = await embedQuery(env, query);
     const dense = denseRanking(queryVector);
-    const scores = reciprocalRankFusion([bm25, dense], [RRF_PARAMS.bm25Weight, RRF_PARAMS.denseWeight], RRF_PARAMS.k);
-    fusedKeys = rankFromScores(scores);
+    fusedScores = reciprocalRankFusion([bm25, dense], [RRF_PARAMS.bm25Weight, RRF_PARAMS.denseWeight], RRF_PARAMS.k);
+    fusedKeys = rankFromScores(fusedScores);
   } catch {
     // Workers AI hiccup (rare) — fall back to lexical-only rather than
     // failing the whole tool call.
     fusedKeys = bm25;
+  }
+
+  if (fusedScores) {
+    try {
+      const candidates = fusedKeys.slice(0, RERANK_PARAMS.topN).map((key) => {
+        const doc = docsByKey.get(key) as SearchDoc;
+        return { key, text: `${doc.pageTitle} > ${doc.heading}\n${doc.content}`.slice(0, RERANK_CANDIDATE_CHARS) };
+      });
+      const rerankScores = await rerankCandidates(env, query, candidates);
+      fusedKeys = blendRerank(fusedScores, rerankScores, RERANK_PARAMS.topN, RERANK_PARAMS.alpha);
+    } catch {
+      // Reranker hiccup (rare) — keep the hybrid fusion's own order rather
+      // than failing the whole tool call.
+    }
   }
 
   const topKeys = fusedKeys.slice(0, RESULT_LIMIT);
