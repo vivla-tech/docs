@@ -32,6 +32,10 @@
       "database_id": "00000000-0000-0000-0000-000000000000"
     }
   ],
+  // Workers AI — no resource to create, unlike D1/Vectorize: this binding
+  // just grants the Worker inference access on the account. Used only to
+  // embed the search query for search_vivla_docs's hybrid ranking.
+  "ai": { "binding": "AI" },
   "vars": {
     "ACCESS_TEAM_DOMAIN": "https://vivla.cloudflareaccess.com",
     // AUD of the Access app "VIVLA Docs" (wiki.vivla.com). Comma-separated;
@@ -54,6 +58,7 @@
         "SITE_BASE_URL": "https://wiki-next.vivla.com"
       },
       "routes": [{ "pattern": "wiki-next.vivla.com", "custom_domain": true }],
+      "ai": { "binding": "AI" },
       "d1_databases": [
         {
           "binding": "FEEDBACK",

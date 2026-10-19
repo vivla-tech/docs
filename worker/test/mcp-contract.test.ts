@@ -48,17 +48,18 @@ describe("search_vivla_docs", () => {
     expect(result.isError).toBe(true);
   });
 
-  it("returns a 'no results' text item for a query that can't match anything", async () => {
+  it("still returns results for a query with no lexical match — dense retrieval has no 'no match' concept", async () => {
+    // v2 (hybrid): unlike BM25 alone, cosine similarity always has a
+    // nearest neighbor, so a run-on gibberish token still gets ranked
+    // results instead of the old "No results found" sentinel.
     const client = await connect();
     const result = await client.callTool({
       name: "search_vivla_docs",
       arguments: { query: "xyzzyplughsupercalifragilisticoinexistente" },
     });
-    expect(result.content).toHaveLength(1);
+    expect(result.content.length).toBeGreaterThan(0);
     expect(result.content[0]).toMatchObject({ type: "text" });
-    expect((result.content[0] as { text: string }).text).toBe(
-      'No results found for "xyzzyplughsupercalifragilisticoinexistente".',
-    );
+    expect((result.content[0] as { text: string }).text).toMatch(/^Title: .+\nLink: /);
   });
 });
 

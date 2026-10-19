@@ -59,7 +59,7 @@ export function createVivlaDocsServer(env: Env, identity: AccessIdentity | null)
       annotations: search.annotations,
     },
     async ({ query }) => {
-      const results = await searchDocs(query, env.SITE_BASE_URL);
+      const results = await searchDocs(env, query, env.SITE_BASE_URL);
       return { content: results.map((text) => ({ type: "text" as const, text })) };
     },
   );
