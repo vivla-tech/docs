@@ -41,21 +41,23 @@ describe("tools/list", () => {
 describe("search_vivla_docs", () => {
   it("rejects extra properties (additionalProperties: false)", async () => {
     const client = await connect();
-    await expect(
-      client.callTool({ name: "search_vivla_docs", arguments: { query: "x", extra: "nope" } } as never),
-    ).rejects.toThrow();
+    // The SDK reports a schema-validation failure as an in-band tool error
+    // (isError: true), not a protocol-level rejection — only an unknown
+    // tool name or a transport fault rejects the call.
+    const result = await client.callTool({ name: "search_vivla_docs", arguments: { query: "x", extra: "nope" } } as never);
+    expect(result.isError).toBe(true);
   });
 
   it("returns a 'no results' text item for a query that can't match anything", async () => {
     const client = await connect();
     const result = await client.callTool({
       name: "search_vivla_docs",
-      arguments: { query: "zzz_definitely_not_in_the_corpus_zzz" },
+      arguments: { query: "xyzzyplughsupercalifragilisticoinexistente" },
     });
     expect(result.content).toHaveLength(1);
     expect(result.content[0]).toMatchObject({ type: "text" });
     expect((result.content[0] as { text: string }).text).toBe(
-      'No results found for "zzz_definitely_not_in_the_corpus_zzz".',
+      'No results found for "xyzzyplughsupercalifragilisticoinexistente".',
     );
   });
 });
