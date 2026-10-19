@@ -73,12 +73,16 @@ const RESULT_LIMIT = 10;
 // prevent.
 const CANDIDATE_POOL = 40;
 
-// Reciprocal Rank Fusion parameters — tuned on half the 40-query parity
-// eval set (train split), reported against the other half (test split) in
-// the parity report. `bm25Weight`/`denseWeight` scale each ranking's
-// contribution before the 1/(k+rank) falloff; `k` controls how fast that
-// falloff is (larger k flattens the advantage of a #1 rank over a #5 rank).
-export const RRF_PARAMS = { k: 60, bm25Weight: 0.4, denseWeight: 1.0 };
+// Reciprocal Rank Fusion parameters — chosen by scripts/evaluate-search.mjs's
+// grid search on half the 40-query eval set (train split: hit@5 80%,
+// hit@3 55%), reported against the held-out other half in the parity
+// report. `bm25Weight`/`denseWeight` scale each ranking's contribution
+// before the 1/(k+rank) falloff; `k` controls how fast that falloff is
+// (larger k flattens the advantage of a #1 rank over a #5 rank). The
+// fairly low bm25Weight reflects the grid search finding dense retrieval
+// the stronger signal for this corpus/query mix — BM25 still matters: it's
+// what makes rare proper nouns and exact technical terms win outright.
+export const RRF_PARAMS = { k: 60, bm25Weight: 0.2, denseWeight: 1.0 };
 
 // Orama matches by prefix by default (not full-text exact), so a short
 // grammatical word in a natural-language query — "de", "el", "se" — matches
