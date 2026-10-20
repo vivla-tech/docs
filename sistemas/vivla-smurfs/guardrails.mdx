@@ -1,0 +1,60 @@
+---
+title: "Guardrails"
+description: "Las reglas duras que comparte cada pitufo de la flota vivla-smurfs y los modos de autenticación con GitHub."
+---
+
+Los guardrails viven en `src/config/guardrails.ts` y son **innegociables**: se hornean en las instrucciones de cada agente (`GUARDRAILS_PROMPT`) **y** se imponen en la capa de workflow/tool donde se puede. Un pitufo que no puede cumplirlos debe pararse, no improvisar (`src/config/guardrails.ts:1`).
+
+## Las reglas duras
+
+<Steps>
+  <Step title="El trabajo acaba al editar ficheros">
+    Un pitufo de código solo lee y edita ficheros en el clon de su directorio de trabajo. No toca el control de versiones ni GitHub: nada de `git add/commit/push/branch/checkout/merge/rebase/stash`, nada del CLI `gh`, nunca abre/edita/etiqueta/comenta un PR o issue por su cuenta (`src/config/guardrails.ts:47`).
+  </Step>
+  <Step title="El harness hace el resto">
+    Tras terminar, el harness automático commitea, hace push de la rama, aplica etiquetas y abre el **PR en borrador** como el bot de la flota. El pitufo deja el árbol de trabajo sucio y resume lo hecho en su mensaje final (que se convierte en el cuerpo del PR) (`src/config/guardrails.ts:54`).
+  </Step>
+  <Step title="Solo PRs en borrador, solo contra develop">
+    La única rama que un pitufo puede apuntar con un PR es `develop` por defecto (`BASE_BRANCH`). La flota **nunca** mergea, nunca hace push a `main`, nunca despliega (`src/config/guardrails.ts:10`, `src/config/guardrails.ts:63`).
+  </Step>
+  <Step title="Superficies protegidas">
+    Nunca se modifica `auth`, `payments`, `booking core`, `secrets` ni `migrations` — salvo que sea el trabajo explícito del pitufo (`PROTECTED_SURFACES`). Aun entonces solo se edita: el PR borrador lo revisa y mergea un humano (`src/config/guardrails.ts:32`).
+  </Step>
+</Steps>
+
+<Warning>
+  Excepciones a «solo contra `develop`» que vienen de `src/config/repo-targets.ts`: **vivla-cms** trabaja sobre `feat/web-2026` (el rediseño de vivla.com, con su propio preview y DB; su `main` congelada hasta el lanzamiento). El perfil del repo también lleva sus **reglas de la casa** (sin cambios de esquema/migración de Payload, primitivas solo del design system, `pnpm check` + type-check + build antes de terminar), que `repoBriefLines(repo)` añade al prompt porque el SDK no carga el `CLAUDE.md` del clon por su cuenta. `SMURFS_BASE_BRANCHES_JSON` re-apunta una rama base sin redeploy (`src/config/repo-targets.ts:119`).
+</Warning>
+
+## Identidad de git en cada clon
+
+Cada clon configura el autor de git de la flota (`src/config/guardrails.ts:15`):
+
+- `GIT_AUTHOR_EMAIL` = `joaquin@vivla.com` (`src/config/guardrails.ts:16`)
+- `GIT_AUTHOR_NAME` = `Joaquin Ferreiros`
+
+## Autenticación con GitHub: tri-modo
+
+La decisión vive en un solo sitio, `src/config/github-auth.ts`. `getGithubToken()` resuelve un bearer token (o `null`) en este orden (`CLAUDE.md`, sección «Hard guardrails»):
+
+<Steps>
+  <Step title="GH_TOKEN puesto → se usa">
+    Un PAT estático o cualquier bearer. Gana sobre las credenciales de la App de GitHub cuando ambos están presentes.
+  </Step>
+  <Step title="App de GitHub → token de instalación de 1h">
+    Con `GITHUB_APP_ID` + `GITHUB_APP_PRIVATE_KEY` + `GITHUB_APP_INSTALLATION_ID`, se acuña un **installation access token** (TTL 1h) vía `@octokit/auth-app`, cacheado en proceso y re-acuñado ~5 min antes de expirar. El PEM puede llegar con `\n` escapados (Railway) y se normaliza antes de acuñar.
+  </Step>
+  <Step title="Nada puesto → null → modo local">
+    Clonar/push por SSH con la clave de trabajo (`~/.ssh/id_work_github`) y `gh` por `GH_CONFIG_DIR=$HOME/.config/gh-work`.
+  </Step>
+</Steps>
+
+En **modo token**, clonar/push van por HTTPS con el token embebido en la URL y `gh` lo lee de `GH_TOKEN` en el entorno del hijo. El token **nunca se loguea** (`CLAUDE.md`, sección «Hard guardrails»).
+
+<Note>
+  Un token de instalación de App **muere en una hora, y la URL `origin` del clon lo lleva dentro**. Por eso toda llamada git de red dentro de un clon existente pasa por `refreshOriginAuth(dir)` (`src/mastra/tools/repo.ts`), que re-estampa `origin` con un token fresco — `pushBranch` y `deepenToCommit` lo hacen. Es no-op en modo local/SSH. Saltárselo solo falla en runs de más de una hora (toda sesión de Brainy, ningún cron) (`CLAUDE.md`, sección «Hard guardrails»).
+</Note>
+
+## Claude Skills empaquetados
+
+Los pitufos de código pueden optar por **Claude Skills** reales (`SKILL.md`) empaquetados en este repo bajo `plugins/vivla-skills/skills/<nombre>/`, cargados como plugin local vía `sdkOptions.plugins` con ruta absoluta (el Dockerfile fija `SMURFS_SKILLS_DIR=/app/plugins/vivla-skills`). Hoy: **Architect** → `improve-codebase-architecture` + `codebase-design`; **Painter** → `make-interfaces-feel-better`; **Papa** → `thermo-nuclear-code-quality-review` (`CLAUDE.md`, sección «Claude Skills»).

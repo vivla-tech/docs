@@ -1,0 +1,85 @@
+---
+title: "Webhooks e integraciones"
+description: "A qué llama la flota vivla-smurfs, quién le llama por webhook, sus rutas HTTP y sus credenciales solo por nombre."
+---
+
+Además del scheduler, la flota expone un servidor HTTP (el mismo proceso de Railway) con **webhooks** para los pitufos dirigidos por evento, y llama hacia fuera a GitHub, Sentry, Linear, Slack, Cursor y varios MCP. Aquí están las conexiones y sus credenciales **solo por nombre** — ningún valor vive en esta wiki.
+
+## Webhooks (quién le llama)
+
+Las rutas personalizadas no pueden empezar por `/api` (reservado), así que usan `/webhooks/...`. Cada una está **inerte** hasta que su secreto está puesto, y está exenta del Basic auth del panel porque autentica por su propia firma HMAC/Bearer (`src/mastra/index.ts:123`, `src/config/basic-auth.ts`). URL pública base: `https://smurfs-production.up.railway.app` (`CLAUDE.md:306`).
+
+| Ruta | Método | Pitufo | Gate (secreto) | Inerte sin él |
+|---|---|---|---|---|
+| `/webhooks/github` | POST | F2 (revisor cross-model) | `SMURFS_WEBHOOK_SECRET` | `{ignored:'f2-disabled'}` |
+| `/webhooks/linear` | POST | Brainy (sesión de agente) y la Done notice de Postman | `LINEAR_WEBHOOK_SECRET` y/o `LINEAR_ISSUES_WEBHOOK_SECRET` | `{ignored:'linear-disabled'}` |
+| `/webhooks/slack` | POST | Postman (Slack Events API) | `SLACK_SIGNING_SECRET` | `{ignored:'postman-disabled'}` |
+| `/webhooks/slack/interactions` | POST | Botones de veredicto de Brainy (S14) | `SLACK_SIGNING_SECRET` | inerte |
+| `/webhooks/tools/create-issue` | POST | Postman («Crear en Linear» desde Tools) | `POSTMAN_TOOLS_INBOUND_KEY` | `{ignored:'tools-inbound-disabled'}` |
+| `/iconero/run`, `/iconero/plan`, `/iconero/jobs` | POST | Iconero | `ICONERO_SECRET` (Bearer) | 503 |
+| `/iconero/jobs/:id` | GET | Iconero (stream NDJSON) | `ICONERO_SECRET` (Bearer) | 503 |
+
+(Registro en `src/mastra/index.ts:124`.)
+
+<Note>
+  **F2 nunca hace push.** En un PR recién abierto verifica el HMAC `X-Hub-Signature-256` y publica una revisión cross-model como **COMENTARIO** (nunca APPROVE/REQUEST_CHANGES) — es advisory, no bloquea el merge de un humano. El revisor es de una familia de modelo **distinta** a los agentes Claude que escriben los PRs, y sigue dormido hasta que hay `REVIEW_PROVIDER` (`gemini`|`openai`) + su key (`src/webhooks/github.ts:1`, `CLAUDE.md`, env `SMURFS_WEBHOOK_SECRET`).
+</Note>
+
+### Rutas de administración y de Slack (vía 2)
+
+Solo existen cuando `SLACK_APP_CONFIG_REFRESH_TOKEN` está puesto (una app de Slack por persona, `@mastra/slack`): `/slack/oauth/callback`, `/slack/events/:webhookId`, `/slack/commands/:webhookId` (autenticadas por Slack, exentas de Basic auth) y `/slack/connect`, `/slack/disconnect`, `/slack/installations` (tras `SMURFS_BASIC_AUTH`). Las rutas de fallback admin `/admin/slack/connect` (POST) y `/admin/slack/status` (GET) también se registran entonces, tras `SMURFS_BASIC_AUTH` (`src/mastra/index.ts:191`, `CLAUDE.md`, sección «Identidad en Slack»).
+
+## A qué llama (integraciones)
+
+<CardGroup cols={2}>
+  <Card title="GitHub" icon="github">
+    Clonar/push y abrir PRs/issues en `vivla-tech`. `git` + `gh` van en la imagen; auth tri-modo (ver [Guardrails](/sistemas/vivla-smurfs/guardrails)).
+  </Card>
+  <Card title="Sentry" icon="bug">
+    Handy lee issues sin resolver. Org `vivla-lifestyle` en la **región DE** (`SENTRY_BASE_URL=https://de.sentry.io`).
+  </Card>
+  <Card title="Linear" icon="list-check">
+    Postman crea/comenta issues con su app OAuth; Brainy corre sesiones de agente. Tokens rotados en LibSQL.
+  </Card>
+  <Card title="Slack" icon="slack">
+    Postman lee/escribe en `#product_request`; Reporter y Alma analyst publican por webhook entrante.
+  </Card>
+  <Card title="Cursor Cloud Agents" icon="code">
+    Brainy puede delegar el build a Cursor Composer (`CURSOR_API_KEY`, Basic auth).
+  </Card>
+  <Card title="MCP (Atlas, wiki)" icon="plug">
+    Postman consulta los catálogos de Atlas y de la wiki; degradan a catálogo vacío sin bloquear el boot.
+  </Card>
+</CardGroup>
+
+Otros servicios: **PostHog** (payloads de feature flags de Alma analyst / Lola watcher / análisis semanal), **Supabase** (métricas de solo lectura de Lola; Guardian cuando se active) y la **Content Factory** de Vercel (Iconero entrega los iconos vía `ICONERO_CALLBACK_URL`). (`CLAUDE.md`, sección «Deploy (Railway)» y `src/webhooks/iconero.ts:77`.)
+
+## Credenciales (solo por nombre)
+
+Todas se inyectan por variable de entorno; sus valores no se commitean (plantilla en `.env.example`). Selección de las principales:
+
+| Variable(s) | Para qué |
+|---|---|
+| `CLAUDE_CODE_OAUTH_TOKEN` **o** `ANTHROPIC_API_KEY` | Auth de Claude para los agentes |
+| `GH_TOKEN` **o** `GITHUB_APP_ID` · `GITHUB_APP_INSTALLATION_ID` · `GITHUB_APP_PRIVATE_KEY` | Auth de GitHub (token o App) |
+| `LIBSQL_URL` | Store durable del scheduler y estados (volumen de Railway) |
+| `SENTRY_AUTH_TOKEN` · `SENTRY_ORG` · `SENTRY_BASE_URL` | Handy (Sentry, región DE) |
+| `LINEAR_WEBHOOK_SECRET` · `LINEAR_CLIENT_ID` · `LINEAR_CLIENT_SECRET` · `LINEAR_ACCESS_TOKEN` · `LINEAR_REFRESH_TOKEN` · `LINEAR_ALLOWED_CREATOR_IDS` | Brainy (Linear OAuth + guardrail de quién puede) |
+| `POSTMAN_LINEAR_ACCESS_TOKEN` · `POSTMAN_LINEAR_REFRESH_TOKEN` · `POSTMAN_LINEAR_CLIENT_ID` · `POSTMAN_LINEAR_CLIENT_SECRET` | App OAuth de Linear propia de Postman |
+| `LINEAR_ISSUES_WEBHOOK_SECRET` | Done notice de Postman (webhook de Issues del workspace) |
+| `SLACK_SIGNING_SECRET` · `SLACK_BOT_TOKEN` | App de Slack de Postman (eventos + bot) |
+| `SLACK_APP_CONFIG_TOKEN` · `SLACK_APP_CONFIG_REFRESH_TOKEN` · `SLACK_BASE_URL` | Vía 2: una app de Slack por persona (`@mastra/slack`) |
+| `SMURFS_WEBHOOK_SECRET` · `REVIEW_PROVIDER` · `GEMINI_API_KEY`/`OPENAI_API_KEY` | F2 (webhook + revisor cross-model) |
+| `CURSOR_API_KEY` | Brainy → Cursor Cloud Agents |
+| `ICONERO_SECRET` | Rutas de Iconero (Bearer) |
+| `SUPABASE_URL` · `SUPABASE_SERVICE_KEY` · `SUPABASE_ACCESS_TOKEN` | Métricas de Lola (Alma analyst / Lola watcher); Guardian |
+| `POSTHOG_API_KEY` · `POSTHOG_HOST` | Lectura de payloads de feature flags |
+| `SLACK_RELEASES_WEBHOOK_URL` · `SLACK_TECH_WEEKLY_WEBHOOK_URL` · `REPORTER_ANTHROPIC_API_KEY` | Destinos y auth de Reporter |
+| `ATLAS_MCP_URL` · `ATLAS_AUTH0_CLIENT_ID` · `ATLAS_AUTH0_CLIENT_SECRET` · `VIVLA_DOCS_MCP_URL` | MCP de contexto de Postman |
+| `SMURFS_BASIC_AUTH` | Gate del Studio/API HTTP del panel |
+
+La lista completa y cada default están documentados en el `CLAUDE.md` del repo (sección «Env vars») y en `.env.example`.
+
+<Danger>
+  Nunca pongas el valor de ninguna de estas credenciales en el código ni en esta wiki. Guárdalas como variables de entorno en Railway.
+</Danger>

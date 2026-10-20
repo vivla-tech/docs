@@ -172,6 +172,17 @@
               "sistemas/vivla-concierge/integraciones",
               "sistemas/vivla-concierge/runbook"
             ]
+          },
+          {
+            "group": "Smurfs",
+            "pages": [
+              "sistemas/vivla-smurfs/index",
+              "sistemas/vivla-smurfs/despliegue",
+              "sistemas/vivla-smurfs/guardrails",
+              "sistemas/vivla-smurfs/programacion",
+              "sistemas/vivla-smurfs/roster",
+              "sistemas/vivla-smurfs/webhooks"
+            ]
           }
         ]
       }
