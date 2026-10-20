@@ -51,7 +51,34 @@ function chunkKey(page, anchor) {
   return `${page}#${anchor}`;
 }
 
+// CI and the VPS have no `cf` CLI login. With CLOUDFLARE_API_TOKEN set,
+// call the Workers AI REST endpoint through curl instead. The token goes to
+// curl on stdin (`-K -`), so it never shows up in the process list.
+function embedBatchRest(model, texts, accountId, tmpDir) {
+  const account = accountId || process.env.CLOUDFLARE_ACCOUNT_ID;
+  if (!account) throw new Error("CLOUDFLARE_API_TOKEN is set but CLOUDFLARE_ACCOUNT_ID is not");
+  const url = `https://api.cloudflare.com/client/v4/accounts/${account}/ai/run/${model}`;
+  const tmpFile = join(tmpDir, `batch-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+  writeFileSync(tmpFile, JSON.stringify({ text: texts, truncate_inputs: true }), "utf8");
+  const raw = execFileSync(
+    "curl",
+    ["-sS", "--fail-with-body", "--retry", "3", "-K", "-", "-H", "Content-Type: application/json", "--data-binary", `@${tmpFile}`, url],
+    {
+      input: `header = "Authorization: Bearer ${process.env.CLOUDFLARE_API_TOKEN}"\n`,
+      maxBuffer: 1024 * 1024 * 256,
+    },
+  );
+  rmSync(tmpFile, { force: true });
+  const parsed = JSON.parse(raw.toString("utf8"));
+  const result = parsed.result || {};
+  if (!parsed.success || !Array.isArray(result.data)) {
+    throw new Error(`Unexpected Workers AI output: ${raw.toString("utf8").slice(0, 500)}`);
+  }
+  return { vectors: result.data, meta: result.meta, shape: result.shape };
+}
+
 function embedBatch(model, texts, accountId, tmpDir) {
+  if (process.env.CLOUDFLARE_API_TOKEN) return embedBatchRest(model, texts, accountId, tmpDir);
   const tmpFile = join(tmpDir, `batch-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
   writeFileSync(tmpFile, JSON.stringify({ text: texts, truncate_inputs: true }), "utf8");
   const env = { ...process.env };

@@ -41,10 +41,9 @@ that.
 - `src/content.ts` — loads `generated/corpus.json` as a bundled JSON
   module.
 - `migrations/` — D1 schema for `wiki_feedback`.
-- `public-placeholder/` — a two-file placeholder site for local dev/tests.
-  **Not the real site.** Once `site/` (built on `feat/starlight-site`)
-  merges, point `assets.directory` in `wrangler.jsonc` at `../site/dist`
-  and delete this folder.
+- `public-placeholder/` — a two-file placeholder site for the unit tests
+  (`wrangler.test.jsonc`). **Not the real site.** `wrangler.jsonc` serves
+  `../site/dist`, so build the site before `wrangler deploy`.
 
 ## Building the corpus
 

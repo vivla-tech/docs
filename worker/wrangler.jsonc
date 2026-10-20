@@ -13,10 +13,10 @@
   "workers_dev": false,
   "preview_urls": false,
   "assets": {
-    // Placeholder during development (this worktree does not build the
-    // Starlight site — see site/ on feat/starlight-site). Point this at
-    // ../site/dist once that lands and the two branches are merged.
-    "directory": "./public-placeholder",
+    // The Starlight build (site/, `pnpm run build`). Build the site before
+    // `wrangler deploy`. Unit tests use wrangler.test.jsonc and its
+    // public-placeholder/ instead.
+    "directory": "../site/dist",
     "binding": "ASSETS",
     "html_handling": "drop-trailing-slash",
     "not_found_handling": "404-page",
@@ -27,9 +27,7 @@
       "binding": "FEEDBACK",
       "database_name": "vivla-wiki-feedback",
       "migrations_dir": "migrations",
-      // Not created in the account yet — see the deploy runbook in
-      // worker/README.md. Replace with the real id from `wrangler d1 create`.
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_id": "61c65ac2-89fa-4e22-b732-254414a8d1b8"
     }
   ],
   // Workers AI — no resource to create, unlike D1/Vectorize: this binding
@@ -52,6 +50,9 @@
   },
   "env": {
     "staging": {
+      // Repeated on purpose: no default domain for staging either.
+      "workers_dev": false,
+      "preview_urls": false,
       "vars": {
         "ACCESS_TEAM_DOMAIN": "https://vivla.cloudflareaccess.com",
         "ACCESS_AUD": "dc70ab4583ee9538450fcb3a48ca18efe08e1a392f7f7eb94dafec9310fdff36",
@@ -64,7 +65,7 @@
           "binding": "FEEDBACK",
           "database_name": "vivla-wiki-feedback-staging",
           "migrations_dir": "migrations",
-          "database_id": "00000000-0000-0000-0000-000000000000"
+          "database_id": "cab7cd10-e81c-41fc-95e7-3a5af179d6de"
         }
       ]
     }

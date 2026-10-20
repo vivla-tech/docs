@@ -1,0 +1,74 @@
+---
+// Mintlify's header has two rows: the usual title/search/theme row, and a
+// horizontal row of top-level tabs below it. Starlight's own Header
+// override point only replaces that first row, so this wraps the default
+// Header and appends the tab row inside the same fixed-height nav box
+// (sized via --sl-nav-height, see src/styles/theme.css).
+import Default from '@astrojs/starlight/components/Header.astro';
+import { TABS, tabIndexForSlug } from '../lib/nav';
+
+const currentSlug = Astro.locals.starlightRoute.id;
+const activeTab = tabIndexForSlug(currentSlug);
+---
+
+<div class="vivla-header-stack">
+  <Default><slot /></Default>
+  {
+    TABS.length > 1 && (
+      <nav class="vivla-tabbar" aria-label="Secciones">
+        <ul>
+          {TABS.map((tab, index) => (
+            <li>
+              <a href={tab.href} aria-current={index === activeTab ? 'page' : undefined}>
+                {tab.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    )
+  }
+</div>
+
+<style>
+  .vivla-header-stack {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .vivla-tabbar {
+    flex-shrink: 0;
+    border-top: 1px solid var(--sl-color-hairline-shade);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .vivla-tabbar::-webkit-scrollbar {
+    display: none;
+  }
+  .vivla-tabbar ul {
+    display: flex;
+    gap: 1.5rem;
+    margin: 0;
+    padding: 0 var(--sl-nav-pad-x);
+    list-style: none;
+    height: var(--vivla-tabbar-height);
+    white-space: nowrap;
+  }
+  .vivla-tabbar a {
+    display: flex;
+    align-items: center;
+    height: 100%;
+    border-bottom: 2px solid transparent;
+    color: var(--sl-color-gray-2);
+    font-size: var(--sl-text-sm);
+    text-decoration: none;
+  }
+  .vivla-tabbar a:hover {
+    color: var(--sl-color-white);
+  }
+  .vivla-tabbar a[aria-current='page'] {
+    border-bottom-color: var(--sl-color-text-accent);
+    color: var(--sl-color-white);
+    font-weight: 600;
+  }
+</style>

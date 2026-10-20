@@ -1,0 +1,19 @@
+---
+// Mintlify <AccordionGroup> — just a layout container around <Accordion>s.
+---
+
+<div class="mintlify-accordion-group not-content">
+  <slot />
+</div>
+
+<style is:global>
+  .mintlify-accordion-group {
+    margin: 1rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .mintlify-accordion-group .mintlify-accordion {
+    margin: 0;
+  }
+</style>

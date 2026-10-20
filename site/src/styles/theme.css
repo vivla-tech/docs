@@ -1,0 +1,99 @@
+/*
+ * Vivla theme: colors, fonts, and layout tweaks to match the Mintlify site
+ * this replaces (docs.json: colors.primary #0c2425, colors.light #cf7625,
+ * fonts Teodor/Sneak). Deliberately unlayered — see Starlight's CSS &
+ * Styling guide: unlayered CSS always wins over Starlight's own `starlight.*`
+ * layers, so these overrides don't need to fight specificity.
+ */
+
+@font-face {
+  font-family: 'Teodor';
+  src: url('/fonts/Teodor-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Teodor';
+  src: url('/fonts/Teodor-Light.woff2') format('woff2');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Sneak';
+  src: url('/fonts/Sneak-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Sneak';
+  src: url('/fonts/Sneak-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --sl-font: 'Sneak', -apple-system, system-ui, sans-serif;
+  --sl-font-headings: 'Teodor', Georgia, serif;
+
+  /* Dark mode accent = docs.json colors.light (#cf7625), matching Mintlify's
+     own light/dark accent split: `light` is the color used on dark pages. */
+  --sl-color-accent-low: rgba(207, 118, 37, 0.16);
+  --sl-color-accent: #cf7625;
+  --sl-color-accent-high: #e3a876;
+  --sl-color-bg-accent: #cf7625;
+
+  /* Two-row header: default Starlight row + our tab bar (SiteHeader.astro). */
+  --vivla-tabbar-height: 2.75rem;
+  --sl-nav-height: calc(3.5rem + var(--vivla-tabbar-height));
+
+  --vivla-success-bg: rgba(0, 166, 62, 0.12);
+  --vivla-success-border: rgba(0, 166, 62, 0.35);
+  --vivla-success-icon: #19a34a;
+}
+
+@media (min-width: 50rem) {
+  :root {
+    --sl-nav-height: calc(4rem + var(--vivla-tabbar-height));
+  }
+}
+
+:root[data-theme='light'] {
+  /* Light mode accent = docs.json colors.primary (#0c2425). */
+  --sl-color-accent-low: rgba(12, 36, 37, 0.08);
+  --sl-color-accent: #0c2425;
+  --sl-color-accent-high: #0c2425;
+  --sl-color-bg-accent: #0c2425;
+
+  --vivla-success-bg: rgba(0, 150, 56, 0.08);
+  --vivla-success-border: rgba(0, 150, 56, 0.3);
+  --vivla-success-icon: #0a7d35;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--sl-font-headings);
+  font-weight: 400;
+}
+
+/* Font Awesome brand mark in the title area reads "VIVLA" + accent "TECH",
+   matching the wordmark on wiki.vivla.com today. */
+.site-title {
+  font-family: var(--sl-font-headings);
+  letter-spacing: 0.02em;
+}
+
+/* Starlight's active sidebar link is a solid accent fill; Mintlify's is a
+   subtle accent-tinted background with accent text (see docs.json's own
+   `bg-primary/10 text-primary`). */
+.sidebar-content [aria-current='page'] {
+  background-color: var(--sl-color-accent-low);
+  color: var(--sl-color-text-accent);
+}

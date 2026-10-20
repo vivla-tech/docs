@@ -1,0 +1,8 @@
+---
+// Mintlify <Tabs> -> Starlight <Tabs>. Direct passthrough; the two
+// components already match (Starlight's wraps <TabItem> children the same
+// way Mintlify's wraps <Tab>).
+import { Tabs } from '@astrojs/starlight/components';
+---
+
+<Tabs {...Astro.props}><slot /></Tabs>

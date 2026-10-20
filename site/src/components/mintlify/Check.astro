@@ -1,0 +1,41 @@
+---
+// Mintlify <Check> — a green "success" callout. Starlight's <Aside> has no
+// success variant, so this is a small custom component rather than a
+// wrapper. Not used in the content today; wired up defensively, see
+// Info.astro.
+import { Icon } from 'astro-icon/components';
+---
+
+<div class="mintlify-check not-content">
+  <Icon name="fa6-solid:circle-check" class="mintlify-check-icon" />
+  <div class="mintlify-check-content"><slot /></div>
+</div>
+
+<style>
+  .mintlify-check {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    margin: 1rem 0;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--vivla-success-border);
+    border-radius: 0.5rem;
+    background-color: var(--vivla-success-bg);
+  }
+  .mintlify-check-icon {
+    flex-shrink: 0;
+    width: 1.1rem;
+    height: 1.1rem;
+    margin-top: 0.2rem;
+    color: var(--vivla-success-icon);
+  }
+  .mintlify-check-content {
+    min-width: 0;
+  }
+  .mintlify-check-content :global(> *:first-child) {
+    margin-top: 0;
+  }
+  .mintlify-check-content :global(> *:last-child) {
+    margin-bottom: 0;
+  }
+</style>
