@@ -44,7 +44,7 @@ description: "A qué servicios externos llama Micaela, quién le llama a ella y 
 </Danger>
 
 <Warning>
-  **`SENTRY_DSN` está puesta servicio a servicio, no como variable compartida de proyecto.** El CLI de Railway no tiene variables compartidas, así que se escribió en los **38 servicios** uno a uno (todos menos los dos Postgres). Un cron **nuevo NO la hereda**: hay que añadírsela a mano al darlo de alta, o queda mudo en Sentry sin que nada avise (`CLAUDE.md`). Ver el [runbook](/sistemas/micaela/runbook).
+  **`SENTRY_DSN` está puesta servicio a servicio, no como variable compartida de proyecto.** El CLI de Railway no tiene variables compartidas, así que se escribió en los **37 servicios** de producción uno a uno (todos menos Postgres; verificado el 2026-10-20). Un cron **nuevo NO la hereda**: hay que añadírsela a mano al darlo de alta, o queda mudo en Sentry sin que nada avise (`CLAUDE.md`). Ver el [runbook](/sistemas/micaela/runbook).
 </Warning>
 
 <Warning>

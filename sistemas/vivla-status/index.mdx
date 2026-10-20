@@ -1,0 +1,88 @@
+---
+title: "Status (vivla-status)"
+description: "La página de estado de Vivla: un Worker de Cloudflare que sondea la superficie crítica cada minuto, asierta sobre el contenido y publica el resultado. Qué es, quién lo usa y cómo está montado."
+---
+
+**vivla-status** es la página de estado de Vivla. Un único **Cloudflare Worker** sondea la superficie crítica cada minuto, guarda el resultado en **D1** y renderiza la página en `status.vivla.com` (`README.md:3`, `wrangler.jsonc`).
+
+No alerta. **Sentry es quien avisa**; esta página solo publica, y eso es lo que la mantiene pequeña. Cualquier petición de reglas de alerta, escalado o enrutado de notificaciones pertenece a Sentry, no aquí (`README.md:5`, `src/index.ts:9`).
+
+El repo está en producción en la rama `main`. Para su sitio en el mapa de repos y entornos, mira [Repositorios](/repositories) y [Entornos](/environments).
+
+<Info>
+  Propietario: equipo **plataforma**. Clase: **servicio**. El código de la rama de producción (`main`) es la fuente de verdad de esta sección.
+</Info>
+
+## Las dos mitades de la monitorización
+
+La monitorización de Vivla tiene dos mitades que responden preguntas distintas, y ninguna es redundante (`HANDOVER.md`):
+
+<CardGroup cols={2}>
+  <Card title="Sentry pregunta «¿responde?»" icon="bell">
+    Checks de uptime y los flujos de errores de varios proyectos, alertando a Slack. Corre en la infraestructura de Sentry, así que sobrevive a una caída de lo que vigila.
+  </Card>
+  <Card title="Este Worker pregunta «¿responde bien?»" icon="magnifying-glass">
+    18 sondas cada minuto desde Cloudflare que asiertan sobre el **cuerpo** de la respuesta y no solo sobre el código HTTP. Guarda histórico en D1, renderiza la página y reporta los fallos de vuelta a Sentry.
+  </Card>
+</CardGroup>
+
+Sentry no puede asertar sobre el cuerpo de una respuesta por su API, y el Worker no puede despertar a nadie. Por eso coexisten (`HANDOVER.md`).
+
+## Quién lo usa
+
+La página es para **todo el equipo de Vivla**: cerrada responde «¿funciona?» a cualquiera; abierta responde «¿qué estamos comprobando y qué contestó?» a quien tiene que arreglarlo (`src/render.ts:3`). Está **sin listar** y detrás de **Cloudflare Access**, restringida a cuentas de vivla.com (`README.md`, `src/index.ts`).
+
+## Por qué vive en Cloudflare
+
+Un monitor alojado en la infraestructura que vigila no es un monitor. Railway y Vercel sirven lo que se comprueba, así que el verificador se sitúa fuera de ambos. Cloudflare además elimina el servidor: no hay Docker que actualizar, ni certificado que renovar, ni base de datos que respaldar (`README.md:9`).
+
+## Stack
+
+| Pieza | Elección |
+|---|---|
+| Runtime | **Cloudflare Worker**, punto de entrada `src/index.ts` (`wrangler.jsonc`) |
+| Almacenamiento | **Cloudflare D1** (SQLite), binding `DB`, base `vivla-status` (`wrangler.jsonc`, `schema.sql`) |
+| Disparador | Cron de Cloudflare cada minuto `* * * * *` (`wrangler.jsonc`) |
+| Lenguaje | TypeScript, sin SDK: se usa `fetch` contra la API HTTP de Sentry (`src/sentry.ts:21`) |
+| Tooling | `wrangler` y `typescript`; sin framework de build (`package.json`) |
+| Alertado | **Sentry** (org `vivla-lifestyle`, región `de.sentry.io`), declarado como código en `sentry/` (`sentry/config.json`) |
+
+## Estructura del repo
+
+```
+src/targets.ts    Qué se vigila y qué significa un fallo para una persona.
+src/index.ts      El cron: sondea, guarda, abre/cierra incidencias y reporta.
+src/sentry.ts     Reporte de fallos hacia Sentry, sin SDK.
+src/render.ts     La página.
+schema.sql        Tablas D1: checks, daily, incidents.
+sentry/config.json  El lado de Sentry, declarado en vez de pinchado.
+sentry/apply.mjs    Diff y aplicación de esa declaración.
+```
+
+(`HANDOVER.md`, verificado contra el árbol del repo)
+
+## Rutas que sirve el Worker
+
+| Ruta | Propósito |
+|---|---|
+| `/` | La página de estado (HTML, `noindex`) |
+| `/api/status` | El mismo estado en JSON |
+
+Cualquier otra ruta responde `404` (`src/index.ts`).
+
+## Dónde seguir
+
+<CardGroup cols={2}>
+  <Card title="Sondas y aserciones" icon="list-check" href="/sistemas/vivla-status/sondas">
+    Las 18 sondas, qué asiertan y por qué el cuerpo importa más que el código.
+  </Card>
+  <Card title="Despliegue y operación" icon="server" href="/sistemas/vivla-status/despliegue">
+    Hosting, secretos, la base D1, despliegue, rollback y desarrollo local.
+  </Card>
+  <Card title="Crons y monitorización" icon="heart-pulse" href="/sistemas/vivla-status/monitorizacion">
+    El cron, el check-in, los recordatorios de incidencia y Sentry como código.
+  </Card>
+  <Card title="Runbook" icon="life-ring" href="/sistemas/vivla-status/runbook">
+    Equipo responsable y fallos más comunes.
+  </Card>
+</CardGroup>

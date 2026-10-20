@@ -1,0 +1,70 @@
+---
+title: "Despliegue y operación"
+description: "Hosting en Cloudflare Pages, dominios por entorno, deploy manual con wrangler, rollback, cabeceras, crons y monitorización."
+---
+
+## Dónde corre
+
+Sitio estático en **Cloudflare Pages**, proyecto `vivla-app-site`. La carpeta publicada es `public/` y **no hay paso de build** (`wrangler.toml:3`, `package.json:5`). La lógica dinámica vive en una **Pages Function** (`functions/_middleware.js`), que Cloudflare ejecuta en el edge.
+
+`wrangler.toml` fija el nombre del proyecto y `compatibility_date = "2024-12-01"` (`wrangler.toml:1`).
+
+### Dominios por entorno
+
+| Dominio | Entorno | Rama |
+|---|---|---|
+| `vivla.app` | Producción | `main` |
+| `staging.vivla.app` | Beta Prod | — |
+| `dev.vivla.app` | Development | — |
+
+Los tres dominios los sirve el **mismo** proyecto de Pages; lo que cambia por dominio es el AASA que genera la función (ver [Verificación de deep links](/sistemas/vivla-app-site/verificacion-deep-links)). `main` es la rama de producción (`repos.yml`, [Entornos](/environments)).
+
+<Note>
+  Un solo proyecto de Cloudflare Pages, `vivla-app-site`, sirve los cuatro dominios: `vivla.app`, `dev.vivla.app`, `staging.vivla.app` y `vivla-app-site.pages.dev`. Los tres dominios propios apuntan al despliegue de **producción** (rama `main`); no hay un despliegue por entorno. La Pages Function distingue el dominio en cada petición y genera el AASA que toca (verificado el 2026-10-20).
+</Note>
+
+## Cómo se despliega
+
+El `package.json` define el deploy como un comando manual de wrangler (`package.json:7`):
+
+```bash
+# Deploy manual
+npx wrangler pages deploy public --project-name=vivla-app-site
+
+# Desarrollo local
+npx wrangler pages dev public
+```
+
+No hay workflows de CI en el repo (no existe `.github/`): el deploy, tal como está el código, es **manual**.
+
+<Note>
+  El proyecto de Pages **no está conectado a GitHub**: un push a `main` no despliega nada. Se despliega a mano con `wrangler pages deploy` (despliegue *ad hoc*), con un token de API de Cloudflare o `wrangler login`. El último despliegue de producción es del 2026-08-04, commit `15c2b56`, que coincide con `main` hoy (verificado el 2026-10-20).
+</Note>
+
+## Cómo se vuelve atrás
+
+El repo no define un procedimiento de rollback.
+
+<Note>
+  Cloudflare Pages conserva los despliegues anteriores: desde el panel del proyecto se puede volver a uno previo. Como el proyecto no está conectado a Git, la alternativa por código es volver a desplegar un commit anterior con `wrangler pages deploy`.
+</Note>
+
+## Cabeceras y caché
+
+`public/_headers` fija las cabeceras que sirve Cloudflare (`public/_headers:1`):
+
+- `/.well-known/apple-app-site-association` y `/.well-known/assetlinks.json`: `Content-Type: application/json`, `Access-Control-Allow-Origin: *`, `Cache-Control: public, max-age=3600`. (El AASA lo sirve la función con estas mismas cabeceras; ver [Verificación de deep links](/sistemas/vivla-app-site/verificacion-deep-links).)
+- Iconos e imagen OG: `Cache-Control: public, max-age=86400`.
+- Todo lo demás (`/*`): `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`.
+
+`public/_redirects` manda cualquier ruta no estática a `/index.html` con 200 (`public/_redirects:3`).
+
+## Crons y monitorización
+
+<Note>
+  **No hay tareas programadas (crons)** en este repo: no existe ningún `scheduled`/cron en `wrangler.toml` ni en la función.
+</Note>
+
+<Warning>
+  **Nadie vigila `vivla.app`.** No hay Sentry en el repo y `vivla-status` no tiene ninguna sonda para `vivla.app` ni para los archivos de `/.well-known/` (verificado el 2026-10-20). Si el AASA o `assetlinks.json` dejan de servirse, los enlaces universales fallan sin aviso. La comprobación documentada es manual, con `curl` y las herramientas de Apple y Google (`README.md:89`).
+</Warning>

@@ -1,0 +1,86 @@
+---
+title: "Booking Cloud Functions"
+description: "Automatismos de reservas de VIVLA en Firebase Cloud Functions: qué es, quién lo usa, dónde corre y cómo está organizado."
+---
+
+**Booking Cloud Functions** (`booking-cloud-functions`) es el conjunto de **Firebase Cloud Functions** (Node 20) que automatiza la operativa de reservas de VIVLA: reacciona a cambios en Firestore, expone webhooks y endpoints HTTP para la app y el panel, lanza tareas programadas y sincroniza datos con sistemas externos (HubSpot, Notion, Slack, Zendesk, Hostaway) (`functions/package.json:14`, `functions/index.js`).
+
+El proyecto de Firebase es **`vivla-app`** y la rama de producción es **`main`** (`.firebaserc:3`). Para su sitio en el mapa de repos y entornos, mira [Repositorios](/repositories) y [Entornos](/environments).
+
+<Info>
+  Propietario: equipo **backend**. Clase: **servicio**. La fuente de verdad de esta sección es el código de la rama de producción (`main`); cuando el README o los comentarios discrepan del código, manda el código.
+</Info>
+
+<Danger>
+  Hay secretos commiteados en el repositorio: en `functions/utils/hs.js`, `functions/utils/slack.js`, `functions/webhooks/hubspotController.js`, `functions/hostaway/hostawayController.js`, `functions/reports/zendeskController.js`, `functions/nps/npstonotion.js`, `functions/nps/tickettonotion.js`, `functions/nps-dashboard/nps-stays.js`, `functions/nps-dashboard/nps-design.js`, `functions/nps-dashboard/nps-tinder.js`, `functions/nps-dashboard/sync-homes.js` y `functions/nps-dashboard/sync-tickets.js`.
+</Danger>
+
+## Quién lo usa
+
+- La **app de propietarios** y el **Panel CX** consumen sus endpoints HTTP (calendario de casas, opciones y políticas de cancelación, precios de alquiler, informes) y reciben las notificaciones que genera.
+- Sistemas externos le llaman por **webhook**: Hostaway (reservas), Typeform (formularios), HubSpot (deals) y Zendesk (tickets).
+- Reacciona a los datos de **Firestore** del proyecto `vivla-app` (reservas, usuarios, casas, NPS) para mantener estados y disparar avisos.
+
+El detalle de cada integración y quién llama a quién está en [Integraciones](/sistemas/booking-cloud-functions/integraciones).
+
+## Dónde corre
+
+| Pieza | Valor | Fuente |
+|---|---|---|
+| Plataforma | Firebase Cloud Functions (1ª gen) | `functions/index.js:2`, `firebase.json:2` |
+| Proyecto Firebase | `vivla-app` | `.firebaserc:3` |
+| Runtime | Node.js 20 | `functions/package.json:14` |
+| Punto de entrada | `functions/index.js` | `functions/package.json:12` |
+| Región | Por defecto `us-central1` (no se fija región en el código) | sin `.region()` en `functions/**` |
+| Rama de producción | `main` | `.firebaserc`, repos.yml |
+
+En producción (proyecto `vivla-app`) hay **140 funciones activas**: 112 en `us-central1`, 20 en `europe-west1` y 8 en `europe-west2`. Las HTTPS de primera generación responden en `https://<región>-vivla-app.cloudfunctions.net/<función>` (verificado el 2026-10-20 con `firebase functions:list`).
+
+<Warning>
+  Qué URL tiene configurada cada servicio externo que llama a estas funciones (HubSpot, Hostaway, Typeform, Zendesk) vive en el panel de cada servicio, no en el código: **PENDIENTE de confirmar**.
+</Warning>
+
+## Estructura del repo
+
+Todo el código vive bajo `functions/`. Cada carpeta agrupa un dominio y `index.js` es el único registro de funciones desplegadas:
+
+```
+functions/
+  index.js            registro de todas las funciones exportadas
+  books/              opciones, política y cancelación de reservas
+  calendars/          API de calendario de casas
+  dashboard/          triggers de Firestore del panel (books, homes, users, slots)
+  hostaway/           webhook de reservas de Hostaway
+  notifications/      notificaciones push/in-app + funciones programadas
+  nps/                migración/sync de NPS y tickets a Notion
+  nps-dashboard/      sync de NPS/tickets/casas al dashboard de VIVLA
+  proxy/              proxy de lectura de Google Cloud Storage
+  rent/               precios de alquiler
+  reports/            informes CX y finanzas, SLA de Zendesk
+  typeform/           webhooks de Typeform
+  utils/              integraciones y helpers (hs, slack, mail, notificaciones)
+  webhooks/           webhook de HubSpot
+```
+
+(`functions/index.js:6`, verificado contra el árbol de `functions/`)
+
+<Note>
+  No todos los módulos están desplegados: `functions/dashboard/update-nps-stats.js` (`calculateNpsAverage`) no se importa en `functions/index.js`, así que no se registra como función.
+</Note>
+
+## Dónde seguir
+
+<CardGroup cols={2}>
+  <Card title="Funciones y triggers" icon="bolt" href="/sistemas/booking-cloud-functions/funciones">
+    Catálogo de funciones por tipo de disparador: Firestore, HTTP, webhooks y crons.
+  </Card>
+  <Card title="Integraciones" icon="plug" href="/sistemas/booking-cloud-functions/integraciones">
+    HubSpot, Notion, Slack, Zendesk, Hostaway y credenciales por nombre.
+  </Card>
+  <Card title="Despliegue y operación" icon="server" href="/sistemas/booking-cloud-functions/despliegue">
+    Firebase deploy, rollback, entornos y monitorización.
+  </Card>
+  <Card title="Runbook" icon="life-ring" href="/sistemas/booking-cloud-functions/runbook">
+    Equipo responsable y fallos más comunes.
+  </Card>
+</CardGroup>

@@ -104,6 +104,10 @@ El servicio `watchdog` (`packages/ingest/src/workers/watchdog.ts`) cada 15 min l
 
 Umbrales de ejemplo (catálogo completo en `watchdog.ts` y `docs/monitoring.md`): `aircall-sync` 20 min, `hubspot-ingest` 26 h, `gong-ingest` 28 h, `daniela-profiles-sync` 45 min.
 
-<Warning>
-  `docs/monitoring.md` es una **guía de setup**, no un inventario en vivo. Qué capas están realmente activas hoy en Railway/Slack/Healthchecks.io y el valor de `WATCHDOG_WEB_HEALTH_URL`/`WATCHDOG_MCP_HEALTH_URL` son **PENDIENTE de confirmar**.
-</Warning>
+<Note>
+  Estado real verificado el 2026-10-20:
+  - El servicio `watchdog` corre cada 15 minutos y vigila `https://micaela.vivla.ai/api/health/ready` (`WATCHDOG_WEB_HEALTH_URL`) y `https://mcp.micaela.vivla.ai/health/ready` (`WATCHDOG_MCP_HEALTH_URL`). Las dos responden 200.
+  - El watchdog manda además un latido a Healthchecks.io (`WATCHDOG_HEARTBEAT_URL`, en Railway), así que si el propio watchdog deja de correr también salta un aviso.
+  - Los 37 servicios de producción tienen `SENTRY_DSN`.
+  - `vivla-status` no tiene sondas de Micaela: su vigilancia es solo la de este repo.
+</Note>

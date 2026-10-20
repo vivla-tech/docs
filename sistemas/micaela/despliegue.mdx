@@ -15,11 +15,14 @@ Micaela corre en **Railway**, todos los servicios dentro de un único proyecto (
 | `mcp` | Servidor MCP (Custom Connector de Claude) | `mcp.micaela.vivla.ai` (dominio propio en Railway) |
 | `ingest` (muchos servicios) | Workers + crons de sincronización | — (sin HTTP) |
 
-(URLs según `CLAUDE.md` «Deploy targets»; el servicio `mcp` usa un dominio custom de Railway.)
-
-<Warning>
-  Los hostnames exactos y el nombre del proyecto en Railway los gestiona la plataforma, no el repo. Los valores de arriba vienen de `CLAUDE.md` (una pista, no el código): confirmar el host público real es **PENDIENTE de confirmar** en Railway.
-</Warning>
+<Note>
+  Verificado en Railway y Cloudflare el 2026-10-20:
+  - Proyecto Railway **VIVLA-Micaela**, entorno `production`: 37 servicios de la app (más Postgres), todos conectados al repo `vivla-tech/micaela`, rama `master`. Un push a `master` despliega solo.
+  - `web` → `micaela.vivla.ai`, con el proxy de Cloudflare activo y sin Cloudflare Access: la propia app pide el login.
+  - `mcp` → `mcp.micaela.vivla.ai`, DNS directo a Railway (sin proxy ni Access): lo protege solo la autenticación del servidor MCP.
+  - Healthcheck de Railway: `/api/health/live` en todos los servicios (`railway.json`). Las dos superficies responden también en `/api/health/ready` (web) y `/health/ready` (mcp).
+  - El proyecto tiene además un entorno `native` con los ingests del repo `micaela-native`.
+</Note>
 
 ### Entornos
 
@@ -66,6 +69,6 @@ Cambiar `apps/mcp/src/tools/*.ts` o cualquier cosa que exponga `@micaela/queries
 - **Apagar la emisión a Sentry (rollback de la instrumentación):** borrar la variable `SENTRY_DSN` del servicio deja `initSentry` como un no-op total; apaga la emisión entera **sin desplegar nada** (`packages/ingest/src/ops/sentry.ts:50`).
 - **Frenar un cron de escritura:** quitarle la `cronSchedule` NO es seguro — un servicio de Railway sin schedule arranca, termina y Railway lo **reinicia en bucle**; en los workers con `--escribir-de-verdad` (p. ej. `hubspot-scores-push`, `hubspot-top-pages-push`) eso son escrituras reales a HubSpot cada pocos segundos (`scripts/railway-start.sh`). Para parar uno de esos, pausarlo en Railway, no dejarlo sin schedule.
 
-<Warning>
-  El procedimiento de **rollback de un despliegue** (volver a una versión anterior de la web/mcp en Railway) no está documentado en el repo. El patrón habitual es re-desplegar la versión previa desde el historial de Railway; confirmarlo es **PENDIENTE de confirmar**.
-</Warning>
+<Note>
+  Railway conserva los despliegues anteriores de cada servicio: desde su historial se puede volver a desplegar uno previo. Como cada push a `master` despliega, revertir el commit en `master` también vuelve atrás. Si el cambio llevaba una migración ya aplicada a mano, revisa el [runbook](/sistemas/micaela/runbook) antes.
+</Note>
