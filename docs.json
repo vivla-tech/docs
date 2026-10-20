@@ -163,6 +163,27 @@
         "tab": "Sistemas",
         "groups": [
           {
+            "group": "Atlas",
+            "pages": [
+              "sistemas/vivla-atlas/index",
+              "sistemas/vivla-atlas/despliegue",
+              "sistemas/vivla-atlas/integraciones",
+              "sistemas/vivla-atlas/retrieval",
+              "sistemas/vivla-atlas/runbook",
+              "sistemas/vivla-atlas/vault"
+            ]
+          },
+          {
+            "group": "Booking Cloud Functions",
+            "pages": [
+              "sistemas/booking-cloud-functions/index",
+              "sistemas/booking-cloud-functions/despliegue",
+              "sistemas/booking-cloud-functions/funciones",
+              "sistemas/booking-cloud-functions/integraciones",
+              "sistemas/booking-cloud-functions/runbook"
+            ]
+          },
+          {
             "group": "Concierge (Alma)",
             "pages": [
               "sistemas/vivla-concierge/index",
@@ -174,13 +195,23 @@
             ]
           },
           {
-            "group": "Booking Cloud Functions",
+            "group": "PropCos",
             "pages": [
-              "sistemas/booking-cloud-functions/index",
-              "sistemas/booking-cloud-functions/despliegue",
-              "sistemas/booking-cloud-functions/funciones",
-              "sistemas/booking-cloud-functions/integraciones",
-              "sistemas/booking-cloud-functions/runbook"
+              "sistemas/propcos/index",
+              "sistemas/propcos/despliegue",
+              "sistemas/propcos/integraciones",
+              "sistemas/propcos/runbook",
+              "sistemas/propcos/tareas-y-monitorizacion"
+            ]
+          },
+          {
+            "group": "Status",
+            "pages": [
+              "sistemas/vivla-status/index",
+              "sistemas/vivla-status/despliegue",
+              "sistemas/vivla-status/monitorizacion",
+              "sistemas/vivla-status/runbook",
+              "sistemas/vivla-status/sondas"
             ]
           }
         ]
