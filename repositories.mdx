@@ -1,199 +1,198 @@
 ---
 title: "Repositorios"
-description: "Inventario completo de los repositorios de VIVLA, su propósito, stack y conexiones"
+description: "Inventario de los repositorios de VIVLA en producción: qué hacen, dónde corren y cómo se documentan"
 ---
 
 # Repositorios
 
-Inventario de todos los repositorios del ecosistema VIVLA, organizados por dominio.
+Inventario de los repositorios de VIVLA que están en producción, agrupados por dominio. Esta wiki es la fuente de verdad técnica de todos ellos.
+
+<Note>
+  **Cómo se documenta cada repo.** Hay dos modelos:
+
+  - **Subrepo:** el repo tiene su carpeta `docs/wiki` con su `docs.json`. El workflow `aggregate.yml` de este repo la copia a la wiki.
+  - **Agente:** un agente de `vivla-smurfs` lee el código cada día y escribe las páginas directamente en este repo.
+
+  Los repos marcados «Sin documentar» se cubren en la fase 3 del plan de cobertura.
+</Note>
+
+## Resumen
+
+| Repo | Qué es | Dónde corre | Rama de producción | Documentación |
+|---|---|---|---|---|
+| [vivla-tools](#vivla-tools) | Plataforma interna: chat, encuestas, notificaciones, Identity | Railway + Vercel | `main` | Subrepo, [49 páginas](/tools/index) |
+| [vivla-api](#vivla-api) | API principal de la app y el panel | Railway | `master` | Agente (Scribe), [7 páginas](/backend/index) + [Operativa](/operativa/index) |
+| [vivla-mobile-app](#vivla-mobile-app) | App de propietarios (iOS y Android) | App Store y Google Play | `main` | Subrepo, [32 páginas](/mobile/index) |
+| [vivla-panel](#vivla-panel) | Backoffice de CX | Vercel | `main` | Subrepo, [20 páginas](/panel/index) |
+| [vivla-cms](#vivla-cms) | Web pública y su CMS | Vercel + Railway | `main` | Sin documentar |
+| [vivla-concierge](#vivla-concierge) | Agentes de Alma (Lola) | Railway | `main` | Sin documentar |
+| [vivla-atlas](#vivla-atlas) | Vault de conocimiento y búsqueda con citas | Railway | `develop` (despliegue manual) | Sin documentar |
+| [vivla-smurfs](#vivla-smurfs) | Flota de agentes de código | Railway | `develop` (despliegue manual) | Sin documentar |
+| [vivla-intelligence](#vivla-intelligence) | Cerebro con datos de la empresa, app de Slack | Railway | `main` | Sin documentar |
+| [micaela](#micaela) | Inteligencia de ventas de todo el embudo | Railway | `master` | Sin documentar |
+| [booking-cloud-functions](#booking-cloud-functions) | Automatismos de reservas e integraciones | Firebase | `main` | Sin documentar |
+| [propcos](#propcos) | Servicio legal y financiero de PropCos | Proveedor externo | `main` | Solo el lado de Tools: [PropCos en Tools](/tools/platform/propcos) |
+| [bigquery-vivla](#bigquery-vivla) | Data warehouse (Dataform, BigQuery) | Google Cloud | `main` | Sin documentar |
+| [vivla-status](#vivla-status) | Sondas, página de estado y Sentry como código | Cloudflare Workers | `main` | Sin documentar |
+| [vivla-app-site](#vivla-app-site) | Verificación de deep links y landing de la app | Cloudflare Pages | `main` | Sin documentar |
+| [docs](#docs) | Esta wiki | Cloudflare Workers | `main` | — |
 
 ---
 
-## Plataforma principal
-
-<CardGroup cols={2}>
-  <Card title="vivla-tools" icon="wrench" href="https://github.com/vivla-tech/vivla-tools">
-    Plataforma interna: chat, surveys, community, notificaciones, equipos.
-  </Card>
-  <Card title="vivla-api" icon="server" href="https://github.com/vivla-tech/vivla-api">
-    API REST principal. Sirve a la app móvil y al panel de CX.
-  </Card>
-  <Card title="vivla-mobile-app" icon="mobile" href="https://github.com/vivla-tech/vivla-mobile-app">
-    App para copropietarios (iOS y Android).
-  </Card>
-  <Card title="vivla-panel" icon="headset" href="https://github.com/vivla-tech/vivla-panel">
-    Backoffice para agentes de atención al cliente.
-  </Card>
-</CardGroup>
+## Producto
 
 ### vivla-tools
 
 | | |
 |---|---|
-| **Propósito** | Plataforma interna de Vivla. Monorepo con chat de soporte en tiempo real, encuestas NPS (5 tipos), community guidelines, notificaciones push, gestión de equipos y permisos granulares. Es el corazón operativo del negocio. |
-| **Stack** | TanStack Start (frontend), NestJS (backend), Supabase (PostgreSQL), Auth0, Stream Chat, Cloudinary, Resend |
-| **Hosting** | Railway (backend + frontend) |
-| **Apps** | `apps/frontend` (panel interno), `apps/backend` (API), `apps/community-frontend` (portal público clientes), `apps/home-excellence` (portal público propietarios) |
-| **Conexiones** | Consumido por vivla-mobile-app (chat, surveys). Community Portal y Home Excellence son portales públicos. |
-| **Características** | Turborepo + pnpm workspaces, packages compartidos (common, ui, eslint-config), Windmill para syncs automáticos |
-| **Docs wiki** | 24 páginas MDX — [Ver tab Vivla Tools](/tools/index) |
+| **Propósito** | Plataforma interna de VIVLA y corazón operativo del negocio: chat de soporte, encuestas, notificaciones, equipos y permisos, proveedores y facturas, Vivla Identity. |
+| **Stack** | Monorepo Turborepo + pnpm. TanStack Start (frontend), NestJS 10 (backend), Supabase (PostgreSQL), Auth0, Stream Chat, Windmill. |
+| **Apps** | `backend`, `frontend`, `identity`, `mobile` (app CX), `community-frontend`, `home-excellence`, `owner-portal`, `spark`, `web`, `windmill`, entre otras. |
+| **Hosting** | Backend e Identity en Railway, frontend en Vercel. `develop` despliega el entorno de desarrollo y `main` producción (`.github/workflows/deploy.yml`). |
+| **Wiki** | Subrepo (`docs/wiki`). El deploy de `main` avisa a la wiki. El agente Editor abre cada mañana un PR que la actualiza. |
 
 ### vivla-api
 
 | | |
 |---|---|
-| **Propósito** | API REST interna que expone datos y lógica de negocio a los frontends. Arquitectura modular por entidades con múltiples versiones (V1, V2, V3). |
-| **Stack** | NestJS 11, Node.js 22+, PostgreSQL (TypeORM), Firebase/Firestore, Google Cloud Storage |
-| **Hosting** | Railway |
-| **Conexiones** | Consumida por vivla-mobile-app, vivla-panel y calendar-manager |
-| **Características** | Sistema de validación custom, jobs programados, comandos CLI, caching, Sentry, i18n, migraciones de DB |
-| **Docs wiki** | Documentado nativamente en este repo (`docs`), ya que `vivla-api` no aloja su propia carpeta de docs. Ver [tab Vivla API](/backend/index) y las páginas de producto en [Operativa](/operativa/index). |
+| **Propósito** | API principal. Sirve a la app de propietarios, al panel de CX y a Tools: reservas, calendarios, casas, invitaciones, usuarios. |
+| **Stack** | NestJS 11, PostgreSQL (TypeORM), Firebase/Firestore (datos heredados), Google Cloud Storage. |
+| **Hosting** | Railway: `production` desde `master` y `staging` desde `stage`. `develop` es la rama de integración y no se despliega. |
+| **Wiki** | El repo no tiene carpeta `docs/wiki`. El agente Scribe lee el código de producción cada mañana y escribe las pestañas [Vivla API](/backend/index) y [Operativa](/operativa/index) directamente en este repo. |
 
 ### vivla-mobile-app
 
 | | |
 |---|---|
-| **Propósito** | App móvil para copropietarios: reservar estancias, comunicarse, gestionar perfil y propiedades. |
-| **Stack** | React Native 0.79.6, Expo SDK 53, Expo Router 5, TypeScript 5.8 |
-| **Hosting** | App Store (iOS), Google Play (Android) |
-| **Conexiones** | Consume vivla-api (auth, booking, properties, stays) y Tools API (chat, surveys) |
-| **Características** | New Architecture habilitada, Zustand + React Query, Stream Chat, PostHog, Sentry, i18n (ES/EN) |
-| **Docs wiki** | 31 páginas MDX — [Ver tab Mobile App](/mobile/index) |
+| **Propósito** | App de propietarios: reservar estancias, chatear con CX, gestionar perfil y casas. |
+| **Stack** | React Native 0.81, Expo SDK 54, Expo Router, TypeScript, Zustand + React Query, Stream Chat, PostHog, Sentry. |
+| **Hosting** | App Store y Google Play con EAS. `develop` publica builds de preview y `main` lanza el pipeline de producción (`.github/workflows/main.yml`). |
+| **Conexiones** | vivla-api (auth, reservas, casas, estancias) y Tools API (chat, encuestas). |
+| **Wiki** | Subrepo (`docs/wiki`). El pipeline de `main` avisa a la wiki. El agente Editor abre cada mañana un PR que la actualiza. |
 
 ### vivla-panel
 
 | | |
 |---|---|
-| **Propósito** | Nuevo backoffice para agentes de CX (customer experience). |
-| **Stack** | Por confirmar |
-| **Hosting** | Por confirmar |
-| **Conexiones** | Consume vivla-api |
-| **Docs wiki** | Pendiente — template disponible en `subrepo-examples/panel-docs.json` |
+| **Propósito** | Backoffice para los agentes de CX. |
+| **Stack** | SPA de Vite + React, función serverless para los reportes. |
+| **Hosting** | Vercel. El código entra por `staging` y llega a producción con un PR de `staging` a `main`. |
+| **Conexiones** | vivla-api. |
+| **Wiki** | Subrepo (`docs/wiki`), escrito a mano por el equipo del panel. Llega a la wiki con la ejecución programada de `aggregate.yml`. |
+
+### vivla-cms
+
+| | |
+|---|---|
+| **Propósito** | Web pública de VIVLA (`www.vivla.com`) y el CMS que la alimenta. |
+| **Stack** | Payload CMS + Next.js, PostgreSQL. |
+| **Hosting** | Vercel y Railway. |
+| **Wiki** | Sin documentar. La fuente es el propio repo. |
+
+---
+
+## Alma y agentes
+
+### vivla-concierge
+
+| | |
+|---|---|
+| **Propósito** | Plano de control de los agentes de Alma (Mastra). Aquí vive Lola, la agente de atención a propietarios. |
+| **Hosting** | Railway: `production` desde `main` (`concierge.vivla.com`, detrás de Cloudflare Access) y `develop` desde `develop`. |
+| **Conexiones** | Tools API, vivla-atlas y el MCP de esta wiki. |
+| **Wiki** | Sin documentar. |
+
+### vivla-atlas
+
+| | |
+|---|---|
+| **Propósito** | Vault de conocimiento de VIVLA y capa de búsqueda con citas que usan los agentes. |
+| **Hosting** | Railway, servicio `atlas-server` (`mcp.atlas.vivla.com`). No tiene despliegue automático: se publica con `railway up` y el vault viaja dentro de la imagen. |
+| **Wiki** | Sin documentar. |
+
+### vivla-smurfs
+
+| | |
+|---|---|
+| **Propósito** | Flota de agentes de código (Mastra + Claude Agent SDK): vigilan Sentry, triagean peticiones, mantienen esta wiki (Scribe, Editor) y abren PRs. |
+| **Hosting** | Railway, servicio `smurfs`. Se despliega con `railway up` desde `develop`. |
+| **Wiki** | Sin documentar. |
+
+### vivla-intelligence
+
+| | |
+|---|---|
+| **Propósito** | Convierte los datos de la empresa en un «cerebro» que responde en Slack. |
+| **Hosting** | Railway (`railway.toml`). CI y sonda de uptime en GitHub Actions. |
+| **Wiki** | Sin documentar. |
+
+### micaela
+
+| | |
+|---|---|
+| **Propósito** | Inteligencia de ventas de todo el embudo (HubSpot, Gong y otras fuentes). |
+| **Hosting** | Railway (`railway.json`), rama `master`. |
+| **Wiki** | Sin documentar. |
 
 ---
 
 ## Servicios
 
-<CardGroup cols={2}>
-  <Card title="booking-cloud-functions" icon="cloud" href="https://github.com/vivla-tech/booking-cloud-functions">
-    Cloud functions de Firebase para automatizaciones e integraciones.
-  </Card>
-  <Card title="calendar-manager" icon="calendar" href="https://github.com/vivla-tech/calendar-manager">
-    Gestión de calendarios, integrándose al panel.
-  </Card>
-  <Card title="VivlaNPS" icon="chart-simple" href="https://github.com/vivla-tech/VivlaNPS">
-    Herramienta de subida de imágenes NPS por propiedad.
-  </Card>
-</CardGroup>
-
 ### booking-cloud-functions
 
 | | |
 |---|---|
-| **Propósito** | Functions serverless para automatización del sistema de booking e integraciones con servicios externos. |
-| **Stack** | Firebase Functions, Node.js 20, HubSpot API, Notion, Slack, Zendesk, Sharp (imágenes), json2csv |
-| **Hosting** | Google Firebase (Cloud Functions) |
-| **Módulos** | books, calendars, dashboard, notifications, NPS, reports, Hostaway, proxy |
-| **Docs wiki** | Pendiente |
-
-### calendar-manager
-
-| | |
-|---|---|
-| **Propósito** | Gestión de calendarios de propiedades. Se está integrando al panel. |
-| **Stack** | Por confirmar (repo no disponible localmente) |
-| **Conexiones** | Consume vivla-api |
-| **Docs wiki** | Pendiente |
-
-### VivlaNPS
-
-| | |
-|---|---|
-| **Propósito** | Aplicación web para subir y gestionar imágenes NPS (Net Promoter Score) por propiedad. Almacena en Firebase Storage con metadata en Firestore. |
-| **Stack** | React 19, Vite, Material-UI (MUI), Firebase (Firestore + Storage), TypeScript |
-| **Docs wiki** | Pendiente |
-
----
-
-## Deep links y redirects
-
-<CardGroup cols={2}>
-  <Card title="vivla-app-site" icon="link" href="https://github.com/vivla-tech/vivla-app-site">
-    Verificación de deep links y landing page de la app.
-  </Card>
-  <Card title="app-invites" icon="envelope" href="https://github.com/vivla-tech/app-invites">
-    Redirects de invitaciones con metadata social.
-  </Card>
-</CardGroup>
-
-### vivla-app-site
-
-| | |
-|---|---|
-| **Propósito** | Sitio estático que sirve archivos de verificación de deep links (AASA para iOS, assetlinks.json para Android) y una landing page con detección de plataforma. |
-| **Stack** | Cloudflare Pages, Wrangler CLI |
-| **Hosting** | Cloudflare Pages (vivla.app, staging.vivla.app, dev.vivla.app) |
-| **Docs wiki** | Pendiente |
-
-### app-invites
-
-| | |
-|---|---|
-| **Propósito** | Servicio de redirects para invitaciones a la app con generación dinámica de metadata Open Graph y Twitter Cards. Detecta plataforma y redirige a las app stores. |
-| **Stack** | Vercel Functions, Tailwind CSS |
-| **Hosting** | Vercel |
-| **Conexiones** | Consume vivla-api para obtener metadata de invitaciones |
-| **Docs wiki** | Pendiente |
-
-<Warning>
-  **Posible solapamiento**: `app-invites` y `vivla-app-site` ambos manejan redirects y deep links. Pendiente confirmar si `app-invites` está deprecado en favor de `vivla-app-site` o si sirven propósitos diferentes.
-</Warning>
-
----
-
-## Externo
-
-<Card title="propcos" icon="building" href="https://github.com/vivla-tech/propcos">
-  Desarrollo externo por contratista.
-</Card>
+| **Propósito** | Functions serverless para automatizar reservas e integrarse con servicios externos. |
+| **Stack** | Firebase Functions, Node.js. Integraciones con HubSpot, Notion, Slack y Zendesk. |
+| **Hosting** | Google Firebase (Cloud Functions). |
+| **Wiki** | Sin documentar. |
 
 ### propcos
 
 | | |
 |---|---|
-| **Propósito** | Proyecto desarrollado por contratista externo (Digio). |
-| **Stack** | Por confirmar (repo no disponible localmente) |
-| **Docs wiki** | Pendiente |
+| **Propósito** | Servicio legal y financiero de las PropCos. Lo construye y lo opera un proveedor externo. |
+| **Hosting** | Infraestructura del proveedor (Docker y su propio CI). |
+| **Conexiones** | Tools lo consume en vivo. |
+| **Wiki** | Solo el lado de Tools: [PropCos en Tools](/tools/platform/propcos). Falta su arquitectura interna. |
+
+### vivla-app-site
+
+| | |
+|---|---|
+| **Propósito** | Sirve los archivos de verificación de deep links (AASA para iOS, `assetlinks.json` para Android) y una landing con detección de plataforma. |
+| **Hosting** | Cloudflare Pages (`vivla.app`, `staging.vivla.app`, `dev.vivla.app`). |
+| **Wiki** | Sin documentar. |
+
+### vivla-status
+
+| | |
+|---|---|
+| **Propósito** | Sondas con aserción de contenido, página de estado y la configuración de Sentry como código. |
+| **Hosting** | Cloudflare Workers. `main` es lo que está en producción. |
+| **Wiki** | Sin documentar. |
+
+---
+
+## Datos
+
+### bigquery-vivla
+
+| | |
+|---|---|
+| **Propósito** | Data warehouse de VIVLA: modelos Dataform sobre BigQuery, más Looker, Cube y monitorización. |
+| **Hosting** | Google Cloud. Un push a `main` que toca `dataform/` despliega los modelos (`dataform-deploy.yml`). |
+| **Wiki** | Sin documentar. |
 
 ---
 
 ## Documentación
 
-<Card title="docs" icon="book" href="https://github.com/vivla-tech/docs">
-  Este repositorio. Wiki centralizada en Mintlify.
-</Card>
-
 ### docs
 
 | | |
 |---|---|
-| **Propósito** | Documentación centralizada de toda la plataforma VIVLA. Agrega documentación de los subrepos via GitHub Actions. |
-| **Stack** | Mintlify, GitHub Actions (agregación automática) |
-| **Hosting** | Mintlify Cloud (wiki.vivla.com, protegido por Cloudflare Access) |
-
----
-
-## Estado de documentación
-
-| Repo | Wiki pages | Estado |
-|------|-----------|--------|
-| vivla-mobile-app | 31 | Activo |
-| vivla-tools | 24 | Activo |
-| vivla-api | 7 | Activo (nativo en repo `docs`) |
-| vivla-panel | 0 | Pendiente (template disponible) |
-| booking-cloud-functions | 0 | Pendiente |
-| calendar-manager | 0 | Pendiente |
-| vivla-app-site | 0 | Pendiente |
-| app-invites | 0 | Pendiente |
-| VivlaNPS | 0 | Pendiente |
-| propcos | 0 | Pendiente |
+| **Propósito** | Esta wiki: la documentación técnica centralizada de VIVLA. |
+| **Stack** | Contenido en MDX con la sintaxis de componentes de Mintlify y `docs.json`. Sitio construido con Astro Starlight. Un Cloudflare Worker sirve el sitio y el servidor MCP. |
+| **Hosting** | Cloudflare Workers (`wiki.vivla.com`), detrás de Cloudflare Access con login de Vivla Identity. Staging en `wiki-next.vivla.com`. |
+| **Actualización** | `aggregate.yml` copia los subrepos y despliega. Se lanza con cada push a `main`, con el aviso de Tools y de la app, y con una ejecución programada. |

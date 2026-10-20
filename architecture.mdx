@@ -1,59 +1,63 @@
 ---
 title: "Arquitectura"
-description: "Visión general de la arquitectura y ecosistema de VIVLA"
+description: "Visión general de la arquitectura y del ecosistema de VIVLA"
 ---
 
 ## Ecosistema VIVLA
 
-VIVLA opera sobre dos backends independientes que sirven a distintos clientes. Todos los frontends pasan por Cloudflare para DNS, CDN y control de acceso.
+VIVLA tiene dos backends de producto: **vivla-api** y la **Tools API** de vivla-tools. Alrededor viven los agentes de Alma, la web pública, los datos y la monitorización. Cloudflare da DNS, CDN y control de acceso (Access) a casi todo.
 
 ```mermaid
 graph TD
-    CF[Cloudflare<br/>CDN / DNS / Access]
+    CF[Cloudflare<br/>DNS / CDN / Access]
 
     subgraph Clientes
-        MOBILE[Mobile App<br/>React Native + Expo]
-        PANEL[Panel CX<br/>vivla-panel]
-        TOOLS_FE[Vivla Tools<br/>TanStack Start]
-        COMMUNITY[Community Portal<br/>Next.js]
-        HOME_EX[Home Excellence<br/>Next.js]
+        MOBILE[App de propietarios<br/>React Native + Expo]
+        PANEL[Panel CX<br/>vivla-panel · Vercel]
+        TOOLS_FE[Vivla Tools<br/>frontend · Vercel]
+        WEB[Web pública + CMS<br/>vivla-cms]
     end
 
     subgraph Backends
-        API[Vivla API<br/>NestJS + TypeORM]
-        TOOLS_BE[Tools API<br/>NestJS + Supabase]
+        API[Vivla API<br/>NestJS + TypeORM · Railway]
+        TOOLS_BE[Tools API<br/>NestJS + Supabase · Railway]
+        IDENTITY[Vivla Identity<br/>Auth0 · vivla-tools/identity]
     end
 
-    subgraph Bases de datos
-        DB_API[(PostgreSQL<br/>Railway)]
-        DB_TOOLS[(PostgreSQL<br/>Supabase)]
+    subgraph Alma
+        CONCIERGE[vivla-concierge<br/>agentes Mastra · Lola]
+        ATLAS[vivla-atlas<br/>vault + búsqueda]
     end
 
     subgraph Servicios
-        CLOUD_FN[Cloud Functions<br/>Firebase]
-        CALENDAR[Calendar Manager]
-        APP_SITE[vivla-app-site<br/>Deep Links]
-        INVITES[app-invites<br/>Invitaciones]
-        NPS[VivlaNPS<br/>Imágenes NPS]
+        CLOUD_FN[booking-cloud-functions<br/>Firebase]
+        PROPCOS[propcos<br/>externo]
+        APP_SITE[vivla-app-site<br/>deep links]
+        STATUS[vivla-status<br/>sondas · Worker]
+        SMURFS[vivla-smurfs<br/>agentes de código]
     end
 
-    CF --> MOBILE
+    subgraph Datos
+        DB_API[(PostgreSQL<br/>Railway)]
+        DB_TOOLS[(PostgreSQL<br/>Supabase)]
+        BQ[(BigQuery<br/>bigquery-vivla)]
+    end
+
     CF --> PANEL
     CF --> TOOLS_FE
-    CF --> COMMUNITY
-    CF --> HOME_EX
+    CF --> CONCIERGE
 
-    MOBILE -->|auth, booking,<br/>propiedades, stays| API
-    MOBILE -->|chat, surveys| TOOLS_BE
+    MOBILE -->|reservas, casas, usuarios| API
+    MOBILE -->|chat, encuestas| TOOLS_BE
     PANEL --> API
     TOOLS_FE --> TOOLS_BE
-    COMMUNITY --> TOOLS_BE
-    HOME_EX --> TOOLS_BE
-    CALENDAR --> API
+    TOOLS_BE --> API
+    TOOLS_BE --> PROPCOS
+    CONCIERGE --> TOOLS_BE
+    CONCIERGE --> ATLAS
 
     API --> DB_API
     TOOLS_BE --> DB_TOOLS
-
     CLOUD_FN -.->|HubSpot, Notion,<br/>Slack, Zendesk| API
 
     style API fill:#0c2425,color:#fff
@@ -63,52 +67,54 @@ graph TD
 ```
 
 <Note>
-  La **Mobile App** consume **dos backends**: la API principal (vivla-api) para booking, propiedades, auth y stays; y la **Tools API** (vivla-tools) para chat y encuestas.
+  La **app de propietarios** consume **dos backends**: vivla-api para reservas, casas, usuarios y auth, y la **Tools API** para chat y encuestas.
 </Note>
 
 ## Dos backends, dos mundos
 
 | | Vivla API | Tools API |
 |---|---|---|
-| **Repo** | `vivla-api` | `vivla-tools` (monorepo) |
+| **Repo** | `vivla-api` | `vivla-tools` (monorepo, `apps/backend`) |
 | **Framework** | NestJS 11 | NestJS 10 |
-| **Base de datos** | PostgreSQL (Railway) via TypeORM | PostgreSQL (Supabase) directo |
-| **Auth** | JWT propio | Auth0 + API key guard |
-| **Clientes** | Mobile App, Panel, Calendar Manager | Mobile App (chat/surveys), Tools Frontend, Community Portal, Home Excellence |
-| **Hosting** | Railway | Railway |
+| **Base de datos** | PostgreSQL (Railway) con TypeORM; Firestore para datos heredados | PostgreSQL (Supabase) |
+| **Auth** | Auth0 (tenant `vivlapro`) | Auth0 (Vivla Identity) + API key para integraciones |
+| **Clientes** | App de propietarios, Panel CX, Tools API | App (chat y encuestas), frontend de Tools, portales públicos, agentes de Alma |
+| **Hosting** | Railway (`production` desde `master`, `staging` desde `stage`) | Railway (`production` desde `main`, `develop` desde `develop`) |
 
-## Stack tecnológico completo
+## Stack tecnológico
 
 | Producto | Tecnología | Hosting |
 |----------|-----------|---------|
 | **Vivla API** | NestJS 11, PostgreSQL (TypeORM), Firebase, GCS | Railway |
-| **Vivla Tools** | TanStack Start + NestJS + Supabase, Stream Chat, Auth0 | Railway |
-| **Mobile App** | React Native 0.79, Expo SDK 53, TypeScript 5.8 | App Store / Google Play |
-| **Panel CX** | vivla-panel (TBD) | TBD |
-| **Community Portal** | Next.js 14 (portal público clientes) | Railway |
-| **Home Excellence** | Next.js 14 (portal público propietarios) | Railway |
-| **Cloud Functions** | Firebase Functions, Node.js 20 | Google Firebase |
-| **Deep Links** | Cloudflare Pages (vivla-app-site) | Cloudflare Pages |
-| **Invitaciones** | Vercel Functions (app-invites) | Vercel |
-| **NPS** | React 19, Vite, MUI, Firebase | TBD |
-| **DNS / CDN** | Cloudflare (Access para wiki y tools) | — |
-| **Docs** | Mintlify | Mintlify Cloud |
+| **Vivla Tools** | TanStack Start + NestJS + Supabase, Stream Chat, Auth0, Windmill | Backend e Identity en Railway, frontend en Vercel |
+| **App de propietarios** | React Native 0.81, Expo SDK 54, TypeScript | App Store y Google Play (EAS) |
+| **Panel CX** | SPA de Vite + función serverless | Vercel |
+| **Web pública + CMS** | vivla-cms (Payload CMS + Next.js) | Vercel y Railway |
+| **Agentes de Alma** | vivla-concierge (Mastra) y vivla-atlas (vault + búsqueda) | Railway |
+| **Agentes de código** | vivla-smurfs (Mastra + Claude Agent SDK) | Railway |
+| **Cloud Functions** | Firebase Functions, Node.js | Google Firebase |
+| **PropCos** | propcos (desarrollo externo) | Infraestructura del proveedor |
+| **Deep links** | vivla-app-site | Cloudflare Pages |
+| **Monitorización** | vivla-status (sondas, página de estado, Sentry como código) | Cloudflare Workers |
+| **Datos** | bigquery-vivla (Dataform, BigQuery) | Google Cloud |
+| **DNS / CDN / Access** | Cloudflare, con login de Auth0 (Vivla Identity) | — |
+| **Wiki** | Astro Starlight + Cloudflare Worker (sitio y MCP), detrás de Cloudflare Access | Cloudflare Workers (`wiki.vivla.com`) |
 
 ## Conexiones clave
 
 <CardGroup cols={2}>
-  <Card title="Mobile App → 2 backends" icon="mobile">
-    La app consume **vivla-api** para auth, booking, propiedades, stays e invitaciones. Usa **Tools API** para chat en tiempo real y encuestas.
+  <Card title="App → 2 backends" icon="mobile">
+    La app consume **vivla-api** para auth, reservas, casas y estancias. Usa la **Tools API** para el chat en tiempo real y las encuestas.
   </Card>
   <Card title="Panel → Vivla API" icon="headset">
-    El backoffice de CX consume exclusivamente la API principal para gestionar reservas y atender clientes.
+    El backoffice de CX consume la API principal para gestionar reservas y atender a los clientes.
+  </Card>
+  <Card title="Alma → Tools y Atlas" icon="robot">
+    Concierge (Lola) lee y escribe en la Tools API y consulta Atlas y esta wiki por MCP.
   </Card>
   <Card title="Cloud Functions → Integraciones" icon="cloud">
-    Firebase Functions orquestan: HubSpot (CRM), Notion, Slack (alertas), Zendesk (soporte), reportes y NPS.
-  </Card>
-  <Card title="Portales públicos → Tools API" icon="globe">
-    Community Portal (guías de propiedades) y Home Excellence (métricas para propietarios) son Next.js apps que consumen la Tools API.
+    Firebase Functions orquesta HubSpot (CRM), Notion, Slack, Zendesk, reportes y NPS.
   </Card>
 </CardGroup>
 
-Ver [Repositorios](/repositories) para la descripción detallada de cada repo.
+Ver [Repositorios](/repositories) para la ficha de cada repo y [Entornos](/environments) para las URLs y ramas.
