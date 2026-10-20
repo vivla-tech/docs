@@ -10,7 +10,7 @@ Atlas tiene dos piezas desplegables:
 | Pieza | Qué es | Dónde | URL |
 |---|---|---|---|
 | **Servidor de retrieval** | API Hono + MCP (`apps/server`) | Railway, servicio `atlas-server` | `mcp.atlas.vivla.com` |
-| **Lector + chat web** | Sitio Starlight (`apps/site`) + Pages Functions (`functions/`) | Cloudflare Pages (inferido) | `atlas.vivla.com` |
+| **Lector + chat web** | Sitio Starlight (`apps/site`) + Pages Functions (`functions/`) | Cloudflare Pages, proyecto `vivla-atlas` | `atlas.vivla.com` |
 
 Fuente: [Entornos](/environments), [Repositorios](/repositories), `functions/api/chat.ts` (autodetección de Pages). El servidor construye con **Nixpacks** y arranca con `npm run start -w @atlas/server`; el healthcheck es `GET /health` (`railway.json:3`, `railway.json:5`, `railway.json:7`).
 
@@ -18,17 +18,21 @@ Fuente: [Entornos](/environments), [Repositorios](/repositories), `functions/api
   **El vault viaja dentro de la imagen.** El servidor resuelve `knowledge/` desde el módulo (`apps/server/src/index.ts → ../../../knowledge`), no desde el cwd, salvo que se defina `KNOWLEDGE_DIR`. Por eso un cambio en el vault requiere re-desplegar (o llamar a `/reload` si el disco ya tiene el cambio) (`apps/server/src/index.ts`, `apps/server/src/vault.ts`).
 </Note>
 
+El lector web es el proyecto de Cloudflare Pages **`vivla-atlas`**, conectado a GitHub (`vivla-tech/vivla-atlas`). Construye con `npm install && npm run build -w @atlas/site` y publica `apps/site/dist`. Sus dominios son `atlas.vivla.com` y `vivla-atlas.pages.dev` (verificado el 2026-10-20).
+
 <Warning>
-  El repo **no commitea** ninguna config de Cloudflare Pages (no hay `wrangler.*` ni `vercel.json`): que el lector web corra en Pages se deduce de los comentarios de `functions/`. El nombre del proyecto Pages, su dominio exacto y cómo se despliega el sitio son **PENDIENTE de confirmar** con el equipo IA.
+  **La rama de producción de Pages es `main`, no `develop`.** Un push a `develop` (o a cualquier otra rama) solo crea un *preview* (`develop.vivla-atlas.pages.dev`). Hoy `atlas.vivla.com` sirve `main` en `983bf24`, del **2026-09-01**: el lector web no muestra los cambios del vault posteriores a esa fecha hasta que se mergee `develop` en `main` (verificado el 2026-10-20).
 </Warning>
 
 ## Entornos y rama de producción
 
-La rama de producción es **`develop`** (no hay `main`/`master` en el flujo de este repo). No hay entorno de staging separado (`.git` del repo; [Entornos](/environments)).
+El servidor se despliega desde **`develop`**. El lector web se publica desde **`main`** (ver arriba). No hay entorno de staging separado: Railway solo tiene el entorno `production` {V}.
 
 | Entorno | Rama | Destino |
 |---|---|---|
-| Producción | `develop` | `railway up` manual → servicio `atlas-server` (`mcp.atlas.vivla.com`) |
+| Producción (servidor) | `develop` | `railway up` manual → proyecto Railway `vivla-atlas`, servicio `atlas-server` (`mcp.atlas.vivla.com`) |
+| Producción (lector web) | `main` | Cloudflare Pages `vivla-atlas`, automático al hacer push (`atlas.vivla.com`) |
+| Preview (lector web) | cualquier otra | Cloudflare Pages, `<rama>.vivla-atlas.pages.dev` |
 
 <Note>
   No hay CI commiteado (`.github/` no existe en el repo): ni typecheck, ni tests, ni despliegue automático. Los tests existen (`npm test -w @atlas/server`) pero se corren a mano.
@@ -44,9 +48,7 @@ railway up
 
 Railway construye con Nixpacks y arranca `npm run start -w @atlas/server` (`railway.json`). Esto es consistente con lo descrito en [Entornos](/environments) y [Repositorios](/repositories).
 
-<Warning>
-  El procedimiento exacto (proyecto/entorno de Railway al que apunta `railway up`, quién tiene permisos, y cómo se despliega en paralelo el lector web de `atlas.vivla.com`) **no está en el repo** — es **PENDIENTE de confirmar** con el equipo IA.
-</Warning>
+El servicio `atlas-server` **no está conectado a GitHub** en Railway: cada despliegue es una subida con `railway up` desde un checkout local, sin commit asociado en Railway. Hay que hacerlo con el CLI enlazado al proyecto `vivla-atlas`, entorno `production`, servicio `atlas-server` (verificado el 2026-10-20).
 
 ## Cómo se vuelve atrás
 
@@ -54,9 +56,7 @@ Railway reinicia el contenedor ante un fallo: `restartPolicyType: ON_FAILURE` (`
 
 Ante `SIGTERM` (redeploy) o `SIGINT` (Ctrl-C local), el servidor hace un apagado ordenado que incluye el flush de Langfuse antes de salir (`apps/server/src/index.ts`).
 
-<Warning>
-  El **rollback** (volver a un despliegue anterior) no está documentado en el repo. El patrón habitual es re-desplegar la versión previa desde el historial de Railway, o volver a hacer `railway up` desde un commit anterior de `develop`. Confirmar el procedimiento es **PENDIENTE de confirmar**.
-</Warning>
+Para volver atrás, redespliega una versión anterior desde el historial de despliegues del servicio en Railway, o haz `railway up` desde un commit anterior de `develop`. Como los despliegues son subidas del CLI, Railway no guarda el commit: anota qué commit subes. En el lector web, Cloudflare Pages permite hacer *rollback* a un despliegue de producción anterior desde el dashboard (verificado el 2026-10-20).
 
 ## Autenticación (gate)
 
@@ -76,9 +76,11 @@ Dos métodos, no excluyentes (`apps/server/src/auth.ts`):
   </Tab>
 </Tabs>
 
-<Warning>
-  Qué método está activo hoy en producción (y si el gate está puesto) depende de qué variables haya en Railway, que **no** están en el repo: **PENDIENTE de confirmar**. El README menciona el plan de auth con Auth0 OAuth 2.1 (espejando `vivla-tools`) como pendiente de producción.
-</Warning>
+En producción están **los dos métodos activos**: el servicio tiene definidas `ATLAS_API_KEY` y `AUTH0_DOMAIN` + `AUTH0_AUDIENCE` (tenant `vivlapro.eu.auth0.com`, audiencia `https://mcp.atlas.vivla.com`). `GET /health` responde sin autenticación (verificado el 2026-10-20).
+
+<Note>
+  `mcp.atlas.vivla.com` apunta directamente a Railway, sin pasar por el proxy de Cloudflare: **Cloudflare Access no lo protege**. La única protección es este gate del servidor (verificado el 2026-10-20).
+</Note>
 
 ## Variables de entorno
 

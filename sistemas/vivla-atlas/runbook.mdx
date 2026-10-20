@@ -20,9 +20,7 @@ Atlas lo mantiene el equipo **IA**. En el código, `CODEOWNERS` apunta todo el r
 
 (`apps/server/src/index.ts`)
 
-<Warning>
-  Quién llama a `POST /reload` tras aprobar un cambio en el vault (p.ej. el editor de `vivla-tools`, un webhook de git, o un redeploy manual) **no está en este repo**: es **PENDIENTE de confirmar** con el equipo IA.
-</Warning>
+Hoy **nadie llama a `POST /reload` de forma automática**: ningún otro repo de VIVLA (Tools, smurfs, concierge) lo invoca. Un cambio del vault llega a producción con un nuevo `railway up` del servidor y, para el lector web, con un merge a `main` (verificado el 2026-10-20).
 
 ## Monitorización
 
@@ -31,7 +29,7 @@ Atlas lo mantiene el equipo **IA**. En el código, `CODEOWNERS` apunta todo el r
 - **Logs:** el servidor loguea el estado de las capas al arrancar, cada reindex (con stats), los avisos de id duplicado y los fallos fail-soft de cada integración (`apps/server/src/index.ts`, `apps/server/src/db.ts`).
 
 <Warning>
-  **No hay Sentry** ni ninguna otra captura de errores integrada en el repo (ni dependencia, ni import). Si Atlas debe reportar a Sentry en producción, no está hecho: **PENDIENTE de confirmar** si se añade.
+  **Atlas no tiene monitorización:** no hay Sentry en el código ni en las variables de Railway, y `vivla-status` no tiene ninguna sonda para `mcp.atlas.vivla.com` ni `atlas.vivla.com`. Si el servidor cae, nadie recibe un aviso (verificado el 2026-10-20).
 </Warning>
 
 ## Fallos más comunes

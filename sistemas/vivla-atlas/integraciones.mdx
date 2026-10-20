@@ -74,9 +74,7 @@ POST /api/solicitudes  → ${ATLAS_SERVER_URL}/solicitudes
   **Identidad autoritativa:** en `POST`, el proxy pisa `solicitante_email` con el header `Cf-Access-Authenticated-User-Email` que añade **Cloudflare Access**. El cliente no puede falsear quién solicita. El nombre se deriva de la parte local del email (`functions/api/solicitudes.ts`).
 </Danger>
 
-<Warning>
-  La configuración real de Cloudflare Access (quién puede entrar a `atlas.vivla.com`, el equipo/política) y el valor de estas variables de Pages viven en el dashboard de Cloudflare, no en el repo: **PENDIENTE de confirmar** con el equipo IA.
-</Warning>
+`atlas.vivla.com` está detrás de la app de Cloudflare Access **«Atlas»**: política `Vivla Users` (correos `@vivla.com`), login con Auth0 (Vivla Identity) con redirección automática y sesión de 7 días. Las variables de Pages en producción son `ATLAS_SERVER_URL`, `ATLAS_API_KEY`, `CONCIERGE_URL` y `CONCIERGE_API_KEY` (verificado el 2026-10-20).
 
 ## Relación con otros repos
 
