@@ -172,6 +172,17 @@
               "sistemas/vivla-concierge/integraciones",
               "sistemas/vivla-concierge/runbook"
             ]
+          },
+          {
+            "group": "Micaela",
+            "pages": [
+              "sistemas/micaela/index",
+              "sistemas/micaela/crons-y-monitorizacion",
+              "sistemas/micaela/despliegue",
+              "sistemas/micaela/fuentes-de-datos",
+              "sistemas/micaela/integraciones",
+              "sistemas/micaela/runbook"
+            ]
           }
         ]
       }

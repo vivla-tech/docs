@@ -1,0 +1,79 @@
+---
+title: "Micaela"
+description: "Stack de datos e inteligencia de ventas de todo el embudo de Vivla. Qué es, quién lo usa y cómo está montado."
+---
+
+**Micaela** es el stack de **datos y reporting de GTM** (go-to-market) de Vivla: ingiere HubSpot, Aircall/Daniela, Gong y varias capas de BigQuery en un único Postgres y expone esos datos por tres superficies que comparten una sola librería de queries (`CLAUDE.md` «Architecture», `apps/`, `packages/`).
+
+El repo está en producción en la rama `master` y corre en **Railway**. Para su sitio en el mapa de repos, mira [Repositorios](/repositories) y [Entornos](/environments).
+
+<Info>
+  Propietario: equipo **IA**. Clase: **agente**. La fuente de verdad de esta sección es el código de la rama de producción (`master`); cuando el `README`/`CLAUDE.md` contradicen al código, manda el código y se avisa.
+</Info>
+
+## Quién lo usa
+
+- **RevOps y dirección de ventas** usan el dashboard web (`apps/web`, Next.js 15) tras OAuth de Google restringido a `@vivla.com` (`apps/web/src/auth.config.ts:4`). Es un dashboard interno de solo lectura del negocio.
+- **Claude Desktop / Claude.ai** consumen los mismos datos vía el servidor **MCP** como Custom Connector de solo lectura (`apps/mcp/README.md`).
+- **El copilot conversacional** `/daily-review/copilot` es un segundo consumidor in-process del mismo catálogo de herramientas dentro de la web (`apps/web/src/lib/copilot/`, `CLAUDE.md`).
+
+<Warning>
+  Nombres propios de las personas usuarias: **PENDIENTE de confirmar**. El código solo evidencia que el acceso está restringido al dominio `@vivla.com` y a los equipos de RevOps/ventas.
+</Warning>
+
+## La convención más importante
+
+**El SQL lo posee `@micaela/queries`.** Ni `apps/web` ni `apps/mcp` escriben SQL propio: la web es un re-export fino y el MCP envuelve con zod + redacción de PII. Así web y MCP nunca devuelven números distintos para la misma pregunta (`CLAUDE.md` «The single most important convention»). La única excepción viva es `lead-detail`, cuyo SQL sigue inline y está protegido por `scripts/check-mcp-sync.sh`.
+
+## Estructura del repo
+
+Monorepo pnpm (`pnpm-workspace.yaml`), Node `20.11.0` (`.nvmrc`), gestor `pnpm@9.12.0` (`package.json:6`).
+
+```
+apps/
+  web/         Dashboard Next.js 15 para RevOps (micaela.vivla.ai)
+  mcp/         Servidor MCP Streamable-HTTP, solo lectura (Custom Connector)
+packages/
+  core/        Taxonomías canónicas (segmentos, objeciones, NBAs) + tipos. Sin SQL
+  db/          Esquema Drizzle, cliente postgres-js, helpers de BigQuery, seeds
+  ingest/      Workers que sincronizan HubSpot/Aircall/Gong a Postgres (crons)
+  queries/     Funciones SQL consumidas por web Y mcp. Fuente única
+  agent-tools/ Catálogo de ~63 tools (CATALOG) que ven MCP y el copilot
+deploy/
+  engagement-sync/  Cloud Run Job (BigQuery) — NO corre en Railway
+scripts/       Dispatchers de Railway, seeds de Langfuse, smoke de Sentry, reports
+```
+
+(`CLAUDE.md` «Architecture», verificado contra el árbol de `apps/` y `packages/`.)
+
+## Stack
+
+| Pieza | Elección |
+|---|---|
+| Web | **Next.js 15** (App Router, RSC) + NextAuth con Google OAuth (`apps/web`, `apps/web/src/auth.ts:14`) |
+| MCP | Servidor **Streamable-HTTP** de solo lectura, OAuth 2.1 (PKCE + registro dinámico) (`apps/mcp/README.md`) |
+| Base de datos | **Postgres** (Railway), esquema con Drizzle, cliente postgres-js (`packages/db`) |
+| Ingesta | Workers CLI con `tsx` en runtime; crons de Railway (`packages/ingest`, `scripts/railway-start.sh`) |
+| LLM | **Claude** de Anthropic (Opus en copilot/daily-review, Haiku en extracción) + Gemini/Vertex por `LLM_PROVIDER` (`CLAUDE.md`, `packages/ingest`) |
+| Observabilidad de prompts | **Langfuse** (prompts versionados; `scripts/seed-*-prompt.ts`) |
+| Errores | **Sentry** (`packages/ingest/src/ops/sentry.ts`) — ver [Crons y monitorización](/sistemas/micaela/crons-y-monitorizacion) |
+
+## Dónde seguir
+
+<CardGroup cols={2}>
+  <Card title="Fuentes de datos" icon="database" href="/sistemas/micaela/fuentes-de-datos">
+    HubSpot (CRM), Aircall/Daniela (llamadas), Gong y las capas de BigQuery.
+  </Card>
+  <Card title="Despliegue y operación" icon="server" href="/sistemas/micaela/despliegue">
+    Railway, servicios, entornos, URLs, cómo se despliega y cómo se vuelve atrás.
+  </Card>
+  <Card title="Integraciones" icon="plug" href="/sistemas/micaela/integraciones">
+    A qué llama, quién le llama y sus credenciales por nombre.
+  </Card>
+  <Card title="Crons y monitorización" icon="clock" href="/sistemas/micaela/crons-y-monitorizacion">
+    La cascada diaria, el smoke de Sentry y las tres capas de vigilancia.
+  </Card>
+  <Card title="Runbook" icon="life-ring" href="/sistemas/micaela/runbook">
+    Equipo responsable y los fallos más comunes.
+  </Card>
+</CardGroup>

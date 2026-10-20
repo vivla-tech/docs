@@ -1,0 +1,52 @@
+---
+title: "Integraciones"
+description: "A qué servicios externos llama Micaela, quién le llama a ella y las credenciales que necesita, siempre por nombre."
+---
+
+## A qué llama (salientes)
+
+| Servicio | Para qué | Credenciales (por nombre) |
+|---|---|---|
+| **BigQuery** (GCP, proyecto `growthia`) | Fuente de lectura de casi todo (HubSpot nativo, silver/gold, Gong, Windsor) | `GCP_PROJECT_ID`, `GCP_SERVICE_ACCOUNT_JSON`, `GCP_VERTEX_LOCATION`, `HUBSPOT_DATASET`, `GONG_DATASET` |
+| **HubSpot CRM** (API) | Lecturas puntuales (stage-history, atribución, perfiles) y escrituras de scoring | `HUBSPOT_ACCESS_TOKEN`, `HUBSPOT_PORTAL_ID`, `HUBSPOT_PORTAL_URL_BASE`, `HUBSPOT_UI_DOMAIN` |
+| **Supabase de Daniela** (Aircall) | Mirror de contactos, perfiles, enrichments y transcripciones del bot | `AIRCALL_SUPABASE_URL`, `AIRCALL_SUPABASE_SERVICE_ROLE_KEY` |
+| **Anthropic (Claude)** | Copilot, daily-review, scoring de WhatsApp, extracción de preferencias, resúmenes AE | `ANTHROPIC_API_KEY` |
+| **Vertex / Gemini** (alternativa de LLM) | Proveedor de modelo conmutable | `LLM_PROVIDER`, `GEMINI_MODEL`, `GCP_VERTEX_LOCATION` |
+| **Langfuse** | Prompts versionados y observabilidad de LLM (los prompts de prod los sirve Langfuse) | `LANGFUSE_HOST`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` |
+| **Slack** | Digests de informes, nudges a SDR, alertas del watchdog | `SLACK_BOT_TOKEN`, `SLACK_NUDGE_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `SLACK_WATCHDOG_WEBHOOK_URL`, `SLACK_CHANNEL_REVOPS`, `SLACK_CHANNEL_SDR`, `SLACK_CHANNEL_AE` |
+| **Sentry** | Captura de errores y la prueba de humo | `SENTRY_DSN`, `SENTRY_ENVIRONMENT`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` |
+| **Healthchecks.io** (externo) | Dead-man's switch de la capa 3 de monitorización | `WATCHDOG_HEARTBEAT_URL` |
+
+(Nombres tomados de `process.env.*` en el código y de `apps/mcp/.env.example`; ver [Crons y monitorización](/sistemas/micaela/crons-y-monitorizacion) para Sentry y Slack.)
+
+## Quién le llama (entrantes)
+
+| Quién | Cómo | Credencial que exige |
+|---|---|---|
+| **RevOps / dirección** (humanos) | Dashboard web tras **Google OAuth** restringido a `@vivla.com` | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `AUTH_SECRET` |
+| **Claude Desktop / Claude.ai** | Custom Connector contra el servidor **MCP** (`/mcp`), de solo lectura | `MCP_BEARER_TOKEN` (secreto compartido vía la pantalla OAuth del MCP) |
+| **El propio copilot de la web** | Consumidor in-process del mismo catálogo de tools | — (mismo proceso que `web`) |
+
+<Note>
+  El MCP habla **OAuth 2.1** (PKCE + registro dinámico de cliente, RFC 7591): Claude hace el baile solo y el formulario del conector solo pide nombre y URL; la contraseña que se pega en `/authorize` es el valor de `MCP_BEARER_TOKEN` (`apps/mcp/README.md`). El servicio `mcp` lee de un rol Postgres de **solo lectura** (`micaela_readonly`); el chat con SQL libre exige además `DATABASE_URL_READONLY` en el servicio `web` (`CLAUDE.md`).
+</Note>
+
+## Bases de datos y variables de conexión
+
+- `DATABASE_URL` — Postgres compartido por todos los servicios.
+- `DATABASE_URL_READONLY` — rol de solo lectura para el SQL libre del copilot; sin ella el chat funciona pero no monta SQL libre (`CLAUDE.md`).
+- `DB_POOL_MAX`, `DB_STATEMENT_TIMEOUT_MS` — tuning del pool.
+
+## Credenciales: reglas
+
+<Danger>
+  Las credenciales se nombran **solo por nombre**, nunca por valor. No copies ningún token, clave, contraseña ni connection string a la wiki ni a un PR, aunque lo encuentres en el repo. `.env.local` apunta a la **BD de producción**: trátalo como secreto y bórralo de cualquier worktree al terminar (`CLAUDE.md`).
+</Danger>
+
+<Warning>
+  **`SENTRY_DSN` está puesta servicio a servicio, no como variable compartida de proyecto.** El CLI de Railway no tiene variables compartidas, así que se escribió en los **38 servicios** uno a uno (todos menos los dos Postgres). Un cron **nuevo NO la hereda**: hay que añadírsela a mano al darlo de alta, o queda mudo en Sentry sin que nada avise (`CLAUDE.md`). Ver el [runbook](/sistemas/micaela/runbook).
+</Warning>
+
+<Warning>
+  Dónde se gestiona cada secreto (qué está en Railway, qué en GCP Secret Manager, quién tiene acceso) es **PENDIENTE de confirmar**: el repo evidencia los **nombres**, no su custodia. El token de HubSpot del Cloud Run Job se copia desde el servicio Railway `hubspot-attribution-sync` a GCP Secret Manager (`hubspot-access-token`) por `deploy/engagement-sync/deploy.sh`.
+</Warning>
