@@ -1,0 +1,102 @@
+---
+title: "Despliegue y operación"
+description: "Dónde corre la flota vivla-smurfs, cómo se despliega con railway up, cómo se vuelve atrás, su monitorización y el runbook de fallos comunes."
+---
+
+## Dónde corre
+
+La flota corre como **un único servicio siempre encendido en Railway**, construido desde el `Dockerfile` (Node 22 slim + `git` + el CLI de GitHub `gh`). El contenedor construye con `mastra build` y arranca con `mastra start`, que en `$PORT` (inyectado por Railway) sirve **a la vez** el servidor de API (donde vive el **scheduler** de crons) y **Mastra Studio** (`railway.json:8`, `Dockerfile:12`, `CLAUDE.md`, sección «Deploy (Railway)»).
+
+| Entorno | Rama | Servicio / URL |
+|---|---|---|
+| Producción | `develop` | Railway, servicio `smurfs` — `https://smurfs-production.up.railway.app` |
+
+(Fuente: [Entornos](/environments) y `CLAUDE.md:306`.)
+
+<Note>
+  La rama de producción es **`develop`**, no `main`. `main` está congelada y lo que corre en producción es `develop` (`src/config/reporter-targets.ts:52`, [Entornos](/environments)). El scheduler solo corre dentro de este proceso de larga vida, y su estado es durable vía el store LibSQL (ver abajo).
+</Note>
+
+La imagen también instala las librerías de sistema de Chromium (para las capturas Antes/Después de los PRs de vivla-cms) y habilita pnpm por corepack. Fija `IS_SANDBOX=1` porque el contenedor corre como root y Claude Code rechaza `bypassPermissions` bajo root salvo que el entorno esté marcado como sandbox aislado (`Dockerfile:31`, `Dockerfile:58`).
+
+## Cómo se despliega
+
+El despliegue es **manual con `railway up`** desde `develop` (`railway up --ci` desde el repo), según [Entornos](/environments) y el `docs/alma-analyst-slack-setup.md` del repo.
+
+<Note>
+  Verificado en Railway el 2026-10-20: proyecto **vivla-smurfs**, entorno `production`, servicio `smurfs`. El servicio **no tiene repo conectado**, así que un push no despliega nada: cada despliegue es un `railway up --ci` lanzado a mano desde un checkout limpio de `develop`. En el repo tampoco hay CI (no existe `.github/workflows/`).
+</Note>
+
+`mastra build` empaqueta `src/` en `.mastra/output/*.mjs` y **no** copia `plugins/` al lado, por eso el `Dockerfile` fija `SMURFS_SKILLS_DIR=/app/plugins/vivla-skills` como fuente de verdad de la ruta de los Claude Skills en el contenedor (`Dockerfile:51`).
+
+## Cómo se vuelve atrás
+
+Railway reinicia el contenedor ante un fallo: `restartPolicyType: ON_FAILURE` con hasta **10** reintentos (`railway.json:9`). El proceso además sobrevive a un rechazo de promesa no capturado en cualquier workflow: se loguea con su stack y el scheduler y los webhooks de los demás pitufos siguen corriendo; solo una excepción no capturada es fatal (`src/mastra/index.ts:39`).
+
+<Note>
+  Para volver atrás, lanza otra vez `railway up --ci` desde el commit anterior de `develop`. Railway también conserva los despliegues anteriores del servicio y permite volver a desplegar uno desde su historial.
+</Note>
+
+## Almacenamiento durable
+
+El scheduler necesita un `LibSQLStore` para que su dominio de `schedules` sea durable; sin él, el estado del cron queda en memoria. En Railway, `LIBSQL_URL` apunta a un fichero en un **volumen montado** (p. ej. `file:/data/mastra.db`); en local cae por defecto a `file:./.smurfs/mastra.db` (git-ignorado) (`src/mastra/index.ts:110`, `CLAUDE.md`, env `LIBSQL_URL`).
+
+El mismo store guarda otros estados por repo que deben sobrevivir a un reinicio: los heads de sync de Editor/Scribe/Documenter (`editor_sync_state`), la rotación de Papa (`papa_review_state`), la memoria por issue de Handy (`handy_issue_state`), las tablas de Postman (`pr_*`) y las sesiones de Brainy (`linear_sessions`). Por eso en Railway **tiene que** vivir en el volumen.
+
+<Note>
+  El `.gitignore` ignora `.smurfs/` (el store LibSQL local). En Railway el volumen `smurfs-volume` está montado en `/data` y `LIBSQL_URL=file:/data/mastra.db` (verificado el 2026-10-20, 1,6 GB usados de 50 GB).
+</Note>
+
+## Variables de entorno de despliegue
+
+Las mínimas para que el servicio arranque y los pitufos LIVE funcionen (`CLAUDE.md`, sección «Deploy (Railway)»):
+
+- `CLAUDE_CODE_OAUTH_TOKEN` — auth de Claude con la suscripción. En producción `ANTHROPIC_API_KEY` **no** está puesta, a propósito (ver [Modelos y facturación](/sistemas/vivla-smurfs/roster#modelos-y-facturación)).
+- `GH_TOKEN` **o** el trío `GITHUB_APP_ID` / `GITHUB_APP_INSTALLATION_ID` / `GITHUB_APP_PRIVATE_KEY` — auth de GitHub (si ambos, gana `GH_TOKEN`). Producción usa la App: `GH_TOKEN` no está puesto.
+- `LIBSQL_URL=file:/data/mastra.db` con un volumen montado en `/data`.
+- `SENTRY_AUTH_TOKEN` / `SENTRY_ORG` / `SENTRY_BASE_URL` — Handy.
+
+El resto de credenciales por nombre (Slack, Linear, Cursor, PostHog, Reporter, Iconero…) están en [Webhooks e integraciones](/sistemas/vivla-smurfs/webhooks). `PORT` lo provee Railway y el servidor lo lee solo.
+
+## Monitorización
+
+- **Logs de Railway:** los rechazos no capturados se loguean con `[fleet] unhandled rejection (kept running)` y el stack; cada run de Postman imprime lo que hizo (`logRun`) (`src/mastra/index.ts:39`).
+- **Política de reinicio:** `ON_FAILURE` ×10 (`railway.json:9`).
+
+<Warning>
+  **Nadie vigila la flota desde fuera.** `railway.json` no define `healthcheckPath`, el repo no reporta a **Sentry** (Handy lo lee, pero la flota no envía sus propios errores) y `vivla-status` no tiene ninguna sonda para `smurfs-production.up.railway.app` (verificado el 2026-10-20). Si el proceso se cuelga, los crons dejan de correr sin aviso. `GET /health` responde 200 sin autenticación, así que una sonda es sencilla.
+</Warning>
+
+## Equipo responsable
+
+La flota la mantiene el equipo **IA** de Vivla (`docs/repos.yml` del repo `docs`: `owner_team: ia`, `class: agent`).
+
+<Warning>
+  Quién está de guardia y los canales de alerta concretos **no viven en el código** — es **PENDIENTE de confirmar** con el equipo IA.
+</Warning>
+
+## Runbook: fallos más comunes
+
+<AccordionGroup>
+  <Accordion title="El scheduler no dispara nada tras un redeploy">
+    El estado del scheduler es durable solo si `LIBSQL_URL` apunta a un volumen montado. Sin volumen, el filesystem de Railway es efímero y el estado del cron se reinicia en cada redeploy. Comprueba que `LIBSQL_URL=file:/data/mastra.db` y que hay un volumen en `/data` (`src/mastra/index.ts:110`).
+  </Accordion>
+  <Accordion title="Un push de Brainy falla con «Invalid username or token»">
+    En modo App de GitHub el token de instalación muere en 1 hora y la URL `origin` del clon lo lleva dentro. Las sesiones de Brainy duran más de una hora; por eso toda operación de red va por `refreshOriginAuth(dir)`, que re-estampa `origin` con un token fresco. Si reaparece, revisa que `pushBranch`/`deepenToCommit` lo llaman (`src/mastra/tools/repo.ts`, `CLAUDE.md`, sección «Hard guardrails»).
+  </Accordion>
+  <Accordion title="Handy no encuentra issues de Sentry (404)">
+    La org `vivla-lifestyle` vive en la **región DE**, así que `SENTRY_BASE_URL` DEBE ser `https://de.sentry.io` — el host por defecto `sentry.io` da 404. El token necesita `org:read` + `project:read` + `event:read` (`CLAUDE.md`, env `SENTRY_AUTH_TOKEN`).
+  </Accordion>
+  <Accordion title="Un webhook responde {ignored:'…-disabled'} o 503">
+    La ruta está inerte porque falta su secreto. Pon el gate correspondiente: `SMURFS_WEBHOOK_SECRET` (github), `LINEAR_WEBHOOK_SECRET`/`LINEAR_ISSUES_WEBHOOK_SECRET` (linear), `SLACK_SIGNING_SECRET` (slack), `POSTMAN_TOOLS_INBOUND_KEY` (tools), `ICONERO_SECRET` (iconero). Ver [Webhooks](/sistemas/vivla-smurfs/webhooks) (`src/mastra/index.ts:124`).
+  </Accordion>
+  <Accordion title="Postman no actúa (registra no-ops)">
+    Postman está en **SHADOW por defecto**: `POSTMAN_SHADOW` sin poner ⇒ las escrituras son no-ops registrados. Solo `POSTMAN_SHADOW=0` lo pone en vivo, y así está en producción (verificado el 2026-10-20). Además, en modo LIVE un `POSTMAN_AUTOMATION_BOT_ID` sin poner rechaza todo mensaje (`CLAUDE.md`, env `POSTMAN_SHADOW`).
+  </Accordion>
+  <Accordion title="El contenedor se reinicia cortando los dibujos de Iconero">
+    Cada dibujo es un proceso de Claude Code + sharp; con 7 a la vez el contenedor se quedó sin memoria (14/10). El tope es `ICONERO_MAX_CONCURRENT` y los que no caben esperan en cola. El código lo pone por defecto en **3** (`src/webhooks/iconero.ts:32`); el `CLAUDE.md` del repo dice 8 — manda el código.
+  </Accordion>
+  <Accordion title="Falla el build por los Claude Skills no encontrados">
+    `mastra build` no copia `plugins/` junto a `.mastra/output`. El contenedor fija `SMURFS_SKILLS_DIR=/app/plugins/vivla-skills` para que la resolución de la ruta no dependa del `cwd`. Si falla en local, exporta esa variable o deja que la resolución busque hacia arriba `plugins/vivla-skills` (`Dockerfile:51`, `CLAUDE.md`, sección «Claude Skills»).
+  </Accordion>
+</AccordionGroup>

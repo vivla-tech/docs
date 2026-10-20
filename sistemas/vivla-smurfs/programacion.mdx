@@ -1,0 +1,62 @@
+---
+title: "Programación y objetivos"
+description: "Las tareas programadas (crons) del scheduler de la flota vivla-smurfs y en qué repos actúa cada pitufo."
+---
+
+El scheduler de Mastra corre **dentro del proceso siempre encendido de Railway** y dispara cada workflow LIVE en su cron. Los lanzadores one-shot de `runners/` hacen el mismo trabajo sin el scheduler (`src/mastra/index.ts:19`, `CLAUDE.md`, sección Runtime). El estado del scheduler es durable gracias al store LibSQL (ver [Despliegue](/sistemas/vivla-smurfs/despliegue)).
+
+<Info>
+  Todos los crons son **`Europe/Madrid`** y están escalonados para no colisionar. Un pitufo que actúa sobre varios repos usa un **array** de entradas `schedule` (cada una con su `id` estable); uno de un solo repo usa la forma de objeto único (`CLAUDE.md`, sección Schedules).
+</Info>
+
+## Crons
+
+| Pitufo | Workflow | Cron(s) |
+|---|---|---|
+| Painter | `improve-ui` | tools `0 1 * * *` (solo frontend web) |
+| Architect | `nightly-architect` | tools `0 3 * * *` |
+| Hefty | `dep-bump` | tools `0 2 * * 1`, mobile `30 2 * * 1` (lunes) |
+| Nosey | `migration-drift` | tools `0 4 * * *` |
+| Tailor | `tighten-type` | tools `0 5 * * *`, mobile `30 5 * * *` |
+| Papa | `quality-review` | tools `0 2 * * *` (diario, tiene cola), mobile `30 2 * * 3` (miércoles) |
+| Poet | `changelog-draft` | tools `0 6 * * 1`, mobile `30 6 * * 1` (lunes) |
+| Editor | `wiki-sync` | diff (diario): tools `0 7 * * *`, mobile `30 7 * * *`; auditoría (lunes): tools `0 8 * * 1`, mobile `30 8 * * 1` |
+| Scribe | `scribe-sync` | diario `0 9 * * *` (fuente vivla-api → destinos docs + vivla-atlas) |
+| Scribe (datos) | `scribe-data-sync` | diario `15 9 * * *` (fuente: Postgres v2 de vivla-api → destino: vivla-atlas) |
+| Documenter | `documenter` | laborables `45 9 * * 1-5` (una ejecución, recorre en secuencia cada repo `mode: documenter` de `repos.yml`) |
+| Handy | `sentry-sweep` | mobile `0 0 * * *`; tools-backend `30 0 * * 1,3,5`, tools-front `30 0 * * 2,4,6` |
+| Reporter | `weekly-report` | `0 9 * * 5` (viernes, una ejecución para todos los repos) |
+| Lola watcher | `lola-watcher` | `*/2 * * * *` (cada 2 minutos) |
+| Lola weekly analyst | `lola-weekly-analysis` | `0 9 * * 1` (lunes 09:00) |
+
+(Fuente: `CLAUDE.md`, sección «Schedules»; registro de workflows en `src/mastra/index.ts:242`. Vanity/`web-audit` está registrado pero **pausado** desde el 15/10 porque ningún repo objetivo define `webRoutes` — `src/mastra/index.ts:99`, `src/mastra/index.ts:249`.)
+
+## En qué repos actúa cada pitufo
+
+Los objetivos de los pitufos de código programados son **solo `vivla-tools` y `vivla-mobile-app`** (`CLAUDE.md`, sección Schedules). Algunas excepciones y matices que vienen del código:
+
+- **Painter** corre solo en `vivla-tools` (su frontend `apps/frontend`); `vivla-mobile-app` es React Native y queda fuera de su alcance a propósito.
+- **Nosey** corre solo en `vivla-tools` y abre un **issue**, nunca un PR; nunca edita migraciones.
+- **Papa** toma órdenes del repo: si hay `docs/refactor-queue.md`, su primer `- [ ]` sin marcar es la tarea del run (`src/mastra/tools/refactor-queue.ts`). Reordenar el backlog es un PR al repo objetivo, no un redeploy de la flota.
+- **Scribe** es la excepción a la regla de dos objetivos (ver [Roster](/sistemas/vivla-smurfs/roster)): lee `vivla-api` (`master`) y escribe en `docs` y `vivla-atlas`.
+- **Documenter** recorre los repos `mode: documenter` del `repos.yml` del wiki.
+
+### Cobertura de Handy (Sentry)
+
+Las parejas (repo, proyecto Sentry) que Handy barre son **configuración, no código** (`src/config/sentry-targets.ts:47`). Las tres por defecto desde el 30-jul:
+
+| `id` | Repo | Proyecto Sentry | Cron |
+|---|---|---|---|
+| `mobile` | `vivla-mobile-app` | `vivla-app` | `0 0 * * *` |
+| `tools-backend` | `vivla-tools` | `tools-backend` | `30 0 * * 1,3,5` |
+| `tools-front` | `vivla-tools` | `tools-front` | `30 0 * * 2,4,6` |
+
+`vivla-tools` aparece dos veces (dos proyectos Sentry) y alternan días porque el candado «un PR abierto por (agente, repo)» es por **repo**, no por proyecto. `tools-backend` trae por defecto un `excludeTitle` que descarta ruido de 404s públicos / escáneres SEO. Todo esto se puede sustituir con `SENTRY_TARGETS_JSON` sin redeploy (`src/config/sentry-targets.ts:68`).
+
+### Cobertura de Reporter
+
+Reporter cubre **10 repos** por defecto (`src/config/reporter-targets.ts:44`), más allá de los dos objetivos de código, porque **solo lee** (nunca escribe): `vivla-tools`, `vivla-mobile-app`, `vivla-api`, `vivla-panel`, `vivla-cms`, `vivla-atlas`, `vivla-smurfs`, `vivla-concierge`, `micaela` y `vivla-intelligence`. Cada objetivo declara su rama de trabajo y su rama de producción (a menudo distintas); se sustituye con `REPORTER_TARGETS_JSON` sin redeploy.
+
+<Warning>
+  Reporter marca `prodBranch: develop` para `vivla-smurfs` y `vivla-concierge` (`src/config/reporter-targets.ts:52`). Para smurfs es correcto: se despliega `develop` con `railway up`. Para **concierge no lo es**: en Railway, producción despliega `main` y `develop` va a su propio entorno (verificado el 2026-10-20). Reporter cuenta como «en producción» cambios de concierge que todavía no lo están. Se corrige en el código o con `REPORTER_TARGETS_JSON`.
+</Warning>

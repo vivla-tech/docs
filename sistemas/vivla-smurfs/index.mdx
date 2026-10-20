@@ -1,0 +1,80 @@
+---
+title: "Smurfs"
+description: "La flota de agentes de código autónomos de Vivla Tech (los Pitufos): qué es, quién lo usa y cómo está montada."
+---
+
+**Smurfs** (`vivla-smurfs`) es la flota de **agentes de código autónomos** de Vivla Tech: agentes pequeños y de un solo propósito que vigilan el código (Sentry, advisors, dependencias, migraciones, docs) y proponen arreglos como **PRs en borrador**. Está construida sobre **Mastra** + el **Claude Agent SDK** (`README.md:3`, `CLAUDE.md:1`).
+
+El repo está en producción en la rama `develop` y corre en Railway como un único servicio siempre encendido. Para su lugar en el mapa de repos y entornos, mira [Repositorios](/repositories) y [Entornos](/environments).
+
+<Info>
+  Propietario: equipo **IA**. Clase: **agente**. La fuente de verdad de esta sección es el código de la rama de producción (`develop`).
+</Info>
+
+## Qué es y quién lo usa
+
+La flota no la usan personas de forma directa: trabaja sola. Su «salida» son PRs en borrador, issues, mensajes de Slack y páginas de wiki que el equipo de ingeniería revisa después. El principio es siempre el mismo: **el pitufo edita y propone; un humano revisa y mergea** (`src/config/guardrails.ts:44`).
+
+Hay dos grandes tipos de pitufo (`CLAUDE.md:7`):
+
+<CardGroup cols={2}>
+  <Card title="Pitufos de código" icon="robot">
+    Corren headless dentro de un clon de un repo con el **Claude Agent SDK** (`ClaudeSDKAgent`): leen, editan y verifican, y la cosecha es un PR en borrador. Architect, Painter, Vanity, Hefty, Nosey, Tailor, Papa, Editor, Scribe, Documenter, Handy, Brainy… (`src/config/agent-sdk.ts`).
+  </Card>
+  <Card title="Pitufos de texto / evento" icon="comments">
+    Agentes `Agent` de Mastra sin acceso a repo (modelo barato) o código puro sin agente: triaje, changelog, informes, vigilancia de chat. Poet, Reporter, Alma analyst, Postman, Lola watcher… (`src/mastra/index.ts`).
+  </Card>
+</CardGroup>
+
+La lista completa, con su motor, modelo y estado, está en [Roster de pitufos](/sistemas/vivla-smurfs/roster).
+
+## Stack
+
+| Pieza | Elección | Fuente |
+|---|---|---|
+| Runtime | **Mastra** (`@mastra/core`): agentes + workflows + scheduler + servidor | `package.json`, `src/mastra/index.ts:113` |
+| Motor de código | **Claude Agent SDK** (`@mastra/claude` sobre `@anthropic-ai/claude-agent-sdk`), `permissionMode: 'bypassPermissions'` | `CLAUDE.md`, sección «Engines» |
+| LLM | **Claude** — opus (`claude-opus-4-8`) para código, haiku (`claude-haiku-4-5`) para texto barato; algunos pitufos de texto usan `claude-opus-5`. Quién paga cada uno está en [Roster](/sistemas/vivla-smurfs/roster#modelos-y-facturación) | `src/config/models.ts:11` |
+| Estado durable | **LibSQL** (`@mastra/libsql`), un fichero en un volumen de Railway | `src/mastra/index.ts:209` |
+| Despliegue | **Railway**, imagen desde `Dockerfile` (Node 22 slim + `git` + `gh`) | `railway.json:4`, `Dockerfile:12` |
+| Node / gestor | Node **22.12.0**, pnpm **9.15.4**, ESM | `.nvmrc`, `package.json` |
+
+## Estructura del repo
+
+```
+src/
+  config/      guardrails, repo-targets, models, github-auth, sentry/reporter-targets
+  mastra/
+    index.ts    el plano de control: agentes + workflows + scheduler + rutas HTTP
+    agents/     la persona de cada pitufo (sentry-fixer, architect, postman, …)
+    workflows/  el trabajo de cada pitufo (clonar → agente → commit → PR)
+    tools/      utilidades compartidas (github, sentry, linear, slack, cursor, …)
+    mcp/        clientes MCP (atlas, vivla-docs)
+  webhooks/     entradas HTTP (github, linear, slack, iconero, tools, admin-slack)
+  icons/        Iconero (estudio de iconos de la Content Factory)
+  review/       revisor cross-model de F2
+runners/        lanzadores one-shot por pitufo (tsx), para prueba manual/CI
+plugins/        vivla-skills: Claude Skills empaquetados que cargan los pitufos
+```
+
+(`src/mastra/index.ts`, verificado contra el árbol de `src/`)
+
+## Dónde seguir
+
+<CardGroup cols={2}>
+  <Card title="Roster de pitufos" icon="users" href="/sistemas/vivla-smurfs/roster">
+    Cada pitufo, su trabajo, su motor, su modelo y su estado (LIVE / stub).
+  </Card>
+  <Card title="Programación y objetivos" icon="clock" href="/sistemas/vivla-smurfs/programacion">
+    Los crons del scheduler y en qué repos actúa cada pitufo.
+  </Card>
+  <Card title="Guardrails" icon="shield" href="/sistemas/vivla-smurfs/guardrails">
+    Las reglas duras de la flota y los modos de autenticación con GitHub.
+  </Card>
+  <Card title="Webhooks e integraciones" icon="plug" href="/sistemas/vivla-smurfs/webhooks">
+    A qué llama, quién le llama, sus rutas HTTP y sus credenciales por nombre.
+  </Card>
+  <Card title="Despliegue y operación" icon="server" href="/sistemas/vivla-smurfs/despliegue">
+    Railway, el `railway up` manual, variables de entorno, rollback, monitorización y el runbook de fallos.
+  </Card>
+</CardGroup>
