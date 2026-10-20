@@ -57,7 +57,7 @@ Además corre CI en GitHub Actions en cada PR y push a `main` (`.github/workflow
 
 <Steps>
   <Step title="Rollback por redeploy en Railway">
-    El código no implementa su propio rollback. La vuelta atrás se hace **desde el dashboard de Railway**, re-desplegando un *deployment* anterior del servicio `mastra`. El proceso exacto (botón de redeploy / rollback) es **PENDIENTE de confirmar** contra el dashboard.
+    El código no implementa su propio rollback. La vuelta atrás se hace **desde el dashboard de Railway**, re-desplegando un *deployment* anterior del servicio `mastra`. Railway conserva el historial de despliegues de cada servicio y permite volver a desplegar uno anterior desde ahí.
   </Step>
   <Step title="Revertir el commit">
     Alternativamente, revertir en `main` el commit problemático vuelve a disparar el auto-deploy con el estado anterior. Toda reversión debe quedar registrada en `CHANGELOG.md` con su motivo — el repo nació de un revert sin motivo documentado (`CHANGELOG.md`).
