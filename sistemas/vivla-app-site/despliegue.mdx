@@ -1,0 +1,70 @@
+---
+title: "Despliegue y operación"
+description: "Hosting en Cloudflare Pages, dominios por entorno, deploy manual con wrangler, rollback, cabeceras, crons y monitorización."
+---
+
+## Dónde corre
+
+Sitio estático en **Cloudflare Pages**, proyecto `vivla-app-site`. La carpeta publicada es `public/` y **no hay paso de build** (`wrangler.toml:3`, `package.json:5`). La lógica dinámica vive en una **Pages Function** (`functions/_middleware.js`), que Cloudflare ejecuta en el edge.
+
+`wrangler.toml` fija el nombre del proyecto y `compatibility_date = "2024-12-01"` (`wrangler.toml:1`).
+
+### Dominios por entorno
+
+| Dominio | Entorno | Rama |
+|---|---|---|
+| `vivla.app` | Producción | `main` |
+| `staging.vivla.app` | Beta Prod | — |
+| `dev.vivla.app` | Development | — |
+
+Los tres dominios los sirve el **mismo** proyecto de Pages; lo que cambia por dominio es el AASA que genera la función (ver [Verificación de deep links](/sistemas/vivla-app-site/verificacion-deep-links)). `main` es la rama de producción (`repos.yml`, [Entornos](/environments)).
+
+<Warning>
+  Cómo se asigna cada dominio a una rama o a un entorno de Pages (producción vs. preview) **no está en el código del repo**: es **PENDIENTE de confirmar** en el panel de Cloudflare Pages.
+</Warning>
+
+## Cómo se despliega
+
+El `package.json` define el deploy como un comando manual de wrangler (`package.json:7`):
+
+```bash
+# Deploy manual
+npx wrangler pages deploy public --project-name=vivla-app-site
+
+# Desarrollo local
+npx wrangler pages dev public
+```
+
+No hay workflows de CI en el repo (no existe `.github/`): el deploy, tal como está el código, es **manual**.
+
+<Warning>
+  Si Cloudflare Pages está conectado al repo de GitHub para desplegar automáticamente en cada push a `main`, eso **no se ve en el código**: es **PENDIENTE de confirmar**. Desplegar requiere autenticación de Cloudflare para `wrangler` (token de API de Cloudflare / `wrangler login`), por nombre; su valor no está en el repo.
+</Warning>
+
+## Cómo se vuelve atrás
+
+El repo no define un procedimiento de rollback.
+
+<Warning>
+  El rollback **no está en el código**. Cloudflare Pages conserva los deployments anteriores y permite promover uno previo desde su panel, pero el procedimiento concreto es **PENDIENTE de confirmar** con el equipo mobile. Alternativa por código: revertir el commit en `main` y volver a desplegar.
+</Warning>
+
+## Cabeceras y caché
+
+`public/_headers` fija las cabeceras que sirve Cloudflare (`public/_headers:1`):
+
+- `/.well-known/apple-app-site-association` y `/.well-known/assetlinks.json`: `Content-Type: application/json`, `Access-Control-Allow-Origin: *`, `Cache-Control: public, max-age=3600`. (El AASA lo sirve la función con estas mismas cabeceras; ver [Verificación de deep links](/sistemas/vivla-app-site/verificacion-deep-links).)
+- Iconos e imagen OG: `Cache-Control: public, max-age=86400`.
+- Todo lo demás (`/*`): `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`.
+
+`public/_redirects` manda cualquier ruta no estática a `/index.html` con 200 (`public/_redirects:3`).
+
+## Crons y monitorización
+
+<Note>
+  **No hay tareas programadas (crons)** en este repo: no existe ningún `scheduled`/cron en `wrangler.toml` ni en la función.
+</Note>
+
+<Warning>
+  **No hay Sentry ni sondas de estado en este repo** (ninguna referencia a Sentry ni a monitorización en el código). Las sondas de disponibilidad de VIVLA viven en el repo **vivla-status** (ver [Repositorios](/repositories)); si `vivla.app` o los archivos `/.well-known/` se vigilan desde allí es **PENDIENTE de confirmar**. La comprobación que sí documenta el repo es manual, con `curl` y las herramientas de validación de Apple/Google (`README.md:89`).
+</Warning>
