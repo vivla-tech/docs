@@ -1,0 +1,102 @@
+---
+title: "Despliegue y operación"
+description: "Dónde corre vivla-status, cómo se despliega y se vuelve atrás, su base de datos D1, los secretos por nombre y el desarrollo local."
+---
+
+## Dónde corre
+
+| | |
+|---|---|
+| **Hosting** | Cloudflare Workers, cuenta **VIVLA** (`wrangler.jsonc`) |
+| **Rama de producción** | `main` |
+| **URL** | `status.vivla.com`, dominio personalizado sobre la zona `vivla.com` (`wrangler.jsonc`) |
+| **Entornos** | Solo producción. No hay `staging` declarado en el repo |
+| **Base de datos** | Cloudflare D1 `vivla-status`, binding `DB` (`wrangler.jsonc`, `schema.sql`) |
+
+<Info>
+  `wrangler.jsonc` fija el `account_id` a la cuenta **VIVLA** a propósito: en la misma máquina existe también una cuenta personal, y el pin evita que un despliegue aterrice en la equivocada (`README.md`, `HANDOVER.md`).
+</Info>
+
+<Warning>
+  La página está **sin listar** y debe ir detrás de **Cloudflare Access** restringido a cuentas de vivla.com; el Worker solo añade la cabecera `noindex`, el control de acceso real lo hace Access. Que Access esté configurado y a qué cuentas está restringido es **PENDIENTE de confirmar** fuera del código (`src/index.ts`, `README.md`).
+</Warning>
+
+## Cómo se despliega
+
+El despliegue es **manual** con wrangler; no hay workflow de CI en el repo (`package.json`):
+
+```bash
+npm install
+npm run deploy   # wrangler deploy, a la cuenta VIVLA
+```
+
+Puesta en marcha desde cero (una vez), según el README (`README.md`):
+
+<Steps>
+  <Step title="Crear la base de datos">
+    `npx wrangler d1 create vivla-status` y copiar el `database_id` que imprime a `wrangler.jsonc`.
+  </Step>
+  <Step title="Crear las tablas">
+    `npm run db:migrate` (ejecuta `schema.sql` contra la D1 remota).
+  </Step>
+  <Step title="Desplegar">
+    `npm run deploy`.
+  </Step>
+  <Step title="Poner los secretos">
+    `SENTRY_CRON_URL` y `MYINVESTOR_SIGNATURE` (ver abajo). Sin el primero, nada vigila al Worker.
+  </Step>
+  <Step title="Dominio y Access">
+    Añadir el dominio personalizado y poner Cloudflare Access delante, restringido a cuentas de vivla.com.
+  </Step>
+</Steps>
+
+## Cómo se vuelve atrás
+
+<Warning>
+  El repo no documenta un procedimiento de rollback ni tiene CI. El despliegue es un `wrangler deploy` manual, así que volver atrás es redesplegar la versión anterior desde el código. El mecanismo exacto (p. ej. `wrangler rollback` / versiones de Cloudflare) es **PENDIENTE de confirmar** con el equipo plataforma.
+</Warning>
+
+El esquema de D1 es aditivo (`CREATE TABLE IF NOT EXISTS …`), así que `npm run db:migrate` es idempotente y no destruye datos (`schema.sql`).
+
+## Secretos (solo por nombre)
+
+Se ponen con `npx wrangler secret put NOMBRE`. El repo nunca guarda sus valores (`HANDOVER.md`, `src/index.ts:17`):
+
+| Secreto | Para qué |
+|---|---|
+| `SENTRY_DSN` | A dónde se reportan los fallos de sonda. Proyecto `status`. Sin él, la página detecta y no se lo cuenta a nadie |
+| `SENTRY_CRON_URL` | URL de check-in del monitor de cron. **Sin él nada vigila al Worker**, y una página congelada seguiría en verde durante una caída |
+| `MYINVESTOR_SIGNATURE` | Autentica la sonda de MyInvestor. Sin él esa sonda se reporta en rojo |
+
+El `MYINVESTOR_SIGNATURE` es la cabecera `sha256=…`: el HMAC-SHA256 de un cuerpo vacío con el secreto de socio que vivla-api guarda. Se guarda la **firma, no el secreto**: las rutas de socio firman el cuerpo, un `GET` no tiene cuerpo, así que un valor precalculado cubre cada llamada y no puede firmar el `POST` que registra un lead (`src/index.ts:24`, `README.md`).
+
+<Warning>
+  Rotar el secreto de socio en vivla-api deja esta sonda en rojo hasta que se reemplace el valor aquí, que es la forma correcta de enterarse. La rotación de ese secreto está **PENDIENTE** desde el go-live según el handover (`HANDOVER.md`).
+</Warning>
+
+Las credenciales del lado de Sentry (token de usuario para `sentry/apply.mjs`) se describen en [Crons y monitorización](/sistemas/vivla-status/monitorizacion).
+
+## La base de datos D1
+
+Tres tablas, cada una responde una pregunta distinta (`schema.sql`):
+
+| Tabla | Qué guarda | Retención |
+|---|---|---|
+| `checks` | Resultados crudos, hora a hora | Podada tras **48 h** (`src/index.ts:39`) |
+| `daily` | El rollup que leen las barras de 90 días | No se poda |
+| `incidents` | Una fila por caída, abierta en el primer fallo y cerrada al recuperarse | Nunca se poda |
+
+La poda la ejecuta el propio cron en cada ciclo (`DELETE FROM checks WHERE ts < …`) (`src/index.ts`). El histórico de 90 días sobrevive porque vive en `daily`, no en `checks`.
+
+## Desarrollo local
+
+```bash
+npm run db:migrate:local   # crea las tablas en una D1 local
+npm run dev                # wrangler dev
+```
+
+`npm run probe:once` (`wrangler dev --test-scheduled`) expone `/__scheduled`, que ejecuta un ciclo de sondeo bajo demanda en vez de esperar al cron (`package.json`, `README.md`).
+
+<Note>
+  Esta sección es solo para operar el servicio. Como documentadores no construimos ni arrancamos el repo; los comandos se transcriben del código y del README.
+</Note>

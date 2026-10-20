@@ -172,6 +172,16 @@
               "sistemas/vivla-concierge/integraciones",
               "sistemas/vivla-concierge/runbook"
             ]
+          },
+          {
+            "group": "Status",
+            "pages": [
+              "sistemas/vivla-status/index",
+              "sistemas/vivla-status/despliegue",
+              "sistemas/vivla-status/monitorizacion",
+              "sistemas/vivla-status/runbook",
+              "sistemas/vivla-status/sondas"
+            ]
           }
         ]
       }

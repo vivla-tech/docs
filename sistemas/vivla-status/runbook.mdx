@@ -1,0 +1,50 @@
+---
+title: "Runbook"
+description: "Equipo responsable de vivla-status y los fallos más comunes, con su causa y su arreglo según el código."
+---
+
+## Equipo responsable
+
+vivla-status lo mantiene el equipo **plataforma** de Vivla. El servicio no alerta por sí mismo: el alertado y el enrutado a Slack viven en **Sentry** (ver [Crons y monitorización](/sistemas/vivla-status/monitorizacion)).
+
+<Warning>
+  Quién está de guardia y la política de escalado concretos **no viven en el código** — son **PENDIENTE de confirmar** con el equipo plataforma. Los canales de Slack sí están declarados: `#alertas-tekis-critico` y `#alertas-tekis` (`sentry/config.json`).
+</Warning>
+
+## Fallos más comunes
+
+<AccordionGroup>
+  <Accordion title="La página muestra todo en verde pero algo está caído">
+    Probablemente la página está **congelada**: el Worker dejó de correr y muestra sus últimos valores. Se delata si el dato más reciente supera los 600 s (marca de obsoleta) y, sobre todo, si el monitor de cron de Sentry deja de recibir el check-in. Comprueba que el secreto `SENTRY_CRON_URL` está puesto y que el cron del Worker se dispara (`src/index.ts:42`, `src/index.ts:276`).
+  </Accordion>
+  <Accordion title="La sonda de MyInvestor está en rojo con «Falta la firma del socio»">
+    Falta el secreto `MYINVESTOR_SIGNATURE`: la sonda no puede autenticarse y se reporta a sí misma en rojo, que es correcto. Ponlo con `npx wrangler secret put MYINVESTOR_SIGNATURE` (`src/index.ts:64`).
+  </Accordion>
+  <Accordion title="La sonda de MyInvestor se puso en rojo sin tocar nada">
+    Si se rotó el secreto de socio en vivla-api, la firma guardada aquí deja de valer y la sonda cae hasta que se reemplaza el valor. Es el comportamiento esperado. Recalcula la firma (HMAC-SHA256 de un cuerpo vacío con el nuevo secreto) y vuelve a poner `MYINVESTOR_SIGNATURE` (`src/index.ts:24`, `README.md`). Recuerda que esa sonda es **toda la alarma** de ese feed: Sentry no puede vigilar `*.railway.app`.
+  </Accordion>
+  <Accordion title="Una sonda de vivla-api responde 200 pero está en rojo">
+    Es el caso para el que existe la aserción de cuerpo: vivla-api responde `200` con un error en el cuerpo (`{"code":41,…}`). La sonda falla porque no encuentra `"code":20`. No quites esa aserción: sin ella, la API parecería sana durante sus fallos de aplicación (`src/targets.ts:88`).
+  </Accordion>
+  <Accordion title="La web responde 200 pero la sonda está en rojo">
+    La página carga pero sin contenido de base de datos: falta la cadena que se asierta (`casa-`, `Casa Alba` o `casa-alba`). Es exactamente lo que detecta la aserción de cuerpo; el fallo está aguas abajo (CMS→base de datos), no en el frontend (`src/targets.ts`, `HANDOVER.md`).
+  </Accordion>
+  <Accordion title="Cada primer fallo aparece ya como incidencia (o ninguna lo hace)">
+    La regla de dos fallos depende de que `trackIncidents` corra **antes** que `persist`, porque lee el ciclo anterior desde `checks`. Si alguien invirtió ese orden en `scheduled()`, cada primer fallo se compara consigo mismo. Mantén el orden (`src/index.ts:299`).
+  </Accordion>
+  <Accordion title="`node sentry/apply.mjs` devuelve 403 en todo">
+    Se está usando un token de organización (`sntrys_`), que Sentry limita a CI. Usa un token de **usuario** (`sntryu_`) con los scopes `project:*`, `alerts:*` y `org:read`, creado en Settings > Account > Auth Tokens (`sentry/apply.mjs`).
+  </Accordion>
+  <Accordion title="`apply.mjs` creó una regla duplicada">
+    El script empareja por nombre y solo crea lo que falta; nunca edita ni borra. Si renombraste una regla en la UI de Sentry, el siguiente `--write` crea una nueva con el nombre del fichero. Cambia el alertado **en `sentry/config.json`** y aplica, no en la UI (`sentry/apply.mjs`, `sentry/config.json`).
+  </Accordion>
+  <Accordion title="Un despliegue aterrizó en la cuenta Cloudflare equivocada">
+    No debería: `wrangler.jsonc` fija el `account_id` a la cuenta VIVLA precisamente porque en la máquina existe también una cuenta personal. Si falla, revisa que ese pin sigue en `wrangler.jsonc` (`wrangler.jsonc`, `HANDOVER.md`).
+  </Accordion>
+</AccordionGroup>
+
+## Qué NO cubre, a propósito
+
+- **Los datos propios de un propietario.** Toda llamada tras el login necesita un token de usuario y ninguna sonda externa puede encadenar login con una segunda llamada. Se prueba que el proceso y la base de datos responden, no que un propietario concreto vea sus casas y reservas (`HANDOVER.md`).
+- **Invariantes de negocio.** Un endpoint que devuelve una lista vacía cuando debería traer datos sigue siendo invisible salvo donde hay una aserción de cuerpo explícita (`HANDOVER.md`).
+- **Las reglas de alerta de `api-vivla`.** Excluidas hasta arreglar su `Sentry.init()`, que corre dentro de `bootstrap()` y pierde parte de la auto-instrumentación (`sentry/config.json`, `HANDOVER.md`).
