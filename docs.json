@@ -172,6 +172,17 @@
               "sistemas/vivla-concierge/integraciones",
               "sistemas/vivla-concierge/runbook"
             ]
+          },
+          {
+            "group": "Atlas",
+            "pages": [
+              "sistemas/vivla-atlas/index",
+              "sistemas/vivla-atlas/despliegue",
+              "sistemas/vivla-atlas/integraciones",
+              "sistemas/vivla-atlas/retrieval",
+              "sistemas/vivla-atlas/runbook",
+              "sistemas/vivla-atlas/vault"
+            ]
           }
         ]
       }

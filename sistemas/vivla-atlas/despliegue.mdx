@@ -1,0 +1,107 @@
+---
+title: "Despliegue y operación"
+description: "Dónde corre Atlas, cómo se despliega con railway up manual y cómo se vuelve atrás, su autenticación y sus variables de entorno."
+---
+
+## Dónde corre
+
+Atlas tiene dos piezas desplegables:
+
+| Pieza | Qué es | Dónde | URL |
+|---|---|---|---|
+| **Servidor de retrieval** | API Hono + MCP (`apps/server`) | Railway, servicio `atlas-server` | `mcp.atlas.vivla.com` |
+| **Lector + chat web** | Sitio Starlight (`apps/site`) + Pages Functions (`functions/`) | Cloudflare Pages (inferido) | `atlas.vivla.com` |
+
+Fuente: [Entornos](/environments), [Repositorios](/repositories), `functions/api/chat.ts` (autodetección de Pages). El servidor construye con **Nixpacks** y arranca con `npm run start -w @atlas/server`; el healthcheck es `GET /health` (`railway.json:3`, `railway.json:5`, `railway.json:7`).
+
+<Note>
+  **El vault viaja dentro de la imagen.** El servidor resuelve `knowledge/` desde el módulo (`apps/server/src/index.ts → ../../../knowledge`), no desde el cwd, salvo que se defina `KNOWLEDGE_DIR`. Por eso un cambio en el vault requiere re-desplegar (o llamar a `/reload` si el disco ya tiene el cambio) (`apps/server/src/index.ts`, `apps/server/src/vault.ts`).
+</Note>
+
+<Warning>
+  El repo **no commitea** ninguna config de Cloudflare Pages (no hay `wrangler.*` ni `vercel.json`): que el lector web corra en Pages se deduce de los comentarios de `functions/`. El nombre del proyecto Pages, su dominio exacto y cómo se despliega el sitio son **PENDIENTE de confirmar** con el equipo IA.
+</Warning>
+
+## Entornos y rama de producción
+
+La rama de producción es **`develop`** (no hay `main`/`master` en el flujo de este repo). No hay entorno de staging separado (`.git` del repo; [Entornos](/environments)).
+
+| Entorno | Rama | Destino |
+|---|---|---|
+| Producción | `develop` | `railway up` manual → servicio `atlas-server` (`mcp.atlas.vivla.com`) |
+
+<Note>
+  No hay CI commiteado (`.github/` no existe en el repo): ni typecheck, ni tests, ni despliegue automático. Los tests existen (`npm test -w @atlas/server`) pero se corren a mano.
+</Note>
+
+## Cómo se despliega
+
+El despliegue es **manual**, no automático por push. Desde la rama `develop` se publica con el CLI de Railway:
+
+```bash
+railway up
+```
+
+Railway construye con Nixpacks y arranca `npm run start -w @atlas/server` (`railway.json`). Esto es consistente con lo descrito en [Entornos](/environments) y [Repositorios](/repositories).
+
+<Warning>
+  El procedimiento exacto (proyecto/entorno de Railway al que apunta `railway up`, quién tiene permisos, y cómo se despliega en paralelo el lector web de `atlas.vivla.com`) **no está en el repo** — es **PENDIENTE de confirmar** con el equipo IA.
+</Warning>
+
+## Cómo se vuelve atrás
+
+Railway reinicia el contenedor ante un fallo: `restartPolicyType: ON_FAILURE` (`railway.json:6`). El healthcheck es `GET /health` (`railway.json:7`).
+
+Ante `SIGTERM` (redeploy) o `SIGINT` (Ctrl-C local), el servidor hace un apagado ordenado que incluye el flush de Langfuse antes de salir (`apps/server/src/index.ts`).
+
+<Warning>
+  El **rollback** (volver a un despliegue anterior) no está documentado en el repo. El patrón habitual es re-desplegar la versión previa desde el historial de Railway, o volver a hacer `railway up` desde un commit anterior de `develop`. Confirmar el procedimiento es **PENDIENTE de confirmar**.
+</Warning>
+
+## Autenticación (gate)
+
+El gate del servidor es **env-driven y fail-closed** (`apps/server/src/auth.ts`):
+
+- Si **no** hay ninguna variable de gating, el servidor queda **abierto** (modo dev) y loguea un aviso al arrancar.
+- En cuanto hay alguna, todas las rutas salvo `/health` exigen autorización; cualquier error de verificación da `401` (nunca un crash).
+
+Dos métodos, no excluyentes (`apps/server/src/auth.ts`):
+
+<Tabs>
+  <Tab title="x-api-key (máquinas)">
+    Cabecera `x-api-key` comparada en **tiempo constante** contra `ATLAS_API_KEY`. Es lo que usan los proxies de `atlas.vivla.com` al reenviar al servidor (`functions/api/solicitudes.ts`).
+  </Tab>
+  <Tab title="Bearer JWT (Auth0)">
+    `Authorization: Bearer <jwt>` validado (RS256) contra el JWKS de Auth0, con `issuer` y `audience` comprobados. Requiere **ambas** `AUTH0_DOMAIN` y `AUTH0_AUDIENCE`.
+  </Tab>
+</Tabs>
+
+<Warning>
+  Qué método está activo hoy en producción (y si el gate está puesto) depende de qué variables haya en Railway, que **no** están en el repo: **PENDIENTE de confirmar**. El README menciona el plan de auth con Auth0 OAuth 2.1 (espejando `vivla-tools`) como pendiente de producción.
+</Warning>
+
+## Variables de entorno
+
+Todas las capas son fail-soft salvo el puerto. Nombres (nunca valores) según `apps/server/.env.example` y el código:
+
+| Variable | Para qué | Si falta |
+|---|---|---|
+| `PORT` | Puerto del servicio (Railway lo inyecta; default 3000) | Usa 3000 |
+| `KNOWLEDGE_DIR` | Apuntar a otro vault | Usa `knowledge/` del repo |
+| `ATLAS_DATABASE_URL` | Postgres del índice híbrido | Fallback in-memory (solo BM25) |
+| `WORKERS_AI_ACCOUNT_ID` · `WORKERS_AI_API_TOKEN` | Embeddings bge-m3 (Workers AI) | Sin vector, solo BM25 |
+| `WORKERS_AI_EMBED_MODEL` · `WORKERS_AI_BATCH_SIZE` | Ajuste de embeddings | Defaults (`@cf/baai/bge-m3`, 50) |
+| `ANTHROPIC_API_KEY` | Haiku (expand/rerank de query) | Query cruda (passthrough) |
+| `ANTHROPIC_MODEL` | Modelo Haiku | Default `claude-haiku-4-5` |
+| `ATLAS_API_KEY` | Gate por `x-api-key` | Sin ese método de gate |
+| `AUTH0_DOMAIN` · `AUTH0_AUDIENCE` | Gate por JWT de Auth0 | Sin ese método de gate |
+| `ATLAS_CACHE_TTL_MS` | TTL de la caché de búsqueda | Default 5 min |
+| `ATLAS_RERANK_SKIP_MARGIN` | Margen para saltar el rerank | Default 0.25 |
+| `LANGFUSE_PUBLIC_KEY` · `LANGFUSE_SECRET_KEY` | Observabilidad de coste Haiku | Instrumentación no-op |
+| `LANGFUSE_BASE_URL` · `LANGFUSE_ENVIRONMENT` | Endpoint y entorno de Langfuse | Defaults (cloud, `dev`) |
+
+Las credenciales de los **proxies web** (`CONCIERGE_URL`, `ATLAS_SERVER_URL`, …) son variables de Cloudflare Pages, no del servidor — ver [Integraciones](/sistemas/vivla-atlas/integraciones).
+
+<Warning>
+  No hagas commit de `.env` ni de credenciales. Usa `.env.example` para documentar qué variables hacen falta.
+</Warning>

@@ -1,0 +1,84 @@
+---
+title: "Runbook"
+description: "Equipo responsable, tareas programadas, monitorización y los fallos más comunes de Atlas con su diagnóstico."
+---
+
+## Equipo responsable
+
+Atlas lo mantiene el equipo **IA**. En el código, `CODEOWNERS` apunta todo el repo a un único handle (`@joaquin-vivla`), declarado como **placeholder** a sustituir por los equipos reales del org (`CODEOWNERS`).
+
+<Warning>
+  El reparto real de responsables por área del vault y la rotación de guardia son **PENDIENTE de confirmar**: el código no los define y `CODEOWNERS` lo dice explícitamente. No se nombran personas aquí a propósito.
+</Warning>
+
+## Tareas programadas (crons)
+
+**No hay cron commiteado en el repo**: ni cron de sistema, ni de Railway, ni `.github/` con jobs (no existe ese directorio). El único trabajo periódico implícito es el **reindex del vault**, que ocurre:
+
+- en el **arranque** del servidor (en background), y
+- al recibir `POST /reload` (recarga el vault en memoria + reindex de Postgres en background).
+
+(`apps/server/src/index.ts`)
+
+<Warning>
+  Quién llama a `POST /reload` tras aprobar un cambio en el vault (p.ej. el editor de `vivla-tools`, un webhook de git, o un redeploy manual) **no está en este repo**: es **PENDIENTE de confirmar** con el equipo IA.
+</Warning>
+
+## Monitorización
+
+- **Sonda de estado:** `GET /health` devuelve `status`, el nº de chunks cargados, el `vaultDir` y qué capas están activas (postgres / embeddings / haikuRewrite). Es el healthcheck de Railway (`apps/server/src/index.ts`, `railway.json:7`).
+- **Observabilidad de coste:** las llamadas Haiku (expandQuery / rerank) se trazan en **Langfuse** bajo el span `atlas.search`, si hay claves configuradas. Es puramente aditivo y fail-soft (`apps/server/src/telemetry.ts`).
+- **Logs:** el servidor loguea el estado de las capas al arrancar, cada reindex (con stats), los avisos de id duplicado y los fallos fail-soft de cada integración (`apps/server/src/index.ts`, `apps/server/src/db.ts`).
+
+<Warning>
+  **No hay Sentry** ni ninguna otra captura de errores integrada en el repo (ni dependencia, ni import). Si Atlas debe reportar a Sentry en producción, no está hecho: **PENDIENTE de confirmar** si se añade.
+</Warning>
+
+## Fallos más comunes
+
+<AccordionGroup>
+  <Accordion title="Una búsqueda no devuelve nada que debería existir">
+    Repasa los filtros del dominio, que se aplican antes de rankear (`apps/server/src/search.ts`, `apps/server/src/db.ts`):
+    - El chunk no es `tier = 1` (solo tier 1 es fuente de respuesta).
+    - Su `verified_until` está en el pasado → `stale`, no se devuelve.
+    - Su `audience` no solapa con la del consumidor (`public` + audiencia pedida).
+    - Es contenido de una casa y la petición **no** declaró `property` (fail-closed: ver [reglas de propiedad](/sistemas/vivla-atlas/vault#reglas-de-propiedad-property-ids-property-hids)).
+
+    También comprueba en `GET /health` que el nº de `chunks` es el esperado.
+  </Accordion>
+  <Accordion title="Un cambio en el vault no aparece en los resultados">
+    El vault viaja dentro de la imagen y se carga en el arranque. Hay que **re-desplegar** (`railway up`) o, si el disco ya tiene el cambio, llamar a `POST /reload` (recarga in-memory al instante; el reindex de Postgres va en background). La caché (TTL 5 min) se invalida con `/reload` (`apps/server/src/index.ts`, `apps/server/src/cache.ts`).
+  </Accordion>
+  <Accordion title="El arranque en frío devuelve pocos resultados un rato">
+    Con Postgres vacío, el reindex corre en background tras levantar el servidor; hasta que termina, Postgres devuelve poco. En régimen, el upsert es transaccional y las filas viejas quedan visibles hasta el COMMIT, así que no debería haber ventana vacía salvo en el primer arranque (`apps/server/src/index.ts`, `apps/server/src/db.ts`).
+  </Accordion>
+  <Accordion title="Los resultados salen sin vector (solo por texto)">
+    Si los embeddings fallan (sin `WORKERS_AI_*`, timeout o error del proveedor), el reindex registra cuántos chunks quedaron sin vector y sigue: esos salen **solo por BM25**. El log del reindex muestra `embedFailed`. No tumba la capa Postgres (`apps/server/src/db.ts`, `apps/server/src/embeddings.ts`).
+  </Accordion>
+  <Accordion title="Un apartado de una página desaparece del índice">
+    Dos `##` que slugifican igual en la misma página colisionan en el mismo `id` de chunk y gana el último; el otro se pierde. El cargador avisa por log con el path y el heading. Solución: renombrar uno de los apartados (`apps/server/src/vault.ts`, `apps/server/src/db.ts`).
+  </Accordion>
+  <Accordion title="/buscar o /mcp devuelven 401">
+    El gate está activo (hay `ATLAS_API_KEY` o `AUTH0_*`). Las máquinas deben mandar `x-api-key`; los humanos, un JWT válido de Auth0. `/health` nunca pide auth. Cualquier error de verificación cae a 401, no a un crash (`apps/server/src/auth.ts`).
+  </Accordion>
+  <Accordion title="Las solicitudes de cambio dan 503">
+    La cola vive en Postgres. Sin `ATLAS_DATABASE_URL`, `/solicitudes` responde 503 a propósito (y las tools MCP lo dicen) sin tumbar el resto del servicio. Es señal de que falta configurar la base de datos (`apps/server/src/index.ts`, `apps/server/src/solicitudes.ts`).
+  </Accordion>
+</AccordionGroup>
+
+## Dónde mirar primero
+
+<Steps>
+  <Step title="¿El servicio está vivo?">
+    `GET /health` → `status: ok` y el nº de `chunks` y las capas activas.
+  </Step>
+  <Step title="¿Qué capas están on?">
+    El mismo `/health` y el log de arranque dicen si Postgres, embeddings y Haiku están activos o en fallback.
+  </Step>
+  <Step title="¿Qué pasó en el último reindex?">
+    El log `[atlas] reindex: …` trae chunks escritos, saltados, duplicados, (re)embebidos y sin vector.
+  </Step>
+  <Step title="¿Coste/latencia de Haiku?">
+    El span `atlas.search` en Langfuse (si está configurado).
+  </Step>
+</Steps>
