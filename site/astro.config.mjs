@@ -25,6 +25,8 @@ export default defineConfig({
 
     starlight({
       title: 'VIVLA Docs',
+      // Mintlify's <title> is "<page> - VIVLA Docs".
+      titleDelimiter: '-',
       description: 'Documentación técnica interna de la plataforma VIVLA',
       favicon: '/favicon.svg',
       logo: {
@@ -37,10 +39,13 @@ export default defineConfig({
         root: { label: 'Español', lang: 'es' },
       },
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/vivla-tech' }],
-      customCss: ['./src/styles/theme.css'],
+      // Inter: what Mintlify actually renders today (it ignores the
+      // docs.json Teodor/Sneak fonts), self-hosted from npm.
+      customCss: ['@fontsource-variable/inter', './src/styles/theme.css'],
       routeMiddleware: './src/routeData.ts',
       components: {
         Header: './src/components/SiteHeader.astro',
+        PageTitle: './src/components/PageTitle.astro',
       },
       pagefind: true,
       markdown: {

@@ -1,0 +1,15 @@
+---
+// Mintlify shows the docs.json group label above the page title and the
+// frontmatter `description` below it. Starlight shows neither, so this
+// wraps the default title. Styles live in src/styles/theme.css.
+import Default from '@astrojs/starlight/components/PageTitle.astro';
+import { groupLabelForSlug } from '../lib/nav';
+
+const route = Astro.locals.starlightRoute;
+const group = groupLabelForSlug(route.id);
+const description = route.entry.data.description;
+---
+
+{group && <p class="vivla-page-eyebrow">{group}</p>}
+<Default />
+{description && <p class="vivla-page-description">{description}</p>}

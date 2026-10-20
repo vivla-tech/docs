@@ -1,0 +1,18 @@
+{
+  "search.label": "Search...",
+  "search.cancelLabel": "Cancel",
+  "tableOfContents.onThisPage": "On this page",
+  "tableOfContents.overview": "Overview",
+  "themeSelect.accessibleLabel": "Select theme",
+  "themeSelect.dark": "Dark",
+  "themeSelect.light": "Light",
+  "themeSelect.auto": "System",
+  "menuButton.accessibleLabel": "Menu",
+  "sidebarNav.accessibleLabel": "Main",
+  "skipLink.label": "Skip to content",
+  "page.previousLink": "Previous",
+  "page.nextLink": "Next",
+  "expressiveCode.copyButtonCopied": "Copied!",
+  "expressiveCode.copyButtonTooltip": "Copy to clipboard",
+  "pagefind.searching": "Searching for [SEARCH_TERM]..."
+}

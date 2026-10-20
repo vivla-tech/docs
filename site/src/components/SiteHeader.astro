@@ -12,7 +12,9 @@ const activeTab = tabIndexForSlug(currentSlug);
 ---
 
 <div class="vivla-header-stack">
-  <Default><slot /></Default>
+  <div class="vivla-header-row">
+    <Default><slot /></Default>
+  </div>
   {
     TABS.length > 1 && (
       <nav class="vivla-tabbar" aria-label="Secciones">
@@ -35,6 +37,13 @@ const activeTab = tabIndexForSlug(currentSlug);
     display: flex;
     flex-direction: column;
     height: 100%;
+  }
+  /* Default Starlight row: takes the space above the tab bar. Its own
+     .header is height: 100%, so without this box it fills the whole nav
+     and pushes the tab bar out below it. */
+  .vivla-header-row {
+    flex: 1 1 auto;
+    min-height: 0;
   }
   .vivla-tabbar {
     flex-shrink: 0;

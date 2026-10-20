@@ -35,6 +35,16 @@ export function tabIndexForSlug(slug: string): number {
   return 0;
 }
 
+/** Label of the docs.json group that contains `slug`, or undefined. */
+export function groupLabelForSlug(slug: string): string | undefined {
+  for (const tab of TABS) {
+    for (const group of tab.groups) {
+      if (group.pages.some((page) => page.slug === slug)) return group.label;
+    }
+  }
+  return undefined;
+}
+
 interface SidebarLink {
   type: 'link';
   label: string;
