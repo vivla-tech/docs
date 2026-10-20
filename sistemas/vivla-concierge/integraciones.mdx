@@ -1,0 +1,108 @@
+---
+title: "Integraciones"
+description: "A qué llama el Concierge (MCP de vivla-tools, Atlas y wiki), quién le llama y sus credenciales por nombre."
+---
+
+El Concierge se apoya en tres fuentes de conocimiento/datos vía **MCP** y en Slack, y expone varias rutas HTTP que consume vivla-tools. Aquí están las conexiones y sus credenciales **solo por nombre** — ningún valor vive en esta wiki.
+
+## A qué llama: clientes MCP
+
+Las tres costuras de conocimiento son distintas y los agentes eligen cuál usar según la pregunta (`mcp/atlas.ts:100`):
+
+<CardGroup cols={3}>
+  <Card title="vivla-tools" icon="database">
+    **Datos vivos**: casas, reservas, accesos/wifi, tickets, encuestas, notificaciones. ~80 tools.
+  </Card>
+  <Card title="Atlas" icon="landmark">
+    **La verdad de la empresa**: qué es Vivla, FAQs, modelo legal, conocimiento institucional. Fundamenta y cita.
+  </Card>
+  <Card title="VIVLA Docs (wiki)" icon="book-open">
+    **Producto y tecnología**: cómo funciona la app, procesos, cómo-se-hace. Esta misma wiki.
+  </Card>
+</CardGroup>
+
+### MCP de vivla-tools
+
+- **Endpoint:** `VIVLA_TOOLS_MCP_URL` (Streamable HTTP). Por defecto apunta a la URL de producción del backend de vivla-tools en Railway (`mcp/vivla-tools.ts:4`).
+- **Catálogo:** ~80 tools cargadas una vez al boot y alimentadas a un `ToolSearchProcessor`. Si no hay token o el servidor no responde, el agente arranca igual, sin ese catálogo (`tools/vivla-tools-catalog.ts:8`).
+- **Autenticación** — el token bearer se resuelve por precedencia (`mcp/auth.ts:20`):
+  1. `VIVLA_TOOLS_TOKEN` (override explícito).
+  2. Service-account de **Auth0** (`client_credentials`, permisos de AGENTE) — producción.
+  3. Token de usuario cacheado en `~/.vivla/credentials.json` — comodidad de desarrollo.
+
+### MCP de Atlas
+
+- **Endpoint:** `ATLAS_MCP_URL`, por defecto `https://mcp.atlas.vivla.com/mcp` (`mcp/atlas.ts:5`).
+- **Tres tools de solo lectura** (prefijadas por el cliente): `atlas_buscar_atlas`, `atlas_listar_areas`, `atlas_obtener_documento` (`mcp/atlas.ts:94`).
+- **Autenticación** por precedencia (`mcp/atlas.ts:106`):
+  1. **Auth0 M2M** (`Authorization: Bearer`): con `ATLAS_AUTH0_CLIENT_ID` + `ATLAS_AUTH0_CLIENT_SECRET` (reusa `AUTH0_DOMAIN`, audiencia fija `https://mcp.atlas.vivla.com`).
+  2. **x-api-key estático**: `ATLAS_MCP_API_KEY` (del service `atlas-server`).
+  3. Sin ninguno → el cliente arranca pero toda llamada a Atlas devuelve 401 (`mcp/atlas.ts:137`).
+
+### MCP de VIVLA Docs (wiki)
+
+- **Endpoint:** `VIVLA_DOCS_MCP_URL`, por defecto `https://wiki.vivla.com/mcp` (`mcp/vivla-docs.ts:4`).
+- **Tools de solo lectura:** `search_vivla_docs` y `query_docs_filesystem_vivla_docs` (`mcp/vivla-docs.ts:19`).
+- **Autenticación:** la wiki está detrás de **Cloudflare Access**. El cliente de máquina manda las cabeceras de un **service token**: `CF_ACCESS_CLIENT_ID` y `CF_ACCESS_CLIENT_SECRET`. Si falta cualquiera de las dos, no manda cabeceras (comportamiento no autenticado) (`mcp/vivla-docs.ts:11`).
+
+<Tip>
+  Cómo conectar un cliente humano (Claude, Cursor…) a ese mismo MCP de la wiki está en [Conectar la wiki a tu IA (MCP)](/mcp-setup).
+</Tip>
+
+## Quién le llama
+
+- **vivla-tools** es el principal consumidor:
+  - Habla con Lola por `POST /api/agents/lola/stream` (y le pasa en el cuerpo la salida estructurada y las fotos).
+  - Reenvía cada mensaje de canal a `POST /lola/ingest` para alimentar la memoria del propietario aunque Lola no responda (`apps/concierge/src/mastra/index.ts:65`).
+  - Llama al pase proactivo de Fabián en `POST /api/workflows/fabian-pass/start-async` (`workflows/fabian-pass/README.md`).
+- **atlas.vivla.com** (home web): superficie del agente Atlas, vía máquina con `x-api-key`.
+- **Slack:** entrega eventos a los agentes con app propia (Fabián, Simón).
+
+### Rutas HTTP propias (fuera de `/api`)
+
+| Ruta | Método | Para qué |
+|---|---|---|
+| `/lola/ingest` | POST | Alimenta la memoria del propietario desde el webhook de Stream de vivla-tools (`index.ts:65`) |
+| `/lola/distill` | POST | Destilado offline de la bio de memoria de trabajo (`index.ts:94`) |
+| `/simon/learn-daily` | POST | Capa 1 de auto-mejora diaria de Simón (`index.ts:117`) |
+| `/memory/owner/:ownerId` | GET | Lectura de la bio del propietario para otros agentes (`index.ts:152`) |
+| `/health` | GET | Healthcheck (público; ver [Despliegue](/sistemas/vivla-concierge/despliegue)) |
+
+Todas salvo `/health` pasan por el mismo gate de servidor.
+
+## Slack
+
+El proveedor de Slack **auto-provisiona una app de Slack por agente** (Manifest API) cuando el agente se conecta. Solo se construye si están `SLACK_APP_CONFIG_REFRESH_TOKEN` y `SLACK_BASE_URL`; es webhook-only, así que `SLACK_BASE_URL` debe ser una URL pública (túnel en desarrollo) (`apps/concierge/src/mastra/index.ts:33`). Cifra los tokens guardados con `MASTRA_ENCRYPTION_KEY`.
+
+## Identidad de agente: OBO + auditoría
+
+El plano de identidad (`packages/identity`) emite **tokens delegados On-Behalf-Of** y registra una fila de auditoría por cada tool-call (`README.md:19`):
+
+- En producción, el emisor usa **Auth0 token-exchange** con `AUTH0_DOMAIN`, `AUTH0_AGENT_CLIENT_ID`, `AUTH0_AGENT_CLIENT_SECRET` y `AUTH0_AUDIENCE` (`packages/identity/src/obo.ts`).
+- Sin esas variables, el emisor firma tokens en **modo local-dev** (HS256 con `OBO_LOCAL_SIGNING_SECRET`), con la misma forma de claims marcada `mode:"local-dev"` (`README.md:144`).
+
+<Warning>
+  El camino de código de OBO está completo, pero necesita que exista la **aplicación de agente en Auth0** (app M2M `vivla-concierge-agent`, grant de Token Exchange, API con audiencia y scopes por tool). Que esté creada en el dashboard de Auth0 es **PENDIENTE de confirmar** (`README.md:144`).
+</Warning>
+
+## Credenciales (solo por nombre)
+
+Todas se inyectan por variable de entorno; sus valores no se commitean (plantilla en `apps/concierge/.env.example`).
+
+| Variable | Para qué |
+|---|---|
+| `ANTHROPIC_API_KEY` | Que los agentes respondan (Claude) |
+| `OPENROUTER_API_KEY` | Modelos vía OpenRouter (opcional) |
+| `VIVLA_TOOLS_TOKEN` | Bearer explícito hacia el MCP de vivla-tools (opcional) |
+| `AUTH0_DOMAIN` · `AUTH0_AGENT_CLIENT_ID` · `AUTH0_AGENT_CLIENT_SECRET` · `AUTH0_AUDIENCE` | OBO del agente hacia vivla-tools |
+| `OBO_LOCAL_SIGNING_SECRET` | Firma de tokens en modo local-dev |
+| `ATLAS_AUTH0_CLIENT_ID` · `ATLAS_AUTH0_CLIENT_SECRET` | Auth0 M2M hacia Atlas |
+| `ATLAS_MCP_API_KEY` | x-api-key hacia el service `atlas-server` |
+| `CF_ACCESS_CLIENT_ID` · `CF_ACCESS_CLIENT_SECRET` | Service token de Cloudflare Access hacia la wiki |
+| `LANGFUSE_PUBLIC_KEY` · `LANGFUSE_SECRET_KEY` | Envío de trazas a Langfuse |
+| `SLACK_APP_CONFIG_REFRESH_TOKEN` · `SLACK_APP_CONFIG_TOKEN` · `MASTRA_ENCRYPTION_KEY` | Provisión y cifrado de las apps de Slack |
+| `CONCIERGE_API_KEY` · `CF_ACCESS_AUD` · `CF_ACCESS_TEAM_DOMAIN` | Gate del servidor (ver [Despliegue](/sistemas/vivla-concierge/despliegue)) |
+
+<Danger>
+  Nunca pongas el valor de ninguna de estas credenciales en el código ni en esta wiki. Guárdalas como variables de entorno en Railway.
+</Danger>

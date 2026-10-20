@@ -158,6 +158,22 @@
             ]
           }
         ]
+      },
+      {
+        "tab": "Sistemas",
+        "groups": [
+          {
+            "group": "Concierge (Alma)",
+            "pages": [
+              "sistemas/vivla-concierge/index",
+              "sistemas/vivla-concierge/agentes",
+              "sistemas/vivla-concierge/despliegue",
+              "sistemas/vivla-concierge/evals",
+              "sistemas/vivla-concierge/integraciones",
+              "sistemas/vivla-concierge/runbook"
+            ]
+          }
+        ]
       }
     ],
     "global": {

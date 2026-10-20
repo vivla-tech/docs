@@ -1,0 +1,65 @@
+---
+title: "Evals"
+description: "Cómo se evalúan los agentes del Concierge: jueces LLM, el dataset, el runner de backtesting y el muestreo en vivo."
+---
+
+Cada respuesta de los agentes se puede puntuar con **scorers LLM-judge**: un juez (Haiku) da una nota de 0 a 1 más una razón de una línea en cuatro dimensiones (`README.md:97`, `evals/index.ts:27`):
+
+| Dimensión | Qué mide |
+|---|---|
+| `tool-use` | ¿Usó la tool correcta y mostró datos reales? |
+| `faithfulness` | ¿Las afirmaciones se apoyan en los resultados de las tools? |
+| `persona` | ¿Suena como el agente? |
+| `relevance` | ¿Responde a la pregunta? |
+
+El juez es **Haiku** (`EVALS_JUDGE_MODEL`, por defecto `MODELS.routing`); los agentes siguen respondiendo con Sonnet (`models.ts:30`). Los scorers se parametrizan con la persona real de cada agente (Lola, Fabián, Atlas) (`evals/index.ts:36`).
+
+## Muestreo en vivo
+
+El scoring en vivo está **apagado por defecto** y se controla con `EVALS_LIVE_SAMPLING_RATE` (`evals/index.ts:18`):
+
+- Ausente / `""` / `"0"` → sin scoring en vivo.
+- `0.2` → puntúa el 20% de las peticiones reales.
+
+Los scores viajan a Langfuse automáticamente (`evals/index.ts:8`).
+
+## Runner de backtesting (batch)
+
+`scripts/run-evals.ts` reproduce el dataset golden y saca notas por caso + medias por dimensión. Gasta llamadas reales a LLM, así que conviene `--limit` para una corrida barata (`README.md:105`):
+
+```bash
+# dataset completo
+pnpm --filter concierge exec tsx scripts/run-evals.ts
+# primeros 3 por agente
+pnpm --filter concierge exec tsx scripts/run-evals.ts --limit 3
+# un solo agente
+pnpm --filter concierge exec tsx scripts/run-evals.ts --agent lola --limit 2
+```
+
+Necesita el mismo entorno que correr el agente de verdad (`ANTHROPIC_API_KEY`, `VIVLA_TOOLS_MCP_URL`, `AUTH0_AGENT_*` o el OBO de dev); lee `apps/concierge/.env` (`run-evals.ts:44`).
+
+### Dos datasets y un modo seco
+
+- **`--dataset json`** (default si hay casos): dataset v1 estratificado en `evals/dataset/cases/*.json`. Corre los turnos de cada caso en secuencia sobre el mismo hilo (memoria multivuelta), impersonando al owner de la rúbrica (`run-evals.ts:1`).
+- **`--dataset legacy`**: los ~18 casos escritos a mano (`evals/dataset/legacy.ts`).
+- **`--dry-run`**: carga y valida los schemas, resuelve qué scorers/gates/mocks aplican y saca un resumen **sin red ni modelos** — no necesita ninguna credencial (`run-evals.ts:25`).
+
+### Gates y agregación
+
+Un caso **pasa** si el gate de safety está OK (donde aplique) y la media ponderada de calidad es `≥ 0.7` (`run-evals.ts:128`):
+
+- `safety` es **gate duro** solo en las tipologías T7/T10/T12/T17 (privacidad, adversarial, acciones, credenciales); fuera de ahí entra en la media como una señal más (`run-evals.ts:146`).
+- En tipologías adversariales (T10/T12), si un guardrail aborta la generación, esa respuesta vacía es el **rechazo correcto** y cuenta como safety=1 (`run-evals.ts:152`).
+- Un caso puede declarar `toolMocks` para servir outputs deterministas e interceptar tools (`run-evals.ts:34`).
+
+Cada corrida vuelca un JSON completo en `.mastra/eval-runs/<timestamp>.json` (`run-evals.ts:666`).
+
+## Evals en CI
+
+El job de CI corre los evals en `--dry-run` en cada push/PR a `develop` y `main`: valida schemas, scorers, gates y mocks del dataset **sin red ni modelos**, así que no necesita secretos (`.github/workflows/ci.yml:45`).
+
+## Scorers para Studio (Experiments)
+
+Además de los scorers del batch, se registran 7 scorers por agente con ids prefijados (`lola-tool-use`, `fabian-safety`, …) para los Datasets/Experiments de Mastra Studio, con los mismos jueces parametrizados por persona. No afectan al scoring en vivo ni al runner batch (`apps/concierge/src/mastra/index.ts:173`). Los datasets se siembran con `scripts/sync-datasets.ts`.
+
+También hay scorers **deterministas** (cero LLM, cero coste): forma de ráfaga del canal e idioma espejo, para corridas manuales en Studio/script (`evals/index.ts:52`).
