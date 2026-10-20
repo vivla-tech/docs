@@ -1,0 +1,86 @@
+---
+title: "Despliegue y entornos"
+description: "Dónde corre PropCos: hosting en Railway, URL de producción, rama que se despliega, pipeline del proveedor externo, migraciones y cómo volver atrás."
+---
+
+PropCos se empaqueta con un **Dockerfile** multi-etapa (Node 22 alpine, pnpm) que construye la app y arranca el servidor Nitro con `node .output/server/index.mjs` en el puerto `3000` como usuario no root (`Dockerfile:1`, `package.json:8`). La imagen la puede correr cualquier plataforma de contenedores; en Vivla corre en **Railway**.
+
+## Dónde corre
+
+| Entorno | Plataforma | Rama | URL |
+|---|---|---|---|
+| Producción | **Railway** | `master` | `https://propcos.vivla.com` (`.github/scripts/deploy-notify.sh:63`) |
+| Integración / desarrollo | GitHub | `main` | — (rama por defecto del repo) |
+| Pipeline del proveedor (Digio) | Kubernetes propio del proveedor | `develop` | registro `registry.digio.es/vivla/...` (`.gitlab-ci.yml:11`) |
+
+<Info>
+  El código de producción se reconoce porque arranca Sentry solo cuando `NODE_ENV=production` y lee las variables `RAILWAY_GIT_COMMIT_SHA` y `RAILWAY_ENVIRONMENT_NAME` que inyecta Railway (`app/server/instrument.ts:7`).
+</Info>
+
+### Acceso y red
+
+- **Producción (`propcos.vivla.com`) está detrás de Cloudflare Access**: solo personal de Vivla puede abrir el dashboard y descargar los assets/source maps (`scripts/sentry-sourcemaps.mjs:7`, `app/server/sync/sync.swagger.ts:25`).
+- Los endpoints máquina a máquina `/api/internal/*` exigen además la cabecera `x-internal-api-key` (ver [Integraciones](/sistemas/propcos/integraciones)).
+
+En Railway, PropCos es el proyecto **`VIVLA-Propcos`**, entorno `production` (verificado el 2026-10-20):
+
+| Servicio | Qué es |
+|---|---|
+| `propcos` | La app. Conectada a `vivla-tech/propcos`, rama `master`. Dominio `propcos.vivla.com`. Arranca con `pnpm db:migrate && pnpm start` |
+| `Postgres Propcos` | PostgreSQL 17 gestionado por Railway |
+| `Redis` | Redis 8 para las colas (BullMQ), con contraseña y volumen |
+| `vivla-cashflow` | El microservicio de conciliación bancaria (repo `vivla-tech/vivla-cashflow`, rama `main`), en el mismo proyecto |
+
+En Cloudflare, `propcos.vivla.com` está detrás de la app de Access **«Propcos»**:
+- Personas: política `Vivla&Digio Users`, con login por código de un solo uso (PIN por correo), para que entre también el equipo del proveedor.
+- Máquinas: dos service tokens, `propcos-drive-import` y `vivla-tools-propcos-sync`.
+- Sin login: la app «API Publica Propcos» deja pasar `/api/reports/year-owner` y `/api/webhooks`.
+
+## Cómo se despliega
+
+Railway está conectado al repositorio de GitHub (`vivla-tech/propcos`) y **despliega al fusionar un PR de release de `main` a `master`**; el autor del deploy es quien fusiona ese PR (`.github/scripts/deploy-notify.sh:32`, `:45`). El propio comentario del workflow indica que el deploy pasa por una **aprobación manual** antes de quedar activo (`.github/workflows/deploy-notify.yml:3`).
+
+<Steps>
+  <Step title="Integración en main">
+    El trabajo diario se fusiona en `main` (rama por defecto). Los PRs de release se titulan `chore(release)…` (`.github/scripts/deploy-notify.sh:34`).
+  </Step>
+  <Step title="Release PR main → master">
+    Fusionar el PR de release de `main` a `master` dispara el build y el deploy de Railway.
+  </Step>
+  <Step title="Build">
+    Railway construye con el `Dockerfile`: instala dependencias, ejecuta `pnpm run build` (Vite + `tsc --noEmit` + subida de source maps a Sentry) y empaqueta `.output` (`package.json:8`, `Dockerfile:40`).
+  </Step>
+  <Step title="Aprobación manual y activación">
+    Tras la aprobación manual, el deploy queda activo. Railway reporta el estado a GitHub como `deployment_status`.
+  </Step>
+  <Step title="Notificación a Slack">
+    El workflow `deploy-notify.yml` publica en **#deploy-notifications** el deploy terminado (éxito o fallo), con el entorno, el commit, el autor y los PRs incluidos (`.github/workflows/deploy-notify.yml:1`, `.github/scripts/deploy-notify.sh:1`).
+  </Step>
+</Steps>
+
+### Migraciones de base de datos
+
+Las migraciones son ficheros SQL en `db/` generados con `drizzle-kit` y se aplican con `pnpm db:migrate` (`package.json:14`, `drizzle.config.ts`). El contenedor final copia `db/` y `drizzle.config.ts` para poder migrar en runtime (`Dockerfile:62`).
+
+El pipeline del proveedor (GitLab) aplica las migraciones en su Kubernetes como un **Job** (`pnpm db:migrate`) solo cuando cambian ficheros de `db/` en la rama `develop` (`.gitlab-ci.yml` sección `migrations_pre`, `devops/staging/migrations-job.yaml`).
+
+En Railway, **las migraciones se aplican en cada arranque**: el comando de inicio del servicio es `pnpm db:migrate && pnpm start`, configurado en Railway (el repo no tiene `railway.json`). Un despliegue con migraciones nuevas las aplica antes de servir tráfico; si la migración falla, el contenedor no arranca (verificado el 2026-10-20).
+
+## Pipeline del proveedor externo (GitLab / Digio)
+
+El repo incluye `.gitlab-ci.yml`, el pipeline del proveedor que construye y despliega en **su propia** infraestructura Kubernetes (imágenes en `registry.digio.es/vivla`), **solo en la rama `develop`**, con notificaciones a Slack y Google Chat (`.gitlab-ci.yml:1`). Sus etapas son `build` → `migrations` (Job de k8s) → `deploy` (`kubectl set image` + `rollout status`).
+
+<Note>
+  Este pipeline es independiente del despliegue de producción de Vivla en Railway: cubre el entorno del proveedor. Railway solo tiene el entorno `production`; Vivla no tiene staging propio de PropCos (verificado el 2026-10-20).
+</Note>
+
+## Cómo se vuelve atrás
+
+El repo no define su propio mecanismo de rollback. Las dos vías que soporta la infraestructura:
+
+- **Railway (producción):** revertir al deployment anterior desde el dashboard de Railway, o fusionar un nuevo release que vuelva al commit bueno. Si una migración ya se aplicó, revertirla con `pnpm db:migrate:revert`/`migration:revert` según el esquema de Drizzle (el README lista `migration:revert`, `README.md:66`).
+- **Kubernetes del proveedor:** `kubectl set image …` apunta la imagen a un `$CI_PIPELINE_IID` anterior; el deploy usa `kubectl rollout status`, así que admite `kubectl rollout undo` (`.gitlab-ci.yml` sección `deploy_pre`).
+
+<Warning>
+  **Ojo con las migraciones al volver atrás:** Railway conserva los despliegues anteriores y permite redesplegarlos, pero una migración ya aplicada no se deshace sola. Revierte el esquema antes de volver a una versión que no lo soporte. Quién lo ejecuta lo decide el equipo proveedor junto con Tech.
+</Warning>
