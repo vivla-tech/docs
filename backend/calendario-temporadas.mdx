@@ -41,7 +41,7 @@ Qué fechas caen en qué temporada **no está hardcodeado**: es dato por casa. C
 
 El coste en llaves de reservar un intercambio depende de la casa y la temporada:
 
-1. **Última hora → 1 llave fija**.
+1. **Intercambio de última hora → 1 llave fija**. El disfrute de última hora en la propia casa no gasta llaves.
 2. Si existe un registro en la tabla `home_exchange_keys` para esa casa + temporada, se usa su valor. Esta tabla se gestiona ahora desde el módulo Properties: `POST /v2/admin/properties/:homeId/set-keys`.
 3. Si no existe, se usa el **fallback** de la variable de entorno `DEFAULT_KEYS`, un CSV con el orden `[alta, media, baja]` (`src/homes/v2/homes.repository.ts:331`). Pico usa el mismo índice que alta.
 

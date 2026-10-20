@@ -1,0 +1,13 @@
+{
+  "name": "@vivla-docs/build-corpus",
+  "private": true,
+  "type": "module",
+  "description": "Builds worker/generated/corpus.json (and llms.txt / llms-full.txt / per-page .md) from the aggregated docs branch; also the search eval harness (evaluate-search.mjs)",
+  "scripts": {
+    "build": "node build-corpus.mjs"
+  },
+  "dependencies": {
+    "@orama/orama": "^3.1.18",
+    "gray-matter": "^4.0.3"
+  }
+}

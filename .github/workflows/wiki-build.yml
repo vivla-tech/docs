@@ -1,0 +1,80 @@
+name: Wiki build check
+
+# Compile check for every PR: builds the Starlight site and the MCP corpus
+# with the PR's own central pages laid over the current aggregated `docs`
+# branch, then runs the Worker tests. Catches MDX that Mintlify accepts but
+# Starlight's stricter compiler rejects. Deploys nothing.
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: c38baece52cddd64baab323c3550ce17
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+
+      - name: Checkout aggregated docs branch
+        uses: actions/checkout@v4
+        with:
+          ref: docs
+          path: .aggregated
+
+      # The subrepo tabs (tools/, mobile/, panel/) only exist on `docs`.
+      # Overlay the PR's central pages and docs.json on top of them.
+      - name: Assemble content root
+        run: |
+          mkdir -p "$RUNNER_TEMP/content"
+          rsync -a --exclude .git .aggregated/ "$RUNNER_TEMP/content/"
+          rsync -a --exclude .git --exclude .aggregated --exclude site \
+            --exclude worker --exclude scripts --exclude .github \
+            --exclude tools --exclude mobile --exclude panel \
+            --exclude docs.json \
+            ./ "$RUNNER_TEMP/content/"
+
+      # docs.json: the PR's version, plus the subrepo tabs that only the
+      # aggregated docs.json has (same tab order as aggregate.yml).
+      - name: Merge docs.json
+        run: |
+          python3 - "$RUNNER_TEMP/content/docs.json" <<'PYTHON'
+          import json, sys
+          out = sys.argv[1]
+          pr = json.load(open('docs.json'))
+          agg = json.load(open('.aggregated/docs.json'))
+          def pages(o):
+              if isinstance(o, str): return [o]
+              if isinstance(o, list): return [p for x in o for p in pages(x)]
+              if isinstance(o, dict): return [p for k in ('groups', 'pages') for p in pages(o.get(k, []))]
+              return []
+          # A subrepo tab: every page lives under a subrepo folder. Like
+          # aggregate.yml, it replaces the stub tab of the same name.
+          sub = [t for t in agg['navigation']['tabs']
+                 if pages(t) and all(p.split('/')[0] in ('tools', 'mobile', 'panel') for p in pages(t))]
+          sub_names = {t.get('tab') for t in sub}
+          tabs = [t for t in pr['navigation']['tabs'] if t.get('tab') not in sub_names] + sub
+          order = ['Overview', 'Vivla Tools', 'Mobile App', 'Vivla API', 'Panel', 'Infra']
+          tabs.sort(key=lambda t: order.index(t.get('tab')) if t.get('tab') in order else len(order))
+          pr['navigation']['tabs'] = tabs
+          json.dump(pr, open(out, 'w'), indent=2, ensure_ascii=False)
+          print(f"{len(tabs)} tabs")
+          PYTHON
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Without the Cloudflare token (for example a PR from a fork) there
+      # are no embeddings, so the Worker tests are skipped.
+      - name: Build and test
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then export SKIP_EMBEDDINGS=1; fi
+          scripts/build-wiki.sh "$RUNNER_TEMP/content"

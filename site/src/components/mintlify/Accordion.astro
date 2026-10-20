@@ -1,0 +1,56 @@
+---
+// Mintlify <Accordion title defaultOpen>. Starlight's authoring guide
+// already supports plain <details>/<summary> in Markdown/MDX, so this just
+// wraps those with Mintlify's prop names and a matching look.
+interface Props {
+  title: string;
+  defaultOpen?: boolean;
+}
+
+const { title, defaultOpen = false } = Astro.props as Props;
+---
+
+<details class="mintlify-accordion not-content" open={defaultOpen}>
+  <summary>{title}</summary>
+  <div class="mintlify-accordion-content"><slot /></div>
+</details>
+
+<style is:global>
+  .mintlify-accordion {
+    margin: 0.75rem 0;
+    border: 1px solid var(--sl-color-hairline);
+    border-radius: 0.5rem;
+    padding: 0.75rem 1rem;
+  }
+  .mintlify-accordion summary {
+    cursor: pointer;
+    font-weight: 600;
+    list-style: none;
+  }
+  .mintlify-accordion summary::-webkit-details-marker {
+    display: none;
+  }
+  .mintlify-accordion summary::before {
+    content: '';
+    display: inline-block;
+    width: 0.6em;
+    height: 0.6em;
+    margin-inline-end: 0.6em;
+    border-inline-end: 2px solid currentColor;
+    border-block-end: 2px solid currentColor;
+    transform: rotate(-45deg);
+    transition: transform 0.15s ease;
+  }
+  .mintlify-accordion[open] summary::before {
+    transform: rotate(45deg);
+  }
+  .mintlify-accordion-content {
+    margin-top: 0.75rem;
+  }
+  .mintlify-accordion-content > :first-child {
+    margin-top: 0;
+  }
+  .mintlify-accordion-content > :last-child {
+    margin-bottom: 0;
+  }
+</style>

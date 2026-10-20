@@ -54,6 +54,7 @@ Las estancias de última hora dejan reservar slots próximos que nadie ha cogido
 - Se marcan como última hora las **4 primeras estancias disponibles** del calendario futuro de la casa (`src/bookings/v2/apps/bookings.apps.service.ts:1838`).
 - Si el usuario ya tiene tantas reservas de última hora recientes (últimos 3 meses) como fracciones, el límite baja a **3** (`bookings.apps.service.ts:1845`).
 - El coste de un intercambio de última hora es **fijo: 1 llave** (`bookings.apps.service.ts:1361`; en la reserva de disfrute, `:1097`).
+- El **disfrute de última hora** en la propia casa **no gasta llaves**. La reserva lleva `keys = 1` (`src/bookings/v2/apps/bookings.apps.service.ts:1105`) y el calendario de la casa marca sus slots de última hora con `keys = 1` (`:1865`), pero solo se descuentan llaves en las reservas de tipo `EXCHANGE` (`src/bookings/v2/bookings.common.repository.ts:1130` y `:1249`).
 
 ## Cancelación
 

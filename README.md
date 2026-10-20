@@ -1,55 +1,44 @@
-# Mintlify Starter Kit
+# VIVLA Docs (wiki.vivla.com)
 
-Use the starter kit to get your docs deployed and ready to customize.
+The central wiki for VIVLA: engineering, product and CX. It is private, behind Cloudflare Access (login with Vivla Identity, `@vivla.com` accounts only).
 
-Click the green **Use this template** button at the top of this repo to copy the Mintlify starter kit. The starter kit contains examples with
+## How it works
 
-- Guide pages
-- Navigation
-- Customizations
-- API reference pages
-- Use of popular components
+| Part | Where | What it does |
+|---|---|---|
+| Content | `*.mdx` + `docs.json` (this repo) and `docs/wiki/` in each subrepo | The pages. Mintlify-dialect MDX; `docs.json` sets tabs, groups, page order and redirects. |
+| Aggregation | `.github/workflows/aggregate.yml`, job `aggregate` | Copies the subrepo pages into the `docs` branch and merges their `docs.json` tabs. |
+| Site | `site/` | An [Astro Starlight](https://starlight.astro.build) build of the `docs` branch, with a compatibility layer for the Mintlify components. |
+| Worker | `worker/` | The Cloudflare Worker `vivla-wiki`. It serves the site, checks the Access JWT and runs the MCP at `/mcp`. |
+| Deploy | `aggregate.yml`, job `deploy-wiki` | Builds the site, the MCP corpus and the search embeddings, runs the tests, then deploys staging and production. |
 
-**[Follow the full quickstart guide](https://starter.mintlify.com/quickstart)**
+## Write a page
 
-## AI-assisted writing
+1. Add or edit an `.mdx` file with `title` and `description` in the frontmatter.
+2. Add the page to `docs.json` (pages in a subrepo go in that subrepo's `docs/wiki/docs.json`).
+3. Open a PR to `main`. The **Wiki build check** must pass before you merge.
 
-Set up your AI coding tool to work with Mintlify:
+Supported components: `Note`, `Tip`, `Info`, `Warning`, `Danger`, `Check`, `Card`, `CardGroup`, `Columns`, `Tabs`/`Tab`, `Steps`/`Step`, `Accordion`/`AccordionGroup`, `CodeGroup`, `Frame`, and Mermaid code fences. Any other component breaks the build.
+
+Escape a literal `<` or `{` in prose (`\<`, `\{`), or put it in inline code. The build fixes the common cases, but not all of them.
+
+## Preview locally
 
 ```bash
-npx skills add https://mintlify.com/docs
+cd site
+pnpm install
+VIVLA_DOCS_CONTENT_ROOT=.. pnpm run dev
 ```
 
-This command installs Mintlify's documentation skill for your configured AI tools like Claude Code, Cursor, Windsurf, and others. The skill includes component reference, writing standards, and workflow guidance.
+To see the subrepo tabs too, point `VIVLA_DOCS_CONTENT_ROOT` at a checkout of the `docs` branch. `scripts/build-wiki.sh <content-root>` runs the full build that CI runs.
 
-See the [AI tools guides](/ai-tools) for tool-specific setup.
+## Environments
 
-## Development
+- Production: `https://wiki.vivla.com`. Worker `vivla-wiki`, route `wiki.vivla.com/*`.
+- Staging: `https://wiki-next.vivla.com`. Worker `vivla-wiki-staging`. CI deploys it first and smoke-tests it.
 
-Install the [Mintlify CLI](https://www.npmjs.com/package/mint) to preview your documentation changes locally. To install, use the following command:
+Both sit behind the Access app **VIVLA Docs**. The Workers have no `workers.dev` or preview URL.
 
-```
-npm i -g mint
-```
+## Rollback
 
-Run the following command at the root of your documentation, where your `docs.json` is located:
-
-```
-mint dev
-```
-
-View your local preview at `http://localhost:3000`.
-
-## Publishing changes
-
-Install our GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app) to propagate changes from your repo to your deployment. Changes are deployed to production automatically after pushing to the default branch.
-
-## Need help?
-
-### Troubleshooting
-
-- If your dev environment isn't running: Run `mint update` to ensure you have the most recent version of the CLI.
-- If a page loads as a 404: Make sure you are running in a folder with a valid `docs.json`.
-
-### Resources
-- [Mintlify documentation](https://mintlify.com/docs)
+Until Mintlify is decommissioned, the `wiki` DNS record still points at Mintlify. To roll back, remove the `routes` entry from `worker/wrangler.jsonc` and deploy (or delete the route in the Cloudflare dashboard: Workers → vivla-wiki → Settings → Domains & Routes).

@@ -134,6 +134,14 @@
               "operativa/intercambio-keys",
               "operativa/alquiler"
             ]
+          },
+          {
+            "group": "Mercado secundario",
+            "pages": [
+              "operativa/mercado-secundario",
+              "operativa/condiciones-propietario",
+              "operativa/cambio-de-casa"
+            ]
           }
         ]
       },

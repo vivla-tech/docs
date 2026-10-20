@@ -1,0 +1,10 @@
+---
+// Fallback for <CodeGroup> blocks the build-time transform (see
+// site/scripts/lib/codegroup.mjs) couldn't rewrite into <Tabs>/<TabItem> —
+// in this corpus, exactly one page whose single "fence" isn't a real fenced
+// code block. Renders its children plainly rather than failing the build.
+---
+
+<div class="mintlify-codegroup-fallback">
+  <slot />
+</div>

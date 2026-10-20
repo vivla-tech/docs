@@ -1,0 +1,77 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vivla-wiki",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "account_id": "c38baece52cddd64baab323c3550ce17",
+  // No default domain of any kind: no *.workers.dev, no preview URLs. The
+  // only way in is the Worker route / custom domain added at deploy time
+  // (see the runbook) behind Cloudflare Access. Defense in depth: even if
+  // one of these were ever flipped back on by mistake, src/access.ts still
+  // 403s every request without a valid Access JWT.
+  "workers_dev": false,
+  "preview_urls": false,
+  // Cutover (PLAN.md §8.1): the route takes wiki.vivla.com in front of the
+  // proxied CNAME to Mintlify, which stays in place for rollback. Rollback:
+  // delete this route and deploy.
+  "routes": [{ "pattern": "wiki.vivla.com/*", "zone_name": "vivla.com" }],
+  "assets": {
+    // The Starlight build (site/, `pnpm run build`). Build the site before
+    // `wrangler deploy`. Unit tests use wrangler.test.jsonc and its
+    // public-placeholder/ instead.
+    "directory": "../site/dist",
+    "binding": "ASSETS",
+    "html_handling": "drop-trailing-slash",
+    "not_found_handling": "404-page",
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "FEEDBACK",
+      "database_name": "vivla-wiki-feedback",
+      "migrations_dir": "migrations",
+      "database_id": "61c65ac2-89fa-4e22-b732-254414a8d1b8"
+    }
+  ],
+  // Workers AI — no resource to create, unlike D1/Vectorize: this binding
+  // just grants the Worker inference access on the account. Used only to
+  // embed the search query for search_vivla_docs's hybrid ranking.
+  "ai": { "binding": "AI" },
+  "vars": {
+    "ACCESS_TEAM_DOMAIN": "https://vivla.cloudflareaccess.com",
+    // AUD of the Access app "VIVLA Docs" (wiki.vivla.com). Comma-separated;
+    // append the AUD of the future "wiki-next" staging app/destination here
+    // once it exists — no code change needed, see worker/README.md.
+    "ACCESS_AUD": "dc70ab4583ee9538450fcb3a48ca18efe08e1a392f7f7eb94dafec9310fdff36",
+    "SITE_BASE_URL": "https://wiki.vivla.com"
+  },
+  "limits": {
+    "cpu_ms": 30000
+  },
+  "observability": {
+    "enabled": true
+  },
+  "env": {
+    "staging": {
+      // Repeated on purpose: no default domain for staging either.
+      "workers_dev": false,
+      "preview_urls": false,
+      "vars": {
+        "ACCESS_TEAM_DOMAIN": "https://vivla.cloudflareaccess.com",
+        "ACCESS_AUD": "dc70ab4583ee9538450fcb3a48ca18efe08e1a392f7f7eb94dafec9310fdff36",
+        "SITE_BASE_URL": "https://wiki-next.vivla.com"
+      },
+      "routes": [{ "pattern": "wiki-next.vivla.com", "custom_domain": true }],
+      "ai": { "binding": "AI" },
+      "d1_databases": [
+        {
+          "binding": "FEEDBACK",
+          "database_name": "vivla-wiki-feedback-staging",
+          "migrations_dir": "migrations",
+          "database_id": "cab7cd10-e81c-41fc-95e7-3a5af179d6de"
+        }
+      ]
+    }
+  }
+}
