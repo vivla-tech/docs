@@ -17,9 +17,7 @@ PropCos no es solo HTTP: al arrancar, `app/server.ts` importa cinco **workers Bu
 
 La conexión a Redis sale de `REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD` (`app/server/queue/redis.config.ts:5`).
 
-<Warning>
-  `WORKER_CONCURRENCY` para los workers de OCR no aparece documentada con su valor por defecto en `.env.example`: el valor efectivo en producción es **PENDIENTE de confirmar**.
-</Warning>
+`WORKER_CONCURRENCY` no está definida en Railway: en producción se usa el valor por defecto del código (verificado el 2026-10-20).
 
 ## Tareas programadas (crons)
 
@@ -32,7 +30,7 @@ pattern: "30 5 * * *"   tz: Europe/Madrid   data: { execute: true }
 El índice también se puede lanzar a mano por `POST /api/internal/drive-index/run` y consultar su estado por `GET /api/internal/drive-index/run?jobId=` (ambos devuelven **solo conteos**, nunca nombres de casa ni de propietario) (`app/routes/api/internal/drive-index/run.ts:12`, `app/server/queue/drive-index.worker.ts:9`).
 
 <Note>
-  Los crons de conciliación bancaria y de Stripe **no viven en PropCos**: viven en el microservicio **vivla-cashflow**, que luego avisa a PropCos por `POST /api/webhooks/sync-completed` (`app/routes/api/webhooks/sync-completed.ts:36`). Sus horarios son **PENDIENTE de confirmar** en la documentación de cashflow.
+  Los crons de conciliación bancaria y de Stripe **no viven en PropCos**: viven en el microservicio **vivla-cashflow**, que luego avisa a PropCos por `POST /api/webhooks/sync-completed` (`app/routes/api/webhooks/sync-completed.ts:36`). Sus horarios están en el código de `vivla-cashflow`, que aún no tiene sección en esta wiki.
 </Note>
 
 ## Monitorización
@@ -55,5 +53,5 @@ El cliente de navegador también lleva Sentry (`@sentry/react`, `app/client/util
 Cada deploy terminado en Railway se publica en Slack **#deploy-notifications** (éxito o fallo), con enlaces a PropCos, a la release de Sentry y a Railway (`.github/scripts/deploy-notify.sh:63`). Detalle en [Despliegue](/sistemas/propcos/despliegue).
 
 <Warning>
-  **No hay endpoint de health/readiness en el código** (`app/routes/api/` no define `/health` ni similar). La sonda de estado que use Railway/Cloudflare y las alertas de Sentry (a quién avisan, por qué canal) son **PENDIENTE de confirmar** con el equipo proveedor.
+  **PropCos no tiene sonda de estado:** el código no define `/health`, Railway no tiene healthcheck configurado y `vivla-status` no vigila `propcos.vivla.com`. El SDK de Sentry está activo en producción (`SENTRY_DSN`, proyecto `propcos`), pero no hay reglas de alerta declaradas para él (verificado el 2026-10-20).
 </Warning>

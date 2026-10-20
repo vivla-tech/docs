@@ -7,8 +7,10 @@ description: "Equipo responsable de PropCos y los fallos más comunes, con su ca
 
 PropCos lo **construye y lo opera un proveedor externo** (Digio, autor en `package.json:10`); el equipo interno responsable en Vivla es **proveedor-externo**. La observabilidad en producción está en **Sentry** (org `vivla-lifestyle`, proyecto `propcos`) y las notificaciones de deploy en Slack **#deploy-notifications** (ver [Tareas y monitorización](/sistemas/propcos/tareas-y-monitorizacion)).
 
+Los errores van al proyecto de Sentry **`propcos`** (organización `vivla-lifestyle`). Ese proyecto no tiene reglas de alerta declaradas en `vivla-status`, y no hay sonda de estado para `propcos.vivla.com` (verificado el 2026-10-20).
+
 <Warning>
-  El contacto del proveedor, quién está de guardia y el canal de alertas de Sentry **no viven en el código**: **PENDIENTE de confirmar**.
+  El contacto del proveedor y quién está de guardia no están en ningún sistema: los conoce el equipo de Tech.
 </Warning>
 
 ## Fallos más comunes
@@ -59,6 +61,6 @@ PropCos lo **construye y lo opera un proveedor externo** (Digio, autor en `packa
     Último deploy, su commit y los PRs incluidos.
   </Step>
   <Step title="El proveedor externo">
-    Si el fallo es de build/infra del lado del proveedor (pipeline GitLab, Kubernetes de Digio), escala al equipo proveedor — **PENDIENTE de confirmar** el contacto.
+    Si el fallo es de build/infra del lado del proveedor (pipeline GitLab, Kubernetes de Digio), escala al equipo proveedor por el canal que usa Tech con ellos.
   </Step>
 </Steps>

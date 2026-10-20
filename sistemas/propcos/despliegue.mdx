@@ -22,9 +22,19 @@ PropCos se empaqueta con un **Dockerfile** multi-etapa (Node 22 alpine, pnpm) qu
 - **Producción (`propcos.vivla.com`) está detrás de Cloudflare Access**: solo personal de Vivla puede abrir el dashboard y descargar los assets/source maps (`scripts/sentry-sourcemaps.mjs:7`, `app/server/sync/sync.swagger.ts:25`).
 - Los endpoints máquina a máquina `/api/internal/*` exigen además la cabecera `x-internal-api-key` (ver [Integraciones](/sistemas/propcos/integraciones)).
 
-<Warning>
-  La configuración concreta de Railway (servicio, plan, réplicas, volúmenes, variables de entorno, Postgres y Redis gestionados, y el dominio Cloudflare Access) **vive en los dashboards de Railway y Cloudflare, no en el repo**: **PENDIENTE de confirmar**. Mira la página general de [Railway](/infra/railway) y [Cloudflare](/infra/cloudflare).
-</Warning>
+En Railway, PropCos es el proyecto **`VIVLA-Propcos`**, entorno `production` (verificado el 2026-10-20):
+
+| Servicio | Qué es |
+|---|---|
+| `propcos` | La app. Conectada a `vivla-tech/propcos`, rama `master`. Dominio `propcos.vivla.com`. Arranca con `pnpm db:migrate && pnpm start` |
+| `Postgres Propcos` | PostgreSQL 17 gestionado por Railway |
+| `Redis` | Redis 8 para las colas (BullMQ), con contraseña y volumen |
+| `vivla-cashflow` | El microservicio de conciliación bancaria (repo `vivla-tech/vivla-cashflow`, rama `main`), en el mismo proyecto |
+
+En Cloudflare, `propcos.vivla.com` está detrás de la app de Access **«Propcos»**:
+- Personas: política `Vivla&Digio Users`, con login por código de un solo uso (PIN por correo), para que entre también el equipo del proveedor.
+- Máquinas: dos service tokens, `propcos-drive-import` y `vivla-tools-propcos-sync`.
+- Sin login: la app «API Publica Propcos» deja pasar `/api/reports/year-owner` y `/api/webhooks`.
 
 ## Cómo se despliega
 
@@ -54,16 +64,14 @@ Las migraciones son ficheros SQL en `db/` generados con `drizzle-kit` y se aplic
 
 El pipeline del proveedor (GitLab) aplica las migraciones en su Kubernetes como un **Job** (`pnpm db:migrate`) solo cuando cambian ficheros de `db/` en la rama `develop` (`.gitlab-ci.yml` sección `migrations_pre`, `devops/staging/migrations-job.yaml`).
 
-<Warning>
-  Cómo y cuándo se aplican las migraciones **en el entorno de producción de Railway** (manual, hook de release o Job aparte) no está en el repo: **PENDIENTE de confirmar** con el equipo proveedor.
-</Warning>
+En Railway, **las migraciones se aplican en cada arranque**: el comando de inicio del servicio es `pnpm db:migrate && pnpm start`, configurado en Railway (el repo no tiene `railway.json`). Un despliegue con migraciones nuevas las aplica antes de servir tráfico; si la migración falla, el contenedor no arranca (verificado el 2026-10-20).
 
 ## Pipeline del proveedor externo (GitLab / Digio)
 
 El repo incluye `.gitlab-ci.yml`, el pipeline del proveedor que construye y despliega en **su propia** infraestructura Kubernetes (imágenes en `registry.digio.es/vivla`), **solo en la rama `develop`**, con notificaciones a Slack y Google Chat (`.gitlab-ci.yml:1`). Sus etapas son `build` → `migrations` (Job de k8s) → `deploy` (`kubectl set image` + `rollout status`).
 
 <Note>
-  Este pipeline es independiente del despliegue de producción de Vivla en Railway: cubre el entorno del proveedor. Cuál de los dos es el staging canónico de Vivla es **PENDIENTE de confirmar**.
+  Este pipeline es independiente del despliegue de producción de Vivla en Railway: cubre el entorno del proveedor. Railway solo tiene el entorno `production`; Vivla no tiene staging propio de PropCos (verificado el 2026-10-20).
 </Note>
 
 ## Cómo se vuelve atrás
@@ -74,5 +82,5 @@ El repo no define su propio mecanismo de rollback. Las dos vías que soporta la 
 - **Kubernetes del proveedor:** `kubectl set image …` apunta la imagen a un `$CI_PIPELINE_IID` anterior; el deploy usa `kubectl rollout status`, así que admite `kubectl rollout undo` (`.gitlab-ci.yml` sección `deploy_pre`).
 
 <Warning>
-  El procedimiento de rollback aprobado (quién lo ejecuta, cómo se tratan las migraciones ya aplicadas y si Railway conserva imágenes anteriores) **no está en el código**: **PENDIENTE de confirmar** con el equipo proveedor.
+  **Ojo con las migraciones al volver atrás:** Railway conserva los despliegues anteriores y permite redesplegarlos, pero una migración ya aplicada no se deshace sola. Revierte el esquema antes de volver a una versión que no lo soporte. Quién lo ejecuta lo decide el equipo proveedor junto con Tech.
 </Warning>

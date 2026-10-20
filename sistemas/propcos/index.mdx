@@ -30,9 +30,7 @@ PropCos es la fuente de verdad de los datos **societarios y financieros** de cad
   </Card>
 </CardGroup>
 
-<Warning>
-  El reparto exacto de permisos y qué roles humanos entran al dashboard **no viven en el código** (el código no implementa su propia autenticación de usuarios; el acceso humano va por Cloudflare Access, ver [Despliegue](/sistemas/propcos/despliegue)). **PENDIENTE de confirmar** con el equipo proveedor y con Vivla.
-</Warning>
+El acceso de personas al dashboard lo controla Cloudflare Access (política `Vivla&Digio Users`): correos de Vivla y del proveedor, con PIN por correo. La app no tiene roles propios (verificado el 2026-10-20).
 
 ## Stack
 
