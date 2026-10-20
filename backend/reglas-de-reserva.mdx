@@ -16,13 +16,13 @@ Estas son las reglas que **el código** aplica al crear o gestionar una reserva.
 | Regla | Detalle | Referencia |
 |-------|---------|------------|
 | **Antelación mínima 72 h** | Un slot cuya fecha de inicio esté a menos de 72 horas se marca como no disponible. | `src/bookings/v2/apps/bookings.apps.repository.ts:410` (también `src/calendars/v2/apps/calendars.apps.repository.ts:114`) |
-| **Horizonte máximo 2 años** | Las estancias disponibles se calculan solo hasta 2 años naturales desde hoy (`today.getFullYear() + 2`). | `src/bookings/v2/apps/bookings.apps.service.ts:1823` |
+| **Horizonte máximo 2 años** | Las estancias disponibles se calculan solo hasta 2 años naturales desde hoy (`today.getFullYear() + 2`). | `src/bookings/v2/apps/bookings.apps.service.ts:1831` |
 
 ## Estancias por reserva
 
 Una reserva puede combinar una o dos estancias (slots) del calendario, con condiciones estrictas (`src/bookings/v2/apps/bookings.apps.service.ts`).
 
-- **Máximo 2 estancias** por reserva; superarlo devuelve `LIMIT_OVER` (`bookings.apps.service.ts:1000` y `:1072`).
+- **Máximo 2 estancias** por reserva; superarlo devuelve `LIMIT_OVER` (`bookings.apps.service.ts:1008`; con un slot de última hora, `:1080`).
 - Ambas estancias deben ser de la **misma temporada**.
 - Solo se pueden encadenar dos estancias si su temporada **permite consecutivas**. Esto ya **no** se deriva del slug `low`/`mid`: cada temporada lleva un flag booleano propio **`allows_consecutive`** (columna de la entidad `Season` de v2, por defecto `false`) (`src/common/database/v2/entities/calendars/season.entity.ts:42`). Es dato por temporada, configurable en Postgres.
 - Las fechas deben ser **consecutivas**.
@@ -33,15 +33,15 @@ Una reserva puede combinar una o dos estancias (slots) del calendario, con condi
   **El cuadro de cupos fijo por tipo de casa (playa/ski/urbano × baja/media/alta/pico) ya NO está en el código.** En v2 el cupo de cada temporada es **dato por temporada** en Postgres: la columna `slots_available` de la entidad `Season` (por defecto **2**) (`src/common/database/v2/entities/calendars/season.entity.ts:50`).
 </Warning>
 
-El cupo disponible de un usuario en una temporada se calcula así (`src/bookings/v2/apps/bookings.apps.service.ts:1747`):
+El cupo disponible de un usuario en una temporada se calcula así (`src/bookings/v2/apps/bookings.apps.service.ts:1755`):
 
 ```
 disponible = season.slots_available × fracciones_del_usuario
 ```
 
-- **Fracciones:** el cupo se multiplica por el número de fracciones del usuario en esa casa (`bookings.apps.service.ts:1747`).
-- **Sin fracciones o calendario bloqueado:** si el usuario no tiene fracciones o su calendario está bloqueado (`lockCalendar`), no puede reservar (`bookings.apps.service.ts:968`).
-- Cada reserva activa del usuario descuenta de la temporada de su slot; si no queda cupo, se devuelve `LIMIT_OVER` (`bookings.apps.service.ts:1000`, `:1072`, `:1205`).
+- **Fracciones:** el cupo se multiplica por el número de fracciones del usuario en esa casa (`bookings.apps.service.ts:1755`).
+- **Sin fracciones o calendario bloqueado:** si el usuario no tiene fracciones o su calendario está bloqueado (`lockCalendar`), no puede reservar (`bookings.apps.service.ts:976`).
+- Cada reserva activa del usuario descuenta de la temporada de su slot; si no queda cupo, se devuelve `LIMIT_OVER` (`bookings.apps.service.ts:1213`).
 
 <Warning>
   **Cupos concretos por temporada y casa, y la antigua lógica de "pico descuenta de alta" / "urbano sin pico": PENDIENTE confirmar por CX/negocio.** Los valores de `slots_available` son dato en Postgres, no código, y pueden variar por temporada y casa. La lógica especial de pico/alta por tipo de casa de v1 ya no existe en el código v2.
@@ -51,17 +51,17 @@ disponible = season.slots_available × fracciones_del_usuario
 
 Las estancias de última hora dejan reservar slots próximos que nadie ha cogido, incluso con el cupo agotado.
 
-- Se marcan como última hora las **4 primeras estancias disponibles** del calendario futuro de la casa (`src/bookings/v2/apps/bookings.apps.service.ts:1838`).
-- Si el usuario ya tiene tantas reservas de última hora recientes (últimos 3 meses) como fracciones, el límite baja a **3** (`bookings.apps.service.ts:1845`).
-- El coste de un intercambio de última hora es **fijo: 1 llave** (`bookings.apps.service.ts:1361`; en la reserva de disfrute, `:1097`).
+- Se marcan como última hora las **4 primeras estancias disponibles** del calendario futuro de la casa (`src/bookings/v2/apps/bookings.apps.service.ts:1846`).
+- Si el usuario ya tiene tantas reservas de última hora recientes (últimos 3 meses) como fracciones, el límite baja a **3** (`bookings.apps.service.ts:1853`).
+- El coste de un intercambio de última hora es **fijo: 1 llave** (`bookings.apps.service.ts:1369`).
 - El **disfrute de última hora** en la propia casa **no gasta llaves**. La reserva lleva `keys = 1` (`src/bookings/v2/apps/bookings.apps.service.ts:1105`) y el calendario de la casa marca sus slots de última hora con `keys = 1` (`:1865`), pero solo se descuentan llaves en las reservas de tipo `EXCHANGE` (`src/bookings/v2/bookings.common.repository.ts:1130` y `:1249`).
 
 ## Cancelación
 
 Con la retirada de v1, la cancelación se rige por las reglas de v2 (`src/bookings/v2/apps/bookings.apps.service.ts`). Al calcular los permisos de una reserva, el `permissions.cancel` del propietario se concede solo si la reserva **no está cancelada, no ha empezado y no es de ThirdHome**, y además:
 
-- **Disfrute (`ENJOY`):** faltan **más de 30 días** para que empiece (`bookings.apps.service.ts:1502`).
-- **Alquiler o intercambio:** faltan **más de 30 días**, la reserva **no tiene asistentes** y **no ha cobrado llaves** (`bookings.apps.service.ts:1505`).
+- **Disfrute (`ENJOY`):** faltan **más de 30 días** para que empiece (`bookings.apps.service.ts:1510`).
+- **Alquiler o intercambio:** faltan **más de 30 días**, la reserva **no tiene asistentes** y **no ha cobrado llaves** (`bookings.apps.service.ts:1516`).
 
 Los invitados que no son el asistente principal pueden anular su propia invitación sin cancelar la reserva (`bookings.apps.service.ts:476`).
 

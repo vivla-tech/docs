@@ -5,11 +5,11 @@ description: "Enum de temporadas, fechas por casa en Firestore, coste en llaves 
 
 # Calendario y temporadas
 
-El calendario mezcla dos fuentes: un **enum de temporadas fijo en el código** y las **fechas concretas de cada casa, que son dato en Firestore**. Separarlas es clave para no confundir lo inmutable con lo configurable.
+El calendario mezcla dos fuentes: un **enum de temporadas fijo en el código** y las **fechas concretas de cada casa, que son dato en Postgres**. Separarlas es clave para no confundir lo inmutable con lo configurable.
 
 ## El enum de temporadas (código)
 
-Las temporadas posibles están hardcodeadas en `src/common/dtos/season.dto.ts:52`:
+Las temporadas posibles están hardcodeadas en `src/common/dtos/season.dto.ts:112`:
 
 | Slug | Enum | Uso |
 |------|------|-----|
@@ -19,10 +19,10 @@ Las temporadas posibles están hardcodeadas en `src/common/dtos/season.dto.ts:52
 | `peak` | `SeasonSlug.HIGH2` | Temporada pico (alta demanda) |
 | `last_hour` | `SeasonSlug.LASTHOUR` | Estancia de última hora |
 
-Solo las temporadas **baja y media** permiten encadenar dos estancias consecutivas: `allowConsecutive` se calcula como `low || mid` (`season.dto.ts:14`). Ver [Reglas de reserva](/backend/reglas-de-reserva).
+Solo las temporadas **baja y media** permiten encadenar dos estancias consecutivas: `allowConsecutive` se calcula como `low || mid` (`season.dto.ts:17`). Ver [Reglas de reserva](/backend/reglas-de-reserva).
 
 <Note>
-  **Modelo v2 (Postgres): la temporada dejó de llevar `slug`.** En la entidad `Season` de v2 se retiró el enum de slug (`low`/`mid`/`high`/`peak`) y se sustituyó por un flag booleano explícito **`instant_keys`** (`src/common/database/v2/entities/calendars/season.entity.ts:29`). Ese flag decide el **cobro instantáneo de llaves**: un slot reservado con **≥ 9 meses de antelación** en una temporada con `instant_keys = true` se marca para cobro automático (`src/calendars/v2/apps/calendars.apps.repository.ts:101`) — antes esto se derivaba de "la temporada no es baja". La migración inicial puso `instant_keys = true` en todas las temporadas que no eran `low`, así que el comportamiento no cambia; ahora es **configurable por temporada** en vez de deducirse del slug. El enum `SeasonSlug` de la tabla superior sigue vivo solo en el DTO v1 (`src/common/dtos/season.dto.ts`).
+  **Modelo v2 (Postgres): la temporada dejó de llevar `slug`.** En la entidad `Season` de v2 se retiró el enum de slug (`low`/`mid`/`high`/`peak`) y se sustituyó por un flag booleano explícito **`instant_keys`** (`src/common/database/v2/entities/calendars/season.entity.ts:29`). Ese flag decide el **cobro instantáneo de llaves**: un slot reservado con **≥ 9 meses de antelación** en una temporada con `instant_keys = true` se marca para cobro automático (`src/calendars/v2/apps/calendars.apps.repository.ts:103`) — antes esto se derivaba de "la temporada no es baja". La migración inicial puso `instant_keys = true` en todas las temporadas que no eran `low`, así que el comportamiento no cambia; ahora es **configurable por temporada** en vez de deducirse del slug. El enum `SeasonSlug` de la tabla superior sigue vivo solo en el DTO v1 (`src/common/dtos/season.dto.ts`).
 </Note>
 
 ## Las fechas de cada casa (dato en Postgres)
@@ -59,4 +59,4 @@ Las horas de entrada y salida por defecto son ahora **columnas del propio calend
 
 ## Tipos y estados de casa
 
-Los tipos de casa (`HomeType`) son `ski`, `beach`, `city`; los estados (`HomeStatus`) son `inactive`, `pre-active`, `active` (`src/common/database/v2/entities/homes/home.entity.ts:27`). El estado condiciona qué reservas se permiten (ver [Operativa](/operativa/index)). El listado admin de propiedades (`GET /v2/admin/properties`, `read:homes`) admite filtrar por `status` con uno de esos valores.
+Los tipos de casa (`HomeType`) son `ski`, `beach`, `city`; los estados (`HomeStatus`) son `inactive`, `pre-active`, `active` (`src/common/database/v2/entities/homes/home.entity.ts:29` y `:35`). El estado condiciona qué reservas se permiten (ver [Operativa](/operativa/index)). El listado admin de propiedades (`GET /v2/admin/properties`, `read:homes`) admite filtrar por `status` con uno de esos valores.
