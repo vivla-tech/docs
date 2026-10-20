@@ -62,7 +62,37 @@ describe("verifyAccessToken", () => {
       .setSubject("user-123")
       .setAudience("aud-prod")
       .setIssuedAt(Math.floor(Date.now() / 1000) - 3600)
-      .setExpirationTime(Math.floor(Date.now() / 1000) - 1)
+      .setExpirationTime(Math.floor(Date.now() / 1000) - 120)
+      .sign(privateKey);
+
+    expect(await verifyAccessToken(token, jwks, ["aud-prod"])).toBeNull();
+  });
+
+  it("accepts a token whose nbf is a few seconds ahead of the local clock", async () => {
+    const { privateKey, jwks } = await makeKeyPairAndJwks();
+    const now = Math.floor(Date.now() / 1000);
+    const token = await new SignJWT({})
+      .setProtectedHeader({ alg: "RS256", kid: "test-key" })
+      .setSubject("svc-token-456")
+      .setAudience("aud-prod")
+      .setIssuedAt(now + 5)
+      .setNotBefore(now + 5)
+      .setExpirationTime(now + 3600)
+      .sign(privateKey);
+
+    expect((await verifyAccessToken(token, jwks, ["aud-prod"]))?.sub).toBe("svc-token-456");
+  });
+
+  it("rejects a token whose nbf is beyond the clock tolerance", async () => {
+    const { privateKey, jwks } = await makeKeyPairAndJwks();
+    const now = Math.floor(Date.now() / 1000);
+    const token = await new SignJWT({})
+      .setProtectedHeader({ alg: "RS256", kid: "test-key" })
+      .setSubject("svc-token-456")
+      .setAudience("aud-prod")
+      .setIssuedAt(now)
+      .setNotBefore(now + 300)
+      .setExpirationTime(now + 3600)
       .sign(privateKey);
 
     expect(await verifyAccessToken(token, jwks, ["aud-prod"])).toBeNull();
