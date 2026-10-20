@@ -1,0 +1,113 @@
+---
+title: "Integraciones"
+description: "Sistemas con los que habla booking-cloud-functions: HubSpot, Notion, Slack, Zendesk, Hostaway y el dashboard de VIVLA, con sus credenciales por nombre."
+---
+
+Esta página resume a quién llama cada integración, quién le llama a él y **con qué credencial** (solo por nombre). Para la lista completa de funciones, mira [Funciones y triggers](/sistemas/booking-cloud-functions/funciones).
+
+<Danger>
+  Las credenciales de todas estas integraciones están **commiteadas en el repositorio** (ver [overview](/sistemas/booking-cloud-functions/index)). Aquí se nombran por el identificador de la constante, nunca por su valor.
+</Danger>
+
+## HubSpot
+
+<Tabs>
+  <Tab title="Qué hace">
+    - **Crear contacto al dar de alta usuario**: cuando se crea un usuario en la app, `createAppUser` usa `createContactIfNeeded` para buscar/crear el contacto en HubSpot (`functions/utils/hs.js:12`, `functions/dashboard/create-app-users.js`).
+    - **Webhook de deal actualizado**: `hbUpdateContact` recibe la notificación de HubSpot, resuelve el contacto asociado al deal vía la API de HubSpot (`crm/v3/objects/deals/.../associations/contact`) y reenvía el email a un webhook de **Airtable** (`functions/webhooks/hubspotController.js:8`).
+  </Tab>
+  <Tab title="Credenciales">
+    - `hsAccessToken` — token de app privada usado por `functions/utils/hs.js:4`.
+    - `bearerToken` — token de app privada usado por `functions/webhooks/hubspotController.js:26`.
+
+    El destino del reenvío es una URL de webhook genérico de Airtable embebida en `functions/webhooks/hubspotController.js`.
+  </Tab>
+</Tabs>
+
+## Notion
+
+Sincroniza NPS y tickets a bases de datos de Notion mediante `@notionhq/client` (`functions/package.json:17`).
+
+<Tabs>
+  <Tab title="Qué hace">
+    - **NPS de reservas**: `syncNewGlobalNPSToNotion` (trigger Firestore sobre `nps-booking`) crea páginas en Notion. Los endpoints `migrateNPSToNotion`, `migrateGlobalNPSToNotion`, etc. migran el histórico (`functions/nps/npstonotion.js`).
+    - **Tickets y estadísticas de casa**: `migrateTicketToNotion`, `migrateHomeTicketStats`, `getAllHomeStats` y el cron `scheduledHomeStatsMigration` (cada 2 h) leen de Zendesk y escriben en Notion (`functions/nps/tickettonotion.js`).
+  </Tab>
+  <Tab title="Credenciales">
+    - `NOTION_TOKEN` — token de integración de Notion (`functions/nps/npstonotion.js:8`, `functions/nps/tickettonotion.js:13`).
+    - Bases de datos (IDs): `NOTION_HNPS_DATABASE_ID`, `NOTION_GNPS_DATABASE_ID` (`functions/nps/npstonotion.js:9`), `NOTION_TICKETS_DATABASE_ID`, `NOTION_STATS_DATABASE_ID` (`functions/nps/tickettonotion.js:14`).
+  </Tab>
+</Tabs>
+
+## Slack
+
+Envía avisos operativos con `@slack/web-api` (`functions/utils/slack.js:1`). Lo usan las notificaciones de reservas/alquiler (`functions/notifications/notifications.js:3`) y el endpoint de prueba `testSlack`.
+
+<Tabs>
+  <Tab title="Qué hace">
+    - `sendSlackMsg` publica en el canal **`ge_notifications`** (`channelId`) con el usuario `GEBot`.
+    - `sendSalesSlackMsg` publica en el canal de pre-reservas (`prebookChannelId`) con el usuario `SalesBookBot` (`functions/utils/slack.js:14`).
+  </Tab>
+  <Tab title="Credenciales">
+    - `token` — token de bot de Slack (`functions/utils/slack.js:5`).
+    - Canales: `channelId` (`ge_notifications`) y `prebookChannelId` (`functions/utils/slack.js:6`).
+  </Tab>
+</Tabs>
+
+<Note>
+  La infraestructura de notificaciones de Slack de VIVLA se describe también en [Infra — Slack notifications](/infra/slack-notifications).
+</Note>
+
+## Zendesk
+
+Usa la API REST de Zendesk (`https://vivlahelp.zendesk.com/api/v2`) por dos vías.
+
+<Tabs>
+  <Tab title="Qué hace">
+    - **SLA de tickets**: el cron `scheduledActualizarFechaPlanDeAccionYPrimeraRespuesta` (cada 5 min) actualiza en Zendesk las fechas de «Plan de acción» y «Primera respuesta» y calcula SLA (`functions/reports/zendeskController.js:21`).
+    - **Sync de tickets al dashboard**: los webhooks `syncZendeskTicket`/`updateZendeskTicket`/`deleteZendeskTicket` propagan altas, ediciones y bajas de ticket (`functions/nps-dashboard/sync-tickets.js`).
+    - **Tickets a Notion**: `tickettonotion.js` lee tickets de Zendesk para volcarlos a Notion (ver arriba).
+  </Tab>
+  <Tab title="Credenciales">
+    - Subdominio `zendeskSubdomain` = `vivlahelp`; usuario `email` (`admin@vivla.com/token`); `apiToken` (`functions/reports/zendeskController.js:9`).
+    - En `tickettonotion.js`: `ZENDESK_EMAIL`, `ZENDESK_TOKEN`, `ZENDESK_SUBDOMAIN` (`functions/nps/tickettonotion.js:7`).
+    - IDs de campos/agentes: `checkboxFieldId`, `dateFieldId`, `checkboxFieldIdPrimeraRespuesta`, `dateFieldIdPrimeraRespuesta`, `agentIds` (`functions/reports/zendeskController.js:12`).
+  </Tab>
+</Tabs>
+
+## Hostaway
+
+<Tabs>
+  <Tab title="Qué hace">
+    - **Webhook entrante** `hostAwayNewReservation`: recibe eventos de reserva de Hostaway. Si el `source` es `apiv1` no hace nada; si el estado es `new`/`inquiry`/`pending` guarda en `hostawayReservations` y notifica nuevas consultas de alquiler; en otros estados actualiza o cambia el estado del documento (`functions/hostaway/hostawayController.js:405`).
+    - **Llamadas salientes** a la API de Hostaway (`API_BASE_URL`) con `Bearer` para crear/gestionar reservas desde la app; las reservas creadas por la app se marcan con el prefijo `VIVLA_COMMENT_PREFIX` (`functions/hostaway/hostawayController.js:33`).
+  </Tab>
+  <Tab title="Credenciales">
+    - `bearerToken` — token de la API de Hostaway (`functions/hostaway/hostawayController.js:7`).
+    - `API_BASE_URL` — base de la API; sobrescribible con la variable de entorno `HOSTAWAY_API_URL` para pruebas locales, en producción usa `https://api.hostaway.com/v1` (`functions/hostaway/hostawayController.js:16`).
+    - Autenticación básica del webhook entrante: `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD`, validados contra la cabecera `Authorization` (`functions/hostaway/hostawayController.js:409`).
+  </Tab>
+</Tabs>
+
+## Dashboard de VIVLA (`dashboard.vivla.com`)
+
+Las funciones de `nps-dashboard/` envían NPS, tickets y casas al API del dashboard de VIVLA con **autenticación básica** (`functions/nps-dashboard/nps-stays.js:63`).
+
+- Destinos: `https://dashboard.vivla.com/api/nps-answers`, `.../api/tickets`, etc.
+- Credencial: usuario `developer` con `password` (`functions/nps-dashboard/sync-tickets.js:89`).
+
+## Backend de notificaciones (push / Expo)
+
+Las notificaciones push se delegan a un backend de notificaciones de VIVLA (en Railway): `sendExpoNotification` hace `POST` a `${EXPO_API_BASE_URL}/expo/send` con la cabecera `x-api-key` (`functions/utils/expo-notifications.js:5`).
+
+- Credencial: variable de entorno `NOTIFICATIONS_API_KEY`; si no está configurada, el envío se omite con un warning (`functions/utils/expo-notifications.js:90`).
+
+<Warning>
+  A qué servicio corresponde exactamente `EXPO_API_BASE_URL` (un host de Railway embebido en el código) y dónde se gestiona `NOTIFICATIONS_API_KEY` son **PENDIENTE de confirmar** con el equipo backend.
+</Warning>
+
+## Otras entradas
+
+- **Typeform**: `typeformWebhook`, `typeformCustomerWebhook` y `completeStayReview` reciben envíos de formularios y los guardan en Firestore (`functions/typeform/typeformController.js`).
+- **Google Cloud Storage**: `proxyGCS` lee archivos del bucket `vivla-app.appspot.com` con las credenciales por defecto del entorno de Functions (`functions/proxy/proxy.js:7`).
+- **Firebase / Firestore y Auth**: el núcleo de datos del proyecto `vivla-app`, origen de casi todos los triggers (`functions/index.js:4`).

@@ -172,6 +172,16 @@
               "sistemas/vivla-concierge/integraciones",
               "sistemas/vivla-concierge/runbook"
             ]
+          },
+          {
+            "group": "Booking Cloud Functions",
+            "pages": [
+              "sistemas/booking-cloud-functions/index",
+              "sistemas/booking-cloud-functions/despliegue",
+              "sistemas/booking-cloud-functions/funciones",
+              "sistemas/booking-cloud-functions/integraciones",
+              "sistemas/booking-cloud-functions/runbook"
+            ]
           }
         ]
       }
