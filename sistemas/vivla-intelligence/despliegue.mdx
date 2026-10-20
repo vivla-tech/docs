@@ -1,0 +1,119 @@
+---
+title: "Despliegue y operación"
+description: "Dónde corre Intelligence (Railway, entornos, URLs, rama de producción), cómo se despliega y se vuelve atrás, sus crons y su monitorización: Sentry, el watchdog y la sonda de uptime."
+---
+
+## Dónde corre
+
+El servicio principal es la app Mastra (`apps/mastra`), desplegada en **Railway** con el builder **RAILPACK**. El proyecto Railway tiene dos entornos (`railway.toml`):
+
+| Entorno | Rama | Servicios | Notas |
+|---|---|---|---|
+| **production** | `main` | `mastra` y `web` | El entorno vivo. Los crons solo se programan aquí (ver abajo). |
+| **testing** | — | `vivla-intelligence` | Entorno de pruebas; se despliega a mano con `pnpm deploy:testing` (`railway up --environment testing`) (`package.json`). |
+
+<Info>
+  Rama de producción: **`main`**. Clase: agente. Propietario: equipo **IA**.
+</Info>
+
+### URLs
+
+- **API de Mastra (producción):** `https://api.vivla.ai` — es la que vigila la sonda de uptime contra `/health` (`.github/workflows/uptime.yml`). También responde en la URL interna del servicio en Railway, declarada en la allowlist de CORS (`apps/mastra/src/mastra/index.ts:262`).
+- **Web (producción):** `https://app.vivla.ai`, servicio `web`, desplegado aparte (`apps/mastra/src/mastra/index.ts:263`).
+
+<Note>
+  Verificado en Railway y Cloudflare el 2026-10-20 (proyecto Railway **VIVLA-INTELLIGENCE**, entorno `production`):
+  - `mastra` → `api.vivla.ai` (y `vivla-intelligence-production.up.railway.app`).
+  - `web` → `app.vivla.ai` (y `web-production-13e2e.up.railway.app`).
+  - Los dos dominios pasan por el proxy de Cloudflare y **no** tienen Cloudflare Access: la autenticación es la de la propia app.
+  - Hay un entorno `testing` con un servicio `vivla-intelligence` en la rama `feat/notion-integration`; su último despliegue falló.
+</Note>
+
+### Build y arranque del servicio `mastra`
+
+- **Build:** `pnpm --filter mastra build` → `mastra build --studio`, salida en `.mastra/output` (`apps/mastra/package.json`, `railway.toml`).
+- **Arranque:** el `start` del paquete **no** es `mastra start` directo, sino un watchdog: `node scripts/start-watchdog.mjs` (`apps/mastra/package.json`). `start:raw` lo salta si hiciera falta.
+- **Healthcheck:** `GET /health` (público, sin auth), timeout 300 s, política de reinicio `ON_FAILURE` con hasta 10 reintentos (`railway.toml`, `apps/mastra/src/mastra/index.ts:273`).
+
+<Note>
+  El `railway.toml` avisa de que el **dashboard de Railway pisa** su `startCommand`, y sus `watchPatterns` (`/apps/mastra/**`) deciden qué commits se despliegan. Valores reales en el dashboard (verificado el 2026-10-20):
+  - `mastra`: conectado a `vivla-tech/vivla-intelligence`, rama `main`, arranque `pnpm --filter mastra start`. Ese script es el watchdog (`node scripts/start-watchdog.mjs`), así que el watchdog **sí** corre en producción.
+  - `web`: misma rama `main`, arranque `pnpm --filter web dev`. En Railway, ese script ejecuta `vite preview` sobre el build, no un servidor de desarrollo.
+  - Un push a `main` despliega solo, si toca rutas de los `watchPatterns`.
+  - `daniela-followups-cron` es una imagen `alpine` con `curl` y horario `0 0 1 1 *`: corre una vez al año, en la práctica está parado.
+</Note>
+
+## Cómo se despliega
+
+El despliegue a producción es por **auto-deploy de Railway desde GitHub**: un commit en `main` que toque las rutas vigiladas (`/apps/mastra/**`) dispara un build y un deploy del servicio `mastra` (`railway.toml`). Cada arranque de contenedor registra un «deploy banner» con el commit, la rama y el `deployment` que Railway inyecta, para que los post-mortems no tengan que adivinar qué corría (`apps/mastra/src/mastra/index.ts:102`).
+
+Además corre CI en GitHub Actions en cada PR y push a `main` (`.github/workflows/ci.yml`):
+
+- **Lint** (Ultracite/Biome) — *warn-only* por ahora (`continue-on-error`).
+- **Typecheck** (`tsc`) — *warn-only* por ahora.
+- **Build de mastra** — **gate duro**: si el build falla en CI, también fallaría en Railway.
+
+## Cómo se vuelve atrás
+
+<Steps>
+  <Step title="Rollback por redeploy en Railway">
+    El código no implementa su propio rollback. La vuelta atrás se hace **desde el dashboard de Railway**, re-desplegando un *deployment* anterior del servicio `mastra`. Railway conserva el historial de despliegues de cada servicio y permite volver a desplegar uno anterior desde ahí.
+  </Step>
+  <Step title="Revertir el commit">
+    Alternativamente, revertir en `main` el commit problemático vuelve a disparar el auto-deploy con el estado anterior. Toda reversión debe quedar registrada en `CHANGELOG.md` con su motivo — el repo nació de un revert sin motivo documentado (`CHANGELOG.md`).
+  </Step>
+</Steps>
+
+<Note>
+  El webhook `POST /webhooks/railway` recibe los eventos de deploy de Railway y publica una notificación en un canal de Slack (`apps/mastra/src/lib/railway/index.ts:11`, `apps/mastra/src/lib/railway/workflow.ts:49`), de modo que cada despliegue y cada `Deployment.crashed` quedan anunciados.
+</Note>
+
+## Tareas programadas (crons)
+
+Los crons se programan **en proceso** dentro del servicio `mastra` con `node-cron`, y **solo** cuando `RAILWAY_ENVIRONMENT_NAME === "production"` — así un deploy de `testing` o un `pnpm mastra:dev` local no disparan los mismos crons contra los canales y datos de producción (`apps/mastra/src/mastra/index.ts:85`).
+
+| Cron | Expresión (UTC) | Qué hace | Fuente |
+|---|---|---|---|
+| Sync legal (RAG) | `0 6,12,18,0 * * *` (4×/día) | Reindexa el corpus legal de Drive en pgvector | `apps/mastra/src/lib/legal-sync-cron.ts:8` |
+| Revisión diaria de Daniela | `0 15 * * *` (≈17:00 Madrid) | Digest de revisión diaria | `apps/mastra/src/lib/daniela-supervisor-cron.ts:18` |
+| Revisión diaria del Qualifier | `30 15 * * *` | Digest del cualificador | `apps/mastra/src/lib/daniela-supervisor-cron.ts:42` |
+| Follow-ups de Daniela | `5 */2 * * *` (cada 2 h) | Avisa a leads sin respuesta; aplica internamente la franja Madrid 9–21 h L–V | `apps/mastra/src/lib/daniela-followup-schedule.ts:11` |
+| Sync de intent/calidad | `*/15 * * * *` (cada 15 min) | Alimenta el bloque CALIDAD del Live Daily Review | `apps/mastra/src/lib/intent-quality-schedule.ts:10` |
+
+Dos de ellos también se exponen como rutas HTTP protegidas por el header `SYNC_SECRET` para disparo manual: `POST /sync/legal` y `POST /cron/daniela-followups` (este último acepta `?dryRun=1` y `?ignoreOfficeHours=1`) (`apps/mastra/src/mastra/index.ts:314`, `:347`).
+
+<Note>
+  El servicio Railway independiente `daniela-followups-cron` quedó **inactivo**: el follow-up se programa ahora en proceso. El comentario en `railway.toml` lo marca como borrable en el dashboard; su ruta HTTP se mantiene solo para disparo manual.
+</Note>
+
+## Monitorización
+
+Cuatro capas, cada una cubriendo lo que la anterior no ve:
+
+<CardGroup cols={2}>
+  <Card title="Sentry" icon="bug">
+    Errores + trazas de agente. Se activa solo si `SENTRY_DSN` está puesto (apagado en local). Proyecto `vivla-lifestyle/vivla-intelligence`. Un `tracesSampler` descarta las transacciones `GET /health` (el watchdog sondea cada 5 s). El `server.onError` reporta los errores de ruta no controlados; los `HTTPException` 4xx pasan sin reportar. (`apps/mastra/src/lib/sentry.ts`, `apps/mastra/src/mastra/index.ts:118`)
+  </Card>
+  <Card title="Langfuse" icon="chart-line">
+    Toda span de IA (agente/tool/workflow) va a Langfuse **y** a Sentry desde la misma config de `Observability` (clave `main`). No se deben separar en dos configs. (`apps/mastra/src/mastra/index.ts:167`)
+  </Card>
+  <Card title="Watchdog en contenedor" icon="shield">
+    `start-watchdog.mjs` es el proceso padre del servicio. Si el hijo muere inesperadamente (p. ej. OOM sin SIGTERM), avisa a dos canales de Slack (uno de alertas técnicas y otro del equipo de ventas) y sale con código de fallo para forzar el reinicio de Railway. En arranque sondea `/health` y publica un aviso verde cuando la API responde. (`apps/mastra/scripts/start-watchdog.mjs`)
+  </Card>
+  <Card title="Sonda de uptime (backstop)" icon="heart-pulse">
+    Workflow de GitHub Actions externo. Ver abajo.
+  </Card>
+</CardGroup>
+
+### Sonda de uptime (GitHub Actions)
+
+`.github/workflows/uptime.yml` es el **backstop externo** para los casos que el watchdog interno no puede ver: un contenedor colgado, un host muerto, una ruta rota. Nació del incidente del 13-ago-2026 (el contenedor se quedó colgado tras un OOM, Railway no lo reinició y la caída pasó 5 días desapercibida).
+
+- **Cadencia:** `*/10 * * * *` (cada 10 minutos), más `workflow_dispatch` manual.
+- **Chequeo:** `GET https://api.vivla.ai/health` con `--max-time 25`; si no da `200`, reintenta a los 30 s. Solo falla si fallan los dos intentos.
+- **Estado:** las últimas 20 ejecuciones de `uptime.yml` pasaron (verificado el 2026-10-20). `vivla-status` no tiene sondas de Intelligence: este workflow es la única vigilancia externa.
+- **Alerta:** si falla, publica en un canal de Slack de producto vía `chat.postMessage` con el token `SLACK_BOT_TOKEN`. Avisa **en cada ejecución fallida** (cada 10 min mientras dure la caída: ruido sostenido para una caída sostenida).
+
+<Warning>
+  El endpoint `/health` devuelve siempre `{ status: "ok" }` si el proceso responde (`apps/mastra/src/mastra/index.ts:281`): confirma que el servidor está vivo, **no** que los agentes, la base de datos o las integraciones funcionen. Un `200` no descarta fallos de dependencias.
+</Warning>
