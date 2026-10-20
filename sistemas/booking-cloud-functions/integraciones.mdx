@@ -102,9 +102,9 @@ Las notificaciones push se delegan a un backend de notificaciones de VIVLA (en R
 
 - Credencial: variable de entorno `NOTIFICATIONS_API_KEY`; si no está configurada, el envío se omite con un warning (`functions/utils/expo-notifications.js:90`).
 
-<Warning>
-  A qué servicio corresponde exactamente `EXPO_API_BASE_URL` (un host de Railway embebido en el código) y dónde se gestiona `NOTIFICATIONS_API_KEY` son **PENDIENTE de confirmar** con el equipo backend.
-</Warning>
+<Info>
+  `EXPO_API_BASE_URL` apunta al **backend de producción de vivla-tools** en Railway (proyecto `VIVLA-tools`, servicio `backend`). Ese servicio tiene configurada la variable `NOTIFICATIONS_API_KEY` que valida la cabecera `x-api-key` (verificado el 2026-10-20).
+</Info>
 
 ## Otras entradas
 

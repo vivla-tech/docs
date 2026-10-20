@@ -98,7 +98,7 @@ Pensados para ejecución manual (importar datos, migrar NPS/tickets a Notion, re
 | `migrateTicketToNotion`, `migrateTicketsByHouseToNotion`, `migrateHomeTicketStats`, `getAllHomeStats`, `migrateAllHomeStatsToNotion` | `functions/nps/tickettonotion.js` |
 
 <Warning>
-  Hay además endpoints `test*` desplegados (`testSlack`, `testPendingBooksNotification`, `testNextStayNotification`, `testInProgressStayNotification`, `testStayReview`, `testHomeNPSNotification`, `testRentBookNotification`, `testExchangeBookNotification`, `testArrivalReviewSynthetic`, varios `testActualizar*` de Zendesk, `updateCompletedStaysReviewStatusTest`). Son endpoints de prueba sin autenticación propia en el código; si deben protegerse o retirarse es **PENDIENTE de confirmar** con backend (`functions/index.js:203`, `functions/index.js:457`).
+  Hay además endpoints `test*` desplegados (`testSlack`, `testPendingBooksNotification`, `testNextStayNotification`, `testInProgressStayNotification`, `testStayReview`, `testHomeNPSNotification`, `testRentBookNotification`, `testExchangeBookNotification`, `testArrivalReviewSynthetic`, varios `testActualizar*` de Zendesk, `updateCompletedStaysReviewStatusTest`). Hay **13 funciones de prueba** desplegadas y activas en producción (verificado el 2026-10-20). Son endpoints de prueba sin autenticación propia en el código; si deben protegerse o retirarse es una decisión **PENDIENTE** (`functions/index.js:203`, `functions/index.js:457`).
 </Warning>
 
 ## Tareas programadas (crons)

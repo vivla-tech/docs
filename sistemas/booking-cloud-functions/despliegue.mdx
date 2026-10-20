@@ -12,9 +12,9 @@ El repo apunta a un único proyecto de Firebase, **`vivla-app`**, como `default`
 | Producción | Firebase `vivla-app`, rama `main` | `.firebaserc:3`, repos.yml |
 | Local (emulador) | Emulador de Functions + Firestore (puerto 8080) | `firebase.json:14` |
 
-<Warning>
-  Que `vivla-app` sea además el entorno de staging/producción compartido, y si existe algún proyecto de pruebas aparte, es **PENDIENTE de confirmar** con el equipo backend: el código solo conoce `vivla-app`.
-</Warning>
+<Info>
+  `vivla-app` es **producción**. Existe un proyecto Firebase aparte, **VIVLA Staging** (`vivla-staging`), pero no tiene ninguna función desplegada y este repo no lo referencia: estas funciones solo corren en producción (verificado el 2026-10-20).
+</Info>
 
 ## Cómo se despliega
 
@@ -34,7 +34,7 @@ El despliegue es con la **Firebase CLI**. Los scripts de npm están en `function
 </Steps>
 
 <Note>
-  No hay workflow de CI/CD en el repo (`.github/` no existe). El despliegue es manual desde la máquina de un desarrollador con la Firebase CLI autenticada. Que exista un pipeline externo es **PENDIENTE de confirmar**.
+  No hay workflow de CI/CD en el repo (`.github/` no existe). El despliegue es manual con la Firebase CLI autenticada. De las 140 funciones activas, 104 llevan la etiqueta de despliegue `cli-firebase` y 36 son de **Firebase Extensions** (exportación de Firestore a BigQuery, `ext-firestore-bigquery-export-*`), que no están en este repo. Hay además 3 funciones en un codebase `functions` que el `firebase.json` del repo no declara (verificado el 2026-10-20).
 </Note>
 
 ### Desarrollo local
@@ -60,9 +60,9 @@ Firebase Functions no tiene un comando de rollback nativo de un clic; la forma s
   </Step>
 </Steps>
 
-<Warning>
-  El procedimiento de rollback concreto del equipo (quién lo ejecuta, si se despliega todo o función a función) **no está en el código**: es **PENDIENTE de confirmar**.
-</Warning>
+<Info>
+  Las funciones de primera generación no guardan versiones anteriores para reactivar. Volver atrás es **redesplegar el commit anterior**: `git checkout <commit>` y `firebase deploy --only functions:<nombre>` para una función, o sin `--only` para todas.
+</Info>
 
 ### Desactivar comportamiento sin desplegar menos funciones
 
@@ -82,7 +82,7 @@ Cambiar un flag requiere re-desplegar la función.
 | Alertas operativas | Mensajes a Slack (`ge_notifications`, pre-reservas) desde las notificaciones | `functions/utils/slack.js` |
 
 <Warning>
-  **No hay Sentry** ni sondas de salud (`/health`) en el código de este repo. Qué paneles de Cloud Monitoring o alertas existen fuera del repo es **PENDIENTE de confirmar** con backend.
+  **No hay Sentry** ni sondas de salud (`/health`) en el código de este repo. Qué alertas de Cloud Monitoring existen fuera del repo es **PENDIENTE de confirmar**.
 </Warning>
 
 Equipo responsable y fallos típicos en el [Runbook](/sistemas/booking-cloud-functions/runbook).

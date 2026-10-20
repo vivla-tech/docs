@@ -34,8 +34,10 @@ El detalle de cada integración y quién llama a quién está en [Integraciones]
 | Región | Por defecto `us-central1` (no se fija región en el código) | sin `.region()` en `functions/**` |
 | Rama de producción | `main` | `.firebaserc`, repos.yml |
 
+En producción (proyecto `vivla-app`) hay **140 funciones activas**: 112 en `us-central1`, 20 en `europe-west1` y 8 en `europe-west2`. Las HTTPS de primera generación responden en `https://<región>-vivla-app.cloudfunctions.net/<función>` (verificado el 2026-10-20 con `firebase functions:list`).
+
 <Warning>
-  Las URLs públicas de las funciones (dominio `https://<región>-vivla-app.cloudfunctions.net/<función>` o los hostnames configurados en HubSpot/Hostaway/Typeform/Zendesk) **no viven en el código**: son **PENDIENTE de confirmar** con el equipo backend.
+  Qué URL tiene configurada cada servicio externo que llama a estas funciones (HubSpot, Hostaway, Typeform, Zendesk) vive en el panel de cada servicio, no en el código: **PENDIENTE de confirmar**.
 </Warning>
 
 ## Estructura del repo
