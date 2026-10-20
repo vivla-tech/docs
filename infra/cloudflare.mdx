@@ -1,6 +1,6 @@
 ---
 title: "Cloudflare"
-description: "DNS, CDN y Cloudflare Access"
+description: "DNS, CDN, Cloudflare Access y el Worker de la wiki"
 ---
 
 ## DNS
@@ -9,18 +9,44 @@ Todos los dominios de VIVLA están gestionados en Cloudflare.
 
 ## Cloudflare Access
 
-La documentación en `wiki.vivla.com` está protegida por Cloudflare Access. Solo miembros autorizados del equipo pueden acceder.
+La documentación en `wiki.vivla.com` está protegida por Cloudflare Access. Solo entran cuentas `@vivla.com`.
 
 ### Configuración
 
 - **Application**: VIVLA Docs
-- **Domain**: `wiki.vivla.com`
-- **Policy**: Allow — equipo VIVLA (por email domain o grupo)
+- **Destinos**: `wiki.vivla.com` y `wiki-next.vivla.com` (staging)
+- **Login**: Auth0 (Vivla Identity), con redirección automática
+- **Policies**:
+  - Allow: equipo VIVLA (email domain `vivla.com`)
+  - Service Auth: service token `wiki-mcp-machines`, para los agentes en servidor (concierge, smurfs)
+- **Managed OAuth**: activado. Los clientes MCP (Claude, Cursor, VS Code) hacen el login con OAuth. Ver [Conectar la wiki a tu IA](/mcp-setup).
 
-<Note>
-  No se necesita autenticación adicional de Mintlify. Cloudflare Access maneja todo el control de acceso.
-</Note>
+## Worker de la wiki
+
+La wiki la sirve un Cloudflare Worker propio:
+
+| Recurso | Producción | Staging |
+|---|---|---|
+| Worker | `vivla-wiki` | `vivla-wiki-staging` |
+| Dominio | ruta `wiki.vivla.com/*` | custom domain `wiki-next.vivla.com` |
+| D1 (feedback del MCP) | `vivla-wiki-feedback` | `vivla-wiki-feedback-staging` |
+
+- El Worker sirve el sitio estático (Starlight) y el MCP en `/mcp`.
+- Además de Access, el Worker valida el JWT de Access en cada petición. Sin JWT válido responde 403.
+- No tiene URL `workers.dev` ni preview URLs.
+- La búsqueda del MCP usa Workers AI para los embeddings.
+
+### Despliegue
+
+El job `deploy-wiki` de `aggregate.yml` despliega en cada ejecución del aggregate:
+
+1. Compila el sitio, el corpus del MCP y los embeddings.
+2. Pasa los tests del Worker.
+3. Despliega staging y hace un smoke test.
+4. Despliega producción y hace un smoke test.
+
+Usa los secrets del repo `CLOUDFLARE_API_TOKEN`, `CF_ACCESS_CLIENT_ID` y `CF_ACCESS_CLIENT_SECRET`.
 
 ## CDN
 
-Cloudflare actúa como CDN y proxy inverso para los servicios web de VIVLA, proporcionando cache, protección DDoS y SSL automático.
+Cloudflare actúa como CDN y proxy inverso para los servicios web de VIVLA, con cache, protección DDoS y SSL automático.
