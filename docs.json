@@ -172,6 +172,16 @@
               "sistemas/vivla-concierge/integraciones",
               "sistemas/vivla-concierge/runbook"
             ]
+          },
+          {
+            "group": "Intelligence",
+            "pages": [
+              "sistemas/vivla-intelligence/index",
+              "sistemas/vivla-intelligence/datos",
+              "sistemas/vivla-intelligence/despliegue",
+              "sistemas/vivla-intelligence/integraciones",
+              "sistemas/vivla-intelligence/runbook"
+            ]
           }
         ]
       }

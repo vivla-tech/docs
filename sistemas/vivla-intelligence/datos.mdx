@@ -1,0 +1,82 @@
+---
+title: "Fuentes de datos"
+description: "De dónde saca Intelligence los datos: BigQuery, Metabase, el RAG de Google Drive y la memoria en Postgres/pgvector, con sus credenciales por nombre."
+---
+
+Intelligence no guarda una copia del negocio: consulta las fuentes en vivo a través de clientes compartidos en `packages/` y de tools por agente. Hay cuatro fuentes principales.
+
+## BigQuery
+
+El paquete `@VIVLA-intelligence/bigquery` envuelve `@google-cloud/bigquery` y es la fuente analítica principal (`packages/bigquery/src/index.ts`):
+
+- **Proyecto:** `GOOGLE_CLOUD_PROJECT` (o el del cliente autenticado) (`packages/bigquery/src/utils.ts:29`).
+- **Dataset:** `BIGQUERY_DATASET`; si no está, cae a `"windsor"` en los helpers y a `"tablas_vivla"` en algunos métodos del cliente (`packages/bigquery/src/utils.ts:40`, `packages/bigquery/src/client.ts:19`).
+- **Ubicación:** `EU` (fijada en el cliente y en los helpers) / `BIGQUERY_LOCATION` (`packages/bigquery/src/client.ts:15`).
+- **Solo lectura:** hay un `validateReadOnlyQuery` que rechaza consultas que no sean de lectura (`packages/bigquery/src/utils.ts`).
+
+Quién lo usa: el agente **Vulcano** genera y ejecuta SQL sobre BigQuery (sub-agente de Mercurio), y hay un servidor MCP de BigQuery definido en el repo (`apps/mastra/src/mcp-servers/bigquery.ts`), aunque la instancia Mastra solo expone por SSE el MCP de ElevenLabs — ver [Integraciones](/sistemas/vivla-intelligence/integraciones).
+
+### Vistas del «Live Daily Review»
+
+En `infra/bigquery/views/` viven las vistas SQL que alimentan el Google Sheet «Live Daily Review» del embudo comercial. Las del Q2 están en el proyecto/dataset `growthia.gold` (`infra/bigquery/views/README.md`):
+
+| Vista | Grano | Frescura |
+|---|---|---|
+| `vw_live_q2_funnel_daily` | 1 fila por (fecha, mercado) | Contacts + Deals de HubSpot, diario |
+| `vw_live_q2_performance_daily` | ídem | Spend de Windsor.ai → Tablas_vivla_silver, ~05:00 UTC diario |
+| `vw_live_q2_speed_to_lead_daily` | ídem + minutos AVG/mediana | HubSpot, diario |
+
+Se despliegan a mano con `bq query` y se conectan al Sheet con el conector nativo BigQuery → Sheets (`infra/bigquery/views/README.md`). El bloque **CALIDAD** de ese mismo review lo refresca el cron de intent/calidad cada 15 min — ver [Despliegue](/sistemas/vivla-intelligence/despliegue).
+
+<Warning>
+  El README de las vistas documenta varios caveats de datos pendientes: el *speed-to-lead* usa `contact_hs_sa_first_engagement_date` en lugar del requisito original (primera llamada saliente con duración &gt;0, bloqueado por el ETL de Aircall), y la ventana de fechas del funnel está fijada a Q2 2026 y hay que actualizarla por trimestre. Son caveats de negocio/datos: contrástalos antes de citar cifras.
+</Warning>
+
+## Metabase
+
+El paquete `@VIVLA-intelligence/metabase` es un cliente tipado de la API de Metabase (`packages/metabase/src/index.ts`):
+
+- **Conexión:** `METABASE_URL` + `METABASE_API_KEY` (header `X-API-Key`) (`packages/metabase/src/client.ts:834`).
+- **Recursos por agente:** `apps/mastra/src/lib/metabase-config.ts` mapea cada agente a sus colecciones, dashboards, `databaseId` y `schema`. Hoy están configurados **Vesta** (BigQuery `app_medallion` + Postgres de Vivla Tools) y **Mercurio** (`Tablas_vivla_silver`, `gong_backup`) (`apps/mastra/src/lib/metabase-config.ts:19`).
+
+Hay también un servidor MCP de Metabase definido en el repo (`apps/mastra/src/mcp-servers/metabase.ts`), no expuesto por la instancia Mastra.
+
+## Google Drive (RAG y Workspace)
+
+Dos patrones para leer carpetas de Drive (`CLAUDE.md`):
+
+- **RAG** — un cron sincroniza una carpeta de Drive → parseo PDF/Docs → chunking → embeddings Vertex `text-embedding-004` (768d) → **pgvector**; el agente consulta el índice con una tool de búsqueda vectorial. Caso de referencia: el corpus **legal** de Temis (`apps/mastra/src/lib/legal-sync.ts`, carpeta `GOOGLE_DRIVE_LEGAL_FOLDER_ID`, cron `scheduleLegalSync` + ruta `POST /sync/legal`).
+- **Workspace** — el agente lee Drive en vivo con cuatro tools de filesystem (`list_files`, `read_file`, `grep`, `file_stat`); sin cron, siempre fresco, para carpetas pequeñas y vivas.
+
+Acceso: el service account (`GOOGLE_CLIENT_EMAIL` / credenciales en env) necesita al menos permiso **Viewer** sobre cada carpeta en la UI de Drive; sin eso todas las llamadas devuelven 403. **Hermes** es el único agente con acceso de **escritura** (requiere Editor sobre su carpeta). Los IDs de carpeta viven en `apps/mastra/src/lib/agent-drive-folders.ts` (`AGENT_GDRIVE_FOLDERS`), nunca en el código de llamada ni en env (`CLAUDE.md`).
+
+## Memoria: Postgres + pgvector
+
+Todos los agentes comparten un único sistema de memoria respaldado por **PostgreSQL (Google Cloud SQL)** vía `DATABASE_URL` (`apps/mastra/src/lib/memory.ts`):
+
+- `PostgresStore` — hilos de conversación y mensajes; es también el `storage` de la instancia Mastra (`apps/mastra/src/mastra/index.ts:153`).
+- `PgVector` — recall semántico con embeddings pgvector; es el `vectors` de la instancia.
+- `Memory` — combina ambos (ventana de los últimos 20 mensajes + top-3 de recall semántico).
+
+El esquema se gestiona con **Drizzle** en `packages/db` (`pnpm db:push` / `db:migrate`).
+
+<Note>
+  La memoria de Daniela es **thread-scoped** por conversación de HubSpot, y hay tablas propias para su operativa (p. ej. `daniela_thread_outcomes`, `daniela_inbound_claims`) descritas en `CHANGELOG.md`.
+</Note>
+
+## Credenciales (solo por nombre)
+
+Las de datos se agrupan aquí; la tabla completa está en [Integraciones](/sistemas/vivla-intelligence/integraciones).
+
+| Variable | Fuente |
+|---|---|
+| `DATABASE_URL` | PostgreSQL (memoria + pgvector) |
+| `GOOGLE_CLOUD_PROJECT` · `BIGQUERY_DATASET` · `BIGQUERY_LOCATION` | BigQuery |
+| `METABASE_URL` · `METABASE_API_KEY` | Metabase |
+| `GOOGLE_VERTEX_PROJECT` · `GOOGLE_VERTEX_LOCATION` | Embeddings de Vertex (RAG + memoria) |
+| `GOOGLE_CLIENT_EMAIL` · `GOOGLE_PRIVATE_KEY` / `GOOGLE_APPLICATION_CREDENTIALS_JSON` | Service account de Drive/GCP |
+| `GOOGLE_DRIVE_LEGAL_FOLDER_ID` · `SYNC_SECRET` | Corpus legal y su sync |
+
+<Danger>
+  Ningún valor de estas credenciales debe aparecer en el código ni en esta wiki. Son variables de entorno en Railway.
+</Danger>

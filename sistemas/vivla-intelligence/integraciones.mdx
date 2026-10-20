@@ -1,0 +1,132 @@
+---
+title: "Integraciones"
+description: "A qué llama Intelligence y quién le llama: la app de Slack, HubSpot, WhatsApp, Twilio, ElevenLabs, Notion y los servidores MCP, con sus credenciales solo por nombre."
+---
+
+Todas las integraciones se registran como rutas HTTP en la misma instancia Mastra (`apps/mastra/src/mastra/index.ts:269`). Las credenciales se inyectan por variable de entorno; sus valores **no** se commitean y **no** aparecen en esta wiki.
+
+## Slack
+
+La integración de Slack es por **Events API sobre HTTP** con verificación de firma — no por Socket Mode.
+
+<Warning>
+  El `CLAUDE.md` del repo describe un «Socket Mode bot» y el doc `docs/SLACK_ARCHITECTURE.md` dibuja rutas por agente (`/slack/atlas`, `/slack/vesta`…). **El código no coincide**: no hay uso de Socket Mode (`@slack/socket-mode` está en dependencias pero no se importa) y las rutas reales son solo cuatro. Mandan los hechos del código (`apps/mastra/src/lib/slack/index.ts:877`).
+</Warning>
+
+### Rutas reales
+
+| Ruta | Método | Para qué | Fuente |
+|---|---|---|---|
+| `/slack/events` | POST | Eventos (`app_mention`, `message`/DM). Despacha a **Hermes** por defecto. | `apps/mastra/src/lib/slack/index.ts:129` |
+| `/slack/commands` | POST | Slash commands | `index.ts:308` |
+| `/slack/interactions` | POST | Botones y modales (feedback de Hermes) | `index.ts:408` |
+| `/slack/temis/events` | POST | Eventos del agente **Temis** (firma propia) | `index.ts:691` |
+
+### Cómo procesa un evento
+
+<Steps>
+  <Step title="Verificación de firma">
+    HMAC-SHA256 sobre `v0:{timestamp}:{body}` comparado en tiempo constante, y se rechaza si el timestamp difiere más de 5 minutos. Usa `SLACK_SIGNING_SECRET` (Temis prueba antes `SLACK_SIGNING_SECRET_TEMIS`). (`apps/mastra/src/lib/slack/index.ts:79`, `:702`)
+  </Step>
+  <Step title="Deduplicación">
+    Los IDs de evento ya vistos se descartan con un cache en memoria (TTL 60 s) que se vacía al reiniciar el servidor. (`index.ts:107`)
+  </Step>
+  <Step title="Resolución de token por agente">
+    El cliente de Slack resuelve el bot token por nombre de agente: primero `SLACK_BOT_TOKEN_{AGENTE}` (p. ej. `SLACK_BOT_TOKEN_TEMIS`, `SLACK_BOT_TOKEN_DANIELA`), y si no existe cae a `SLACK_BOT_TOKEN`. (`apps/mastra/src/lib/slack/client.ts:46`)
+  </Step>
+  <Step title="Respuesta del agente">
+    El agente genera la respuesta (streaming a Slack) y actualiza reacciones/estado del mensaje. (`index.ts:251`)
+  </Step>
+</Steps>
+
+### App de Slack de Daniela (solo salida)
+
+Daniela tiene su **propia app de Slack** en el workspace de vivla para que sus alertas se publiquen bajo su nombre y no bajo el de Hermes (`infra/slack/daniela-app/README.md`):
+
+- **Scopes:** `chat:write` + `chat:write.public`. **Sin** suscripciones de eventos y **sin** interactividad — es solo salida.
+- Los posts interactivos (botones del digest de revisión diaria) se quedan en la app de Hermes, que es la que maneja esos handlers.
+- Se gestiona con el Slack CLI desde `infra/slack/daniela-app/` (editar `manifest.json` → `slack app install`).
+- Se consume con `SLACK_BOT_TOKEN_DANIELA`.
+
+### Feedback a Notion
+
+El handler de interacciones de Hermes guarda el feedback negativo en una base de datos de **Notion** (cliente `@notionhq/client`, `NOTION_API_KEY`), de forma «fire-and-forget» para no romper la respuesta a Slack (`apps/mastra/src/lib/slack/index.ts:19`).
+
+## HubSpot
+
+Automatización de CRM y, sobre todo, el motor de captación de Daniela (`apps/mastra/src/lib/hubspot`, registrado en `index.ts:387`):
+
+| Ruta | Para qué |
+|---|---|
+| `POST /hubspot/webhook` | Entrada de conversaciones/eventos de HubSpot (dispara el workflow de respuesta directa de Daniela) |
+| `POST /hubspot/ab-test` | A/B testing |
+| `POST /hubspot/sdr/trigger` · `/sdr/multi-agent` · `/sdr/post-call` | Flujos de SDR |
+| `POST /hubspot/calendar/book-meeting` | Reserva de reuniones |
+
+Daniela y el Qualifier reservan en el calendario del **round-robin de SDR** (`NATIONAL_RR_MEETING_SLUG`); el SDR asignado por la rotación pasa a ser owner del contacto y del deal (`CLAUDE.md`). Las rutas de administración de Daniela (`/admin/daniela/threads`, `/contacts/:id`, `/overview`, `/documents`…) exponen el estado de sus hilos y contactos (`apps/mastra/src/lib/daniela-admin.ts`).
+
+## WhatsApp
+
+Webhook de la API de Meta Business + el agente **Iris** para cualificación de leads (`apps/mastra/src/lib/whatsapp`, `index.ts:391`):
+
+| Ruta | Para qué |
+|---|---|
+| `GET`/`POST /whatsapp` | Verificación y recepción del webhook de Meta |
+| `POST /whatsapp/send-template` · `GET /whatsapp/templates` | Plantillas |
+| `GET /whatsapp/phone-numbers` · `/threads` | Números y conversaciones |
+
+Credencial: `WHATSAPP_ACCESS_TOKEN`.
+
+## Twilio (voz)
+
+Llamadas de voz con TwiML enrutadas a un agente (`apps/mastra/src/lib/twilio`, `index.ts:395`): `POST /twilio/voice` y `POST /twilio/gather`. El agente que atiende es configurable por `TWILIO_AGENT_NAME` (`CLAUDE.md`).
+
+## ElevenLabs
+
+- El agente **Atlas** gestiona los agentes conversacionales de ElevenLabs; la credencial es `ELEVENLABS_API_KEY` (`apps/mastra/package.json`).
+- Las configuraciones de agentes/tools/tests de ElevenLabs viven en `packages/eleven-labs` y se sincronizan con la plataforma mediante un workflow de GitHub Actions al hacer push a `main` bajo `packages/eleven-labs/**` (empuja los cambios y luego hace `pull` para recomitear lo que la plataforma devuelva) (`.github/workflows/elevenlabs-sync.yml`).
+
+## Servidores MCP
+
+El repo define tres servidores MCP (`apps/mastra/src/mcp-servers/index.ts`): `bigquery`, `metabase` y `elevenlabs`. En la instancia Mastra **solo se registra y expone por SSE** el de ElevenLabs, en `/mcp/elevenlabs` (y `/mcp/elevenlabs/message`), pensado para clientes MCP externos como Claude Code o Cursor (`apps/mastra/src/mastra/index.ts:201`, `:408`). El `.mcp.json` del repo apunta ese cliente SSE a la ruta `/mcp/elevenlabs` de la URL de producción del servicio en Railway.
+
+## Quién le llama
+
+- **Slack** entrega los eventos del equipo interno a `/slack/*`.
+- **HubSpot** entrega conversaciones y eventos a `/hubspot/webhook`.
+- **Meta (WhatsApp)** entrega mensajes a `/whatsapp`.
+- **Twilio** entrega las llamadas de voz a `/twilio/voice`.
+- **Railway** entrega eventos de despliegue a `/webhooks/railway`.
+- **GitHub Actions** (sonda de uptime) consulta `/health`; ver [Despliegue](/sistemas/vivla-intelligence/despliegue).
+- **Clientes MCP** (Claude Code, Cursor) se conectan a `/mcp/elevenlabs`.
+
+## Credenciales (solo por nombre)
+
+Plantilla en `apps/mastra/env.example`. Nunca se commitean valores.
+
+| Variable | Para qué |
+|---|---|
+| `DATABASE_URL` | PostgreSQL (Cloud SQL): memoria y pgvector |
+| `GOOGLE_CLOUD_PROJECT` · `GOOGLE_CLOUD_REGION` | Proyecto/región de GCP |
+| `GOOGLE_VERTEX_PROJECT` · `GOOGLE_VERTEX_LOCATION` | Vertex AI (modelos de tool-level + embeddings) |
+| `GOOGLE_APPLICATION_CREDENTIALS_JSON` / `GOOGLE_APPLICATION_CREDENTIALS` | Credenciales de service account (prod / local) |
+| `GOOGLE_CLIENT_EMAIL` · `GOOGLE_PRIVATE_KEY` | Service account alternativa (acceso a Drive) |
+| `GOOGLE_GENERATIVE_AI_API_KEY` | Routing de modelos Gemini vía Google AI |
+| `GOOGLE_DRIVE_LEGAL_FOLDER_ID` | Carpeta de Drive del corpus legal (RAG) |
+| `SYNC_SECRET` | Header que protege `POST /sync/legal` y `POST /cron/daniela-followups` |
+| `BIGQUERY_DATASET` · `BIGQUERY_LOCATION` | Dataset y ubicación de BigQuery |
+| `METABASE_URL` · `METABASE_API_KEY` | API de Metabase (header `X-API-Key`) |
+| `SLACK_BOT_TOKEN` · `SLACK_SIGNING_SECRET` | Bot y firma genéricos de Slack |
+| `SLACK_BOT_TOKEN_DANIELA` · `SLACK_BOT_TOKEN_TEMIS` · `SLACK_SIGNING_SECRET_TEMIS` | Tokens/firmas por agente |
+| `NOTION_API_KEY` | Guardado de feedback en Notion |
+| `WHATSAPP_ACCESS_TOKEN` | API de WhatsApp (Meta) |
+| `TWILIO_AGENT_NAME` | Agente que atiende las llamadas de Twilio |
+| `ELEVENLABS_API_KEY` | ElevenLabs (agente Atlas + sync de CI) |
+| `POSTHOG_API_KEY` | Instrumentación de producto (PostHog) |
+| `LANGFUSE_PUBLIC_KEY` · `LANGFUSE_SECRET_KEY` · `LANGFUSE_BASE_URL` | Trazas a Langfuse |
+| `SENTRY_DSN` | Errores + trazas a Sentry |
+| `RAILWAY_ENVIRONMENT_NAME` | Inyectada por Railway; decide si se programan los crons y es el tag de entorno en Sentry |
+
+<Danger>
+  Nunca pongas el valor de ninguna de estas credenciales en el código ni en esta wiki. Guárdalas como variables de entorno en Railway.
+</Danger>

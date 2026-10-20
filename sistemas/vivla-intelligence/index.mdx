@@ -1,0 +1,99 @@
+---
+title: "Intelligence"
+description: "El cerebro de datos de VIVLA (Mastra): una flota de agentes que responde en Slack, atiende leads por HubSpot/WhatsApp y consulta BigQuery y Metabase. Qué es, quién lo usa y cómo está montado."
+---
+
+**Intelligence** (`vivla-intelligence`) convierte los datos de la empresa en un «cerebro» que responde en Slack y atiende leads: una flota de agentes montada sobre **Mastra** que corre como un único servicio de API en Railway, con todos sus agentes, tools, workflows e integraciones registrados en la misma instancia (`apps/mastra/src/mastra/index.ts:127`).
+
+El repo está en producción en la rama `main` y corre en Railway. Para su ubicación en el mapa de repos y entornos, mira [Repositorios](/repositories) y [Entornos](/environments).
+
+<Info>
+  Propietario: equipo **IA**. Clase: **agente**. El código de la rama de producción (`main`) es la fuente de verdad de esta sección. Donde el `README.md` o el `CLAUDE.md` del repo discrepan del código, mandan los hechos del código y se señala la discrepancia.
+</Info>
+
+## Quién lo usa
+
+Dos públicos, el mismo runtime:
+
+- **Equipo interno** (dirección, GTM, operaciones, CX, legal…) — conversa con los agentes **en Slack**. Hermes es el agente por defecto; otros especialistas tienen su propia app (`apps/mastra/src/lib/slack/index.ts:251`).
+- **Leads y clientes** — hablan con los agentes de **captación** sin saberlo, a través de los canales de conversación de HubSpot, WhatsApp y llamadas de voz (Twilio/ElevenLabs). Daniela responde conversaciones entrantes de HubSpot; Iris cualifica por WhatsApp (`apps/mastra/src/mastra/index.ts:128`).
+
+## La flota de agentes
+
+La instancia registra 18 agentes. Hermes es el orquestador «chief of staff» y el resto son especialistas a los que delega o que atienden un canal concreto (`apps/mastra/src/mastra/index.ts:128`):
+
+| Agente | Rol (resumen) |
+|---|---|
+| **Hermes** | Orquestador. Agente por defecto en Slack; delega en los especialistas. |
+| **Mercurio** | GTM y ventas (campañas, pipeline, analítica de llamadas). |
+| **Vulcano** | Especialista SQL: genera y ejecuta consultas sobre BigQuery (sub-agente de Mercurio). |
+| **Vesta** | Operaciones (estado de casas, mantenimiento, ocupación, NPS). |
+| **Mars** | Finanzas (P\&L, presupuestos, decisiones documentadas). |
+| **Dionisio** | Marca (voz y tono, naming, revisión de copy). |
+| **Janus** | Customer Experience (playbooks, SOPs, escalados). |
+| **Apollo** | Producto (PRDs, specs, roadmap, A/B tests). |
+| **Mnemosyne** | Documentación (informes ejecutivos en Notion). |
+| **Temis** / **Temis Drive** | Legal (RAG sobre el corpus legal en Drive). |
+| **Atlas** | Voz (gestiona los agentes conversacionales de ElevenLabs). |
+| **Iris** / **text-message-agent** | WhatsApp: cualificación de leads y reserva de reuniones. |
+| **Daniela** | Responde conversaciones entrantes de HubSpot (email/WhatsApp), reserva reuniones y actualiza propiedades de contacto. |
+| **Daniela Qualifier** | Hermana de Daniela con postura activa de cualificación; registrada, enrutado de inbox **aún no cableado**. |
+| **Daniela MyInvestor** | Agente de WhatsApp para leads de la alianza MyInvestor; registrado solo para Studio, **no enrutado**. |
+| **Daniela Supervisor** | Genera los digests de revisión diaria de Daniela. |
+
+<Note>
+  Los papeles y modelos concretos de cada agente (p. ej. qué modelo Gemini usa cada uno) se describen en el `CLAUDE.md` del repo. Esa tabla es un **hint**, no la fuente de verdad: lo verificado aquí es el registro de agentes en `apps/mastra/src/mastra/index.ts:128`. El catálogo detallado por agente está **PENDIENTE de confirmar**.
+</Note>
+
+## Stack
+
+| Pieza | Elección | Fuente |
+|---|---|---|
+| Runtime | **Mastra** (sobre el Vercel AI SDK): agentes + tools + workflows + memoria + observabilidad | `apps/mastra/package.json` |
+| LLM | Routing de modelos de Mastra hacia **Google** (Gemini vía Google AI y Vertex AI); embeddings `text-embedding-004` en Vertex | `apps/mastra/src/lib/models.ts` |
+| Memoria | **PostgreSQL** (Cloud SQL) para hilos y mensajes + **pgvector** para recall semántico | `apps/mastra/src/lib/memory.ts` |
+| Observabilidad | **Langfuse** + **Sentry** (misma config, dos exporters) | `apps/mastra/src/mastra/index.ts:167` |
+| Monorepo | pnpm workspaces + Turborepo, Node 22 | `package.json`, `.nvmrc` |
+| Hosting | **Railway** (RAILPACK) | `railway.toml` |
+
+## Estructura del repo
+
+```
+apps/
+  mastra/        el servicio que corre: API + agentes + workflows + integraciones
+    src/mastra/index.ts   la instancia Mastra (plano de control)
+    src/agents/           un directorio por agente
+    src/workflows/        workflows de HubSpot, calendario, Daniela…
+    src/lib/              integraciones (slack, hubspot, whatsapp, twilio, railway…) y crons
+    src/mcp-servers/      servidores MCP (bigquery, metabase, elevenlabs)
+  web/           dashboard frontend (Vite + React + TanStack), se despliega aparte
+  mcp-gateway/   gateway MCP
+packages/
+  bigquery/      cliente de BigQuery + helpers
+  metabase/      cliente de la API de Metabase
+  db/            esquema Drizzle + PostgreSQL
+  eleven-labs/   wrapper del SDK de voz de ElevenLabs
+  config/        config de TypeScript compartida
+infra/
+  bigquery/views/  vistas SQL que alimentan el Live Daily Review
+  slack/daniela-app/  manifest de la app de Slack de Daniela
+```
+
+(`package.json`, `CLAUDE.md`, verificado contra el árbol de `apps/` y `packages/`)
+
+## Dónde seguir
+
+<CardGroup cols={2}>
+  <Card title="Despliegue y operación" icon="server" href="/sistemas/vivla-intelligence/despliegue">
+    Railway, entornos, URLs, rollback, crons y monitorización (Sentry, watchdog, sonda de uptime).
+  </Card>
+  <Card title="Integraciones" icon="plug" href="/sistemas/vivla-intelligence/integraciones">
+    App de Slack, HubSpot, WhatsApp, Twilio, ElevenLabs, Notion, MCP y credenciales por nombre.
+  </Card>
+  <Card title="Fuentes de datos" icon="database" href="/sistemas/vivla-intelligence/datos">
+    BigQuery, Metabase, RAG de Google Drive y la memoria en Postgres/pgvector.
+  </Card>
+  <Card title="Runbook" icon="life-ring" href="/sistemas/vivla-intelligence/runbook">
+    Equipo responsable y los fallos más comunes.
+  </Card>
+</CardGroup>
