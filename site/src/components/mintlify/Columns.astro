@@ -1,0 +1,27 @@
+---
+// Mintlify <Columns cols> — same grid behaviour as <CardGroup>, used for
+// plain content columns rather than <Card> children.
+interface Props {
+  cols?: number;
+}
+
+const { cols = 2 } = Astro.props as Props;
+---
+
+<div class="mintlify-columns not-content" style={`--mintlify-cols: ${cols}`}>
+  <slot />
+</div>
+
+<style>
+  .mintlify-columns {
+    display: grid;
+    grid-template-columns: repeat(1, 1fr);
+    gap: 1.5rem;
+    margin: 1rem 0;
+  }
+  @media (min-width: 50rem) {
+    .mintlify-columns {
+      grid-template-columns: repeat(var(--mintlify-cols, 2), 1fr);
+    }
+  }
+</style>
