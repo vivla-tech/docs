@@ -1,0 +1,52 @@
+name: Wiki build check
+
+# Compile check for every PR: builds the Starlight site and the MCP corpus
+# with the PR's own central pages laid over the current aggregated `docs`
+# branch, then runs the Worker tests. Catches MDX that Mintlify accepts but
+# Starlight's stricter compiler rejects. Deploys nothing.
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: c38baece52cddd64baab323c3550ce17
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+
+      - name: Checkout aggregated docs branch
+        uses: actions/checkout@v4
+        with:
+          ref: docs
+          path: .aggregated
+
+      # The subrepo tabs (tools/, mobile/, panel/) only exist on `docs`.
+      # Overlay the PR's central pages and docs.json on top of them.
+      - name: Assemble content root
+        run: |
+          mkdir -p "$RUNNER_TEMP/content"
+          rsync -a --exclude .git .aggregated/ "$RUNNER_TEMP/content/"
+          rsync -a --exclude .git --exclude .aggregated --exclude site \
+            --exclude worker --exclude scripts --exclude .github \
+            --exclude tools --exclude mobile --exclude panel \
+            ./ "$RUNNER_TEMP/content/"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Without the Cloudflare token (for example a PR from a fork) there
+      # are no embeddings, so the Worker tests are skipped.
+      - name: Build and test
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then export SKIP_EMBEDDINGS=1; fi
+          scripts/build-wiki.sh "$RUNNER_TEMP/content"
