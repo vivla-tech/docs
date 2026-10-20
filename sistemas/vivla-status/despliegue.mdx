@@ -12,18 +12,18 @@ description: "Dónde corre vivla-status, cómo se despliega y se vuelve atrás, 
 | **URL** | `status.vivla.com`, dominio personalizado sobre la zona `vivla.com` (`wrangler.jsonc`) |
 | **Entornos** | Solo producción. No hay `staging` declarado en el repo |
 | **Base de datos** | Cloudflare D1 `vivla-status`, binding `DB` (`wrangler.jsonc`, `schema.sql`) |
+| **Cron** | `* * * * *`: el Worker se ejecuta cada minuto (verificado el 2026-10-20) |
+| **URLs por defecto** | `*.workers.dev` y URLs de preview **desactivadas**; solo responde en `status.vivla.com` (verificado el 2026-10-20) |
 
 <Info>
   `wrangler.jsonc` fija el `account_id` a la cuenta **VIVLA** a propósito: en la misma máquina existe también una cuenta personal, y el pin evita que un despliegue aterrice en la equivocada (`README.md`, `HANDOVER.md`).
 </Info>
 
-<Warning>
-  La página está **sin listar** y debe ir detrás de **Cloudflare Access** restringido a cuentas de vivla.com; el Worker solo añade la cabecera `noindex`, el control de acceso real lo hace Access. Que Access esté configurado y a qué cuentas está restringido es **PENDIENTE de confirmar** fuera del código (`src/index.ts`, `README.md`).
-</Warning>
+La página está **sin listar**: el Worker solo añade la cabecera `noindex`. El control de acceso lo hace **Cloudflare Access**: la app `status` protege `status.vivla.com` con la política reutilizable «Vivla Users» (dominio de correo `vivla.com`). El login es Auth0 (Vivla Identity) con redirección automática (verificado el 2026-10-20).
 
 ## Cómo se despliega
 
-El despliegue es **manual** con wrangler; no hay workflow de CI en el repo (`package.json`):
+El despliegue es **manual** con wrangler; no hay workflow de CI en el repo (`package.json`). Wrangler no tiene login propio en la máquina de despliegue: se usa el token OAuth de la CLI `cf` de la cuenta VIVLA como `CLOUDFLARE_API_TOKEN`. Despliega siempre desde un checkout limpio de `main`, así producción coincide con git.
 
 ```bash
 npm install
@@ -52,9 +52,9 @@ Puesta en marcha desde cero (una vez), según el README (`README.md`):
 
 ## Cómo se vuelve atrás
 
-<Warning>
-  El repo no documenta un procedimiento de rollback ni tiene CI. El despliegue es un `wrangler deploy` manual, así que volver atrás es redesplegar la versión anterior desde el código. El mecanismo exacto (p. ej. `wrangler rollback` / versiones de Cloudflare) es **PENDIENTE de confirmar** con el equipo plataforma.
-</Warning>
+<Info>
+  Cloudflare guarda las **10 últimas versiones** del Worker, todas subidas con `wrangler`. Para volver atrás: `npx wrangler deployments list` para ver las versiones y `npx wrangler rollback <version-id>` para activar una anterior. No hace falta redesplegar desde el código. La versión activa es la del 2026-10-05 19:47 UTC, que coincide con el último commit de `main` (verificado el 2026-10-20).
+</Info>
 
 El esquema de D1 es aditivo (`CREATE TABLE IF NOT EXISTS …`), así que `npm run db:migrate` es idempotente y no destruye datos (`schema.sql`).
 

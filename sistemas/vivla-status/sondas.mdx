@@ -92,9 +92,9 @@ Las sondas de salud prueban que el proceso está en pie y que Postgres responde 
 | `web-listings` — listado de casas | 2 | `200` y cuerpo con `casa-alba` |
 | `web-apex-redirect` — redirección de vivla.com a www | 3 | `301` o `308`, sin seguir la redirección |
 
-<Warning>
-  La redirección del apex (`vivla.com` → `www.vivla.com`) solo existe en un ajuste del panel de **Vercel**, en ningún repositorio. Nadie leyendo el código sabría que está, y por eso tiene sonda. El ajuste en sí es **PENDIENTE de confirmar** fuera del código (`src/targets.ts`, `HANDOVER.md`).
-</Warning>
+<Info>
+  La redirección del apex (`vivla.com` → `www.vivla.com`) no está en ningún repositorio. El registro DNS de `vivla.com` es un CNAME sin proxy hacia Vercel, y Vercel responde `308` hacia `https://www.vivla.com/`: es un ajuste de dominio del proyecto en Vercel. Por eso tiene sonda (verificado el 2026-10-20).
+</Info>
 
 ### Procesos automáticos (interno)
 
@@ -103,7 +103,7 @@ Las sondas de salud prueban que el proceso está en pie y que Postgres responde 
 | `windmill` — Windmill | 2 | `200` |
 
 <Warning>
-  `windmill.vivla.com` **no resuelve** (NXDOMAIN) aunque los repos lo referencian ~90 veces. El punto de entrada real es el dominio de Railway que figura en `targets.ts`. Su hermano `proxy-production-7058` devuelve `502`; si ese proxy debería estar en uso es **PENDIENTE de confirmar** (`src/targets.ts`, `HANDOVER.md`).
+  `windmill.vivla.com` **no resuelve** (NXDOMAIN): la zona `vivla.com` no tiene ningún registro con ese nombre (verificado el 2026-10-20), aunque los repos lo referencian ~90 veces. El punto de entrada real es el dominio de Railway que figura en `targets.ts`. Su hermano `proxy-production-7058` devuelve `502`; si ese proxy debería estar en uso es **PENDIENTE de confirmar** (`src/targets.ts`, `HANDOVER.md`).
 </Warning>
 
 ### Socios externos — MyInvestor
