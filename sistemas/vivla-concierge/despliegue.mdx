@@ -1,0 +1,81 @@
+---
+title: "Despliegue y operación"
+description: "Dónde corre el Concierge, cómo se despliega y se vuelve atrás, su almacenamiento, tareas programadas y monitorización."
+---
+
+## Dónde corre
+
+El Concierge corre en **Railway**, construido desde un `Dockerfile` (no Nixpacks) (`railway.json:3`). La imagen hace `pnpm build` (que produce un servidor Node autónomo en `apps/concierge/.mastra/output`) y arranca con `node .mastra/output/index.mjs`. Railway inyecta `PORT`; el servidor lo lee (default 4111) (`Dockerfile:24`, `apps/concierge/src/mastra/index.ts:230`).
+
+| Entorno | Rama | Servicio / URL |
+|---|---|---|
+| Producción | `main` | Railway `production` — `concierge.vivla.com`, detrás de Cloudflare Access |
+| Desarrollo | `develop` | Railway `develop` |
+
+(Fuente: [Entornos](/environments). El repo sigue gitflow `main` + `develop`; los PRs apuntan a `develop` — `README.md:166`.)
+
+<Note>
+  El `Dockerfile` «hornea» el modelo del embedder (fastembed) en la imagen porque el bucket GCS de Qdrant devuelve hoy HTTP 403: lo baja de Hugging Face con revisión fijada + sha256 a la cache dir, para que fastembed nunca toque la red en runtime (`Dockerfile:15`).
+</Note>
+
+### Gate del servidor
+
+Toda la superficie `/api/*` y la SPA de Studio están detrás de un gate; `/health` queda público (`apps/concierge/src/mastra/index.ts:45`):
+
+- Si `CONCIERGE_API_KEY` **no** está puesta, el servidor está **abierto** (con aviso al boot), para poder desplegar antes de repartir la clave.
+- Con `CONCIERGE_API_KEY` puesta, toda ruta salvo `/health` exige: cabecera `x-api-key` (máquinas, p. ej. el proxy de `atlas.vivla.com`) **o** un JWT válido de **Cloudflare Access** (humanos vía `concierge.vivla.com`). El acceso directo a la URL de Railway sin credencial da 401 (`apps/concierge/.env.example:71`).
+- La rama humana necesita `CF_ACCESS_TEAM_DOMAIN` y `CF_ACCESS_AUD`.
+
+Tras el gate hay un segundo middleware que acepta un `model` en el cuerpo de las rutas de ejecución solo si está en `CONCIERGE_MODEL_ALLOWLIST`, para el A/B de modelo por canal (`apps/concierge/src/mastra/index.ts:57`).
+
+## Cómo se despliega
+
+El workflow de CI (`.github/workflows/ci.yml`) corre en cada push/PR a `develop` y `main`, pero **solo** hace typecheck, tests y los evals en `--dry-run` — **no despliega** (`.github/workflows/ci.yml:10`).
+
+<Warning>
+  El mecanismo exacto de despliegue continuo (auto-deploy de Railway al hacer push a la rama frente a `railway up` manual) **no está en el repo**. El mapeo rama→entorno de [Entornos](/environments) dice `develop → Railway develop` y `main → Railway production`. Confirmar el disparador real con el equipo IA es **PENDIENTE de confirmar**.
+</Warning>
+
+## Cómo se vuelve atrás
+
+Railway reinicia el contenedor ante un fallo: `restartPolicyType: ON_FAILURE` con hasta 3 reintentos (`railway.json:10`). El healthcheck es `GET /health` con timeout de 120s (`railway.json:8`).
+
+<Warning>
+  El procedimiento de **rollback** (volver a un despliegue anterior en Railway) no está documentado en el repo. El patrón habitual es usar el historial de despliegues de Railway para re-desplegar la versión previa; confirmar el procedimiento es **PENDIENTE de confirmar**.
+</Warning>
+
+## Almacenamiento
+
+El almacenamiento guarda **trazas + memoria de agentes**. `MASTRA_DB_URL` elige el backend (`storage.ts:6`):
+
+<Tabs>
+  <Tab title="Postgres (producción durable)">
+    `postgres://…`/`postgresql://…` → `PostgresStore`. Persiste entre redeploys. Es lo que hace que la memoria de los propietarios y las trazas sobrevivan a un despliegue (`storage.ts:47`).
+  </Tab>
+  <Tab title="LibSQL (default, efímero)">
+    Cualquier otra cosa / sin variable → `LibSQLStore` (SQLite `file:`). En Railway es **efímero**: el filesystem se borra en cada redeploy, así que se pierde memoria y trazas. Vale para local/esqueleto, no para estado durable de producción (`README.md:139`).
+  </Tab>
+</Tabs>
+
+**Retención** (solo aplica a Postgres): las trazas de observabilidad (`observability.spans`) se podan a 30 días; la **memoria de propietarios NO se poda** a propósito — es la relación con el propietario, no telemetría (`storage.ts:40`). Mastra nunca poda solo: hay que ejecutar `scripts/prune-storage.ts` desde un cron/job manual (borra filas, no reclama disco) (`README.md:142`).
+
+## Tareas programadas (crons)
+
+No hay cron de sistema operativo ni configuración de cron de Railway commiteada en el repo. Hay dos mecanismos de planificación:
+
+- **Envíos programados de Simón** — usan la planificación **nativa de Mastra** (`mastra.schedules`), no un cron propio. Simón crea/lista/pausa/reanuda/borra **sus propios** encargos hablando ("los miércoles a las 8 dame el pulso de tickets" → un `AgentSchedule` con cron de 5 partes). Cada schedule se aísla por el `resourceId` de quien lo crea (`agents/simon/schedule-tools.ts:7`). Si el disparo de un envío programado de Simón revienta, se avisa por **DM de Slack** a quien lo creó (`apps/concierge/src/mastra/index.ts:182`).
+- **Rutas de proceso diario** — `/lola/distill` (destilado de bios) y `/simon/learn-daily` (auto-mejora) son endpoints HTTP pensados para dispararse periódicamente.
+
+<Warning>
+  Cómo se disparan en producción `/lola/distill`, `/simon/learn-daily` y la poda de `prune-storage.ts` (qué servicio llama a cada endpoint y con qué cadencia) **no está en el repo** — es **PENDIENTE de confirmar** con el equipo IA.
+</Warning>
+
+## Monitorización
+
+- **Trazas:** siempre se exportan al almacenamiento local (visibles en Mastra Studio); además se envían a **Langfuse** por OTel cuando `LANGFUSE_PUBLIC_KEY` + `LANGFUSE_SECRET_KEY` están presentes (`observability.ts:11`). Las trazas se etiquetan con `LANGFUSE_ENVIRONMENT` (default `dev`; poner `production` en prod) para que las pruebas no contaminen las analíticas (`observability.ts:26`).
+- **Scores de evals:** fluyen a Langfuse automáticamente (ver [Evals](/sistemas/vivla-concierge/evals)).
+- **Sonda de estado:** el healthcheck `GET /health` de Railway (`railway.json:8`).
+
+<Note>
+  No hay integración de **Sentry** en este repo (no aparece en el código). La captura de errores y las sondas de estado a nivel de empresa las lleva [vivla-status](/repositories#vivla-status). Que Concierge deba o no reportar a Sentry es **PENDIENTE de confirmar**.
+</Note>

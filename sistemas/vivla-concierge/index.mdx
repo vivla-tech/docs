@@ -1,0 +1,82 @@
+---
+title: "Concierge (Alma)"
+description: "Plano de control de los agentes de Alma (Mastra): Lola, Fabián, Atlas y Simón. Qué es, quién lo usa y cómo está montado."
+---
+
+**Concierge** (`vivla-concierge`) es el plano de control de los agentes de **Alma**: convierte "tenemos una clave de Anthropic y un backend" en "corremos agentes versionados, con trazas, evals, identidad de herramienta con alcance y memoria conectable". Cada agente es un «inquilino» del mismo runtime; añadir uno es añadir una carpeta hermana (`README.md:5`, `apps/concierge/src/mastra/index.ts:46`).
+
+El repo está en producción en la rama `main` y corre en Railway. Para su ubicación en el mapa de repos, mira [Repositorios](/repositories) y [Entornos](/environments).
+
+<Info>
+  Propietario: equipo **IA**. Clase: **agente**. El código de la rama de producción (`main`) es la fuente de verdad de esta sección.
+</Info>
+
+## Quién lo usa
+
+Cuatro agentes, cada uno con su público y su superficie (`apps/concierge/src/mastra/index.ts:166`):
+
+<CardGroup cols={2}>
+  <Card title="Lola" icon="user">
+    Concierge del **propietario**. Habla en el chat de la app de propietarios (Stream). Es la supervisora de la jerarquía. (`agents/lola/index.ts:25`)
+  </Card>
+  <Card title="Fabián" icon="headset">
+    Copiloto de **CX** (soporte, incidencias, tickets). Vive en Slack con su propia app. (`agents/fabian/index.ts:15`)
+  </Card>
+  <Card title="Atlas" icon="book">
+    Memoria **institucional** de Vivla. Responde en la home web de `atlas.vivla.com` a compañeros `@vivla.com`. (`agents/atlas/index.ts:10`)
+  </Card>
+  <Card title="Simón" icon="chart-line">
+    **Analista de datos** del negocio. Responde preguntas de dirección en Slack con SQL read-only sobre la capa semántica. (`agents/simon/index.ts:17`)
+  </Card>
+</CardGroup>
+
+Detalle de cada uno en [Catálogo de agentes](/sistemas/vivla-concierge/agentes).
+
+## Stack
+
+| Pieza | Elección |
+|---|---|
+| Runtime | **Mastra** (sobre el Vercel AI SDK): agentes + tools + memoria + OTel (`README.md:16`) |
+| LLM | **Claude** de Anthropic — Sonnet responde, Haiku enruta/clasifica. El modelo es una variable de entorno (`models.ts:9`) |
+| Observabilidad | **Langfuse** vía OpenTelemetry (`observability.ts:11`) |
+| Memoria | Memoria integrada de Mastra; almacenamiento LibSQL o Postgres según `MASTRA_DB_URL` (`storage.ts:47`) |
+| Identidad | Tokens delegados On-Behalf-Of (OBO) + registro de auditoría por cada tool-call (`packages/identity`) |
+| Monorepo | pnpm + Turborepo, Node 22 (`package.json`, `.nvmrc`) |
+
+## Estructura del repo
+
+```
+packages/
+  contracts/   tipos de costura compartidos (AgentEvent, AgentResponse, ...)
+  identity/    emisor de tokens OBO (Auth0) + sink de auditoría + guard de tools
+apps/
+  concierge/   la app Mastra que corre
+    src/mastra/index.ts        el plano de control (agentes, tools, server)
+    src/mastra/agents/          lola · fabian · atlas · simon
+    src/mastra/mcp/             clientes MCP (vivla-tools, atlas, vivla-docs)
+    src/mastra/tools/           registro de tools + guards
+    src/mastra/evals/           scorers LLM-judge + dataset
+    src/mastra/workflows/       fabian-pass (pase proactivo de CX)
+```
+
+(`README.md:23`, verificado contra el árbol de `apps/concierge/src/mastra/`)
+
+## Dónde seguir
+
+<CardGroup cols={2}>
+  <Card title="Catálogo de agentes" icon="users" href="/sistemas/vivla-concierge/agentes">
+    Lola, Fabián, Atlas y Simón: personas, herramientas y memoria.
+  </Card>
+  <Card title="Integraciones" icon="plug" href="/sistemas/vivla-concierge/integraciones">
+    Clientes MCP, Slack, Auth0 y credenciales por nombre.
+  </Card>
+  <Card title="Despliegue y operación" icon="server" href="/sistemas/vivla-concierge/despliegue">
+    Railway, entornos, rollback, almacenamiento, crons y monitorización.
+  </Card>
+  <Card title="Evals" icon="flask" href="/sistemas/vivla-concierge/evals">
+    Jueces LLM, dataset y el runner de backtesting.
+  </Card>
+  <Card title="Runbook" icon="life-ring" href="/sistemas/vivla-concierge/runbook">
+    Equipo responsable y fallos más comunes.
+  </Card>
+</CardGroup>

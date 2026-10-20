@@ -1,0 +1,50 @@
+---
+title: "Runbook"
+description: "Equipo responsable del Concierge y los fallos más comunes, con su causa y su arreglo según el código."
+---
+
+## Equipo responsable
+
+El Concierge lo mantiene el equipo **IA** de Vivla. Observabilidad de cada turno en **Langfuse** (ver [Despliegue y operación](/sistemas/vivla-concierge/despliegue)).
+
+<Warning>
+  Quién está de guardia y los canales de alerta concretos **no viven en el código** — es **PENDIENTE de confirmar** con el equipo IA.
+</Warning>
+
+## Fallos más comunes
+
+<AccordionGroup>
+  <Accordion title="Lola/Fabián/Simón no ven las tools de vivla-tools">
+    Al boot no se resolvió token hacia el MCP de vivla-tools, o el servidor no respondió. El agente **arranca igual**, pero sin el catálogo de ~80 tools; verás en logs `[vivla-tools] no token resolved…` o `MCP unavailable at boot`. Comprueba que están `AUTH0_AGENT_*` (o `VIVLA_TOOLS_TOKEN`) y que `VIVLA_TOOLS_MCP_URL` es alcanzable (`tools/vivla-tools-catalog.ts:19`).
+  </Accordion>
+  <Accordion title="Las tools de Atlas devuelven 401">
+    No hay credenciales de Atlas: faltan tanto `ATLAS_AUTH0_CLIENT_ID`/`ATLAS_AUTH0_CLIENT_SECRET` como el `ATLAS_MCP_API_KEY`. El cliente arranca pero toda llamada a Atlas da 401; verás el warn `[atlas] no Auth0 M2M creds … — Atlas tools will 401`. Pon una de las dos vías de auth (`mcp/atlas.ts:137`).
+  </Accordion>
+  <Accordion title="Fabián no contesta en Slack (503 «Chat not initialized»)">
+    La dependencia `chat` (runtime del canal de chat de `@mastra/core`) no está en el output del bundle: Slack entrega el evento, pero cada evento responde 503 y no hay error visible en Slack. Por eso `chat` está declarada como `external` en el bundler y pineada en `apps/concierge/package.json` — mantén ambas (`apps/concierge/src/mastra/index.ts:218`).
+  </Accordion>
+  <Accordion title="Se pierde la memoria de propietarios tras un despliegue">
+    En Railway, el backend por defecto (LibSQL/SQLite) es **efímero**: el filesystem se borra en cada redeploy. Para estado durable, pon `MASTRA_DB_URL` a una cadena de conexión Postgres (`PostgresStore`) (`storage.ts:47`, `README.md:139`).
+  </Accordion>
+  <Accordion title="Acceso directo a la URL de Railway da 401">
+    Es esperado cuando `CONCIERGE_API_KEY` está puesta: toda ruta salvo `/health` exige `x-api-key` (máquinas) o un JWT de Cloudflare Access (humanos vía `concierge.vivla.com`). Usa la credencial correcta o entra por el dominio detrás de Access (`apps/concierge/.env.example:71`).
+  </Accordion>
+  <Accordion title="Respuestas vacías (finishReason: tool-calls)">
+    Un agente agota su presupuesto de pasos en llamadas a tools y no le queda ninguno para redactar. Cada agente fija su tope: Atlas `maxSteps: 10`, Lola/Fabián `12`, Simón `15`, siempre dejando un paso para la respuesta final. Si reaparece tras tocar prompts/tools, revisa ese tope (`agents/lola/index.ts:316`, `agents/atlas/index.ts:49`, `agents/simon/index.ts:123`).
+  </Accordion>
+  <Accordion title="Falla la build por el modelo del embedder">
+    fastembed baja su modelo del bucket GCS de Qdrant, que hoy devuelve HTTP 403. La build lo descarga de Hugging Face (revisión fijada + sha256) con `pnpm --filter concierge fetch-embedder-model` antes de `build`; el CI lo cachea. Si la build falla descargando el modelo, revisa ese paso (`Dockerfile:15`, `.github/workflows/ci.yml:36`).
+  </Accordion>
+  <Accordion title="Un envío programado de Simón no dispara">
+    Si el disparo de un schedule de Simón revienta, el sistema avisa por **DM de Slack** a quien lo creó (`apps/concierge/src/mastra/index.ts:182`). Los schedules solo funcionan desde una conversación de Slack (necesitan un hilo real donde entregar la respuesta) y están aislados por el `resourceId` de su creador (`agents/simon/schedule-tools.ts:7`).
+  </Accordion>
+</AccordionGroup>
+
+## Modo prueba (playground)
+
+Para refinar prompts/UX sin tocar prod, un tester fija "en este chat soy el propietario X" en la pestaña **Request Context** de Mastra Studio. El modo prueba es **seguro por defecto** (`README.md:56`):
+
+- **Solo lectura:** cualquier tool de escritura/acción rehúsa ejecutarse y devuelve "modo prueba: escritura bloqueada". El tope duro es `tools/guard-writes.ts`.
+- **Trazas etiquetadas como dev:** Langfuse las marca con `environment` para que las pruebas no contaminen las analíticas.
+
+Para ejecutar acciones reales hay que poner `testMode = false` explícitamente (no recomendado desde el playground).

@@ -1,0 +1,91 @@
+---
+title: "Catálogo de agentes"
+description: "Los cuatro agentes del Concierge: Lola, Fabián, Atlas y Simón. Persona, superficie, herramientas, memoria y modelo de cada uno."
+---
+
+El Concierge registra cuatro agentes en un solo runtime (`apps/concierge/src/mastra/index.ts:166`). Todos responden con **Sonnet** por defecto (`anthropic/claude-sonnet-4-6`) y usan **Haiku** (`anthropic/claude-haiku-4-5`) para enrutar, clasificar y en los guardrails. El modelo se cambia con una variable de entorno, sin desplegar código (`models.ts:9`).
+
+## Modelos por tarea
+
+| Constante | Default | Variable de override | Para qué |
+|---|---|---|---|
+| `MODELS.answer` | `anthropic/claude-sonnet-4-6` | `CONCIERGE_ANSWER_MODEL` | Respuestas de Lola, Fabián y (por defecto) Atlas (`models.ts:10`) |
+| `MODELS.routing` | `anthropic/claude-haiku-4-5` | `CONCIERGE_ROUTING_MODEL` | Routing, guardrails y clasificación (`models.ts:11`) |
+| `ATLAS_MODEL` | `MODELS.answer` | `ATLAS_MODEL` | Solo el agente Atlas (`models.ts:15`) |
+| `SIMON_MODEL` | `MODELS.answer` | `SIMON_MODEL` | Solo el agente Simón (`models.ts:20`) |
+
+<Note>
+  El formato es `provider/model-id` de Mastra. Soporta OpenRouter nativo (`openrouter/<vendor>/<modelo>` + `OPENROUTER_API_KEY`), así que probar otro modelo es solo una variable de entorno (`models.ts:4`).
+</Note>
+
+## Lola — concierge del propietario
+
+- **Superficie:** el chat de la app de propietarios (Stream), **no** Slack (`agents/lola/index.ts:28`).
+- **Rol:** supervisora de la jerarquía. Tiene a `fabian` cableado como subagente, pero esa delegación está **latente**: desde VIV-2099 R2 las incidencias van directas con `ticket_create` en vez de delegar (`agents/lola/index.ts:33`).
+- **Modelo:** `MODELS.answer`. `maxSteps: 12` (`agents/lola/index.ts:316`).
+
+### Herramientas de Lola
+
+Lola no carga las ~80 tools de vivla-tools de golpe. Combina dos mecanismos (`agents/lola/index.ts:30`):
+
+<Steps>
+  <Step title="Herramientas de conocimiento — siempre visibles">
+    Pocas y de solo lectura: el catálogo de **VIVLA Docs** (wiki) y el de **Atlas** (`atlas_buscar_atlas`) para fundamentar en «la verdad de la empresa». Se montan estáticas (`agents/lola/index.ts:277`).
+  </Step>
+  <Step title="Catálogo de vivla-tools — por búsqueda (ToolSearch)">
+    Un `ToolSearchProcessor` indexa el catálogo completo y la agente busca/carga tools bajo demanda (`topK: 6`, `autoLoad`) (`agents/lola/index.ts:195`).
+  </Step>
+</Steps>
+
+El catálogo pasa por una cadena de envoltorios antes de llegar al modelo (`agents/lola/index.ts:166`):
+
+- **`guardWrites`** — en modo prueba, cualquier tool de escritura (`create_*`, `update_*`, `send_*`, …) rehúsa ejecutarse contra prod (`tools/guard-writes.ts`).
+- **`injectChannelMeta`** — pasa el `channelId` del turno al `_meta` de la llamada MCP saliente.
+- **`boostToolSearchDescriptions`** — mejora las descripciones para el índice BM25.
+- **`omitToolsByName`** — saca del catálogo tools con datos desactualizados (amenities, inventario, guías de aparatos) y las retiradas (`chat_ask_team`, `chat_send_team_escalation`), para que Lola ni las vea (`agents/lola/index.ts:143`).
+
+Además lleva **guardrails** concurrentes (prompt-injection + moderación) que corren en paralelo con la generación y controlan la entrega del primer trozo, y procesadores de salida para memoria de salida estructurada, memoria de imágenes y una «red de seguridad de promesas» (`agents/lola/index.ts:244`).
+
+<Info>
+  Lola acepta **salida estructurada** y **fotos** sin cambios de cableado: ambos llegan en el cuerpo de `POST /api/agents/lola/stream` desde vivla-tools (`agents/lola/index.ts:44`).
+</Info>
+
+### Memoria y contexto de Lola
+
+- **Impersonación:** su `requestContextSchema` (owner + `testMode`) desbloquea la pestaña **Request Context** de Mastra Studio para fijar «en este chat soy el propietario X» (`agents/owner-context.ts`, `agents/lola/index.ts:266`).
+- **Modo solo-partes** (`mode: 'ticket_only'`): oculta todo salvo `ticket_list`/`ticket_create` (`agents/lola/index.ts:277`).
+
+## Fabián — copiloto de CX
+
+- **Superficie:** Slack, con su propia app por agente (`apps/concierge/src/mastra/index.ts:26`).
+- **Herramientas:** un *slice* exacto de CX del catálogo de vivla-tools (allowlist `CX_READ_TOOLS` + `propose_ticket` por ToolSearch, más `CX_UI_TOOLS` estáticas para las tarjetas de UI), además de VIVLA Docs y Atlas (`agents/fabian/index.ts:22`).
+- **Memoria propia:** perfil de la agente de CX (`resourceId = "cx:" + userId`), aislada de la de Lola (`agents/fabian/memory.ts`).
+- **Modelo:** `MODELS.answer`. `maxSteps: 12` (`agents/fabian/index.ts:96`).
+
+### Pase proactivo `fabian-pass`
+
+Un workflow Mastra expuesto por HTTP para el gateway de vivla-tools. No es el chat interactivo: es un pase determinista por turno que, a partir de la conversación de un canal de CX, produce clasificación + saludo + 5 sugerencias + (condicional) borrador de ticket (`workflows/fabian-pass/README.md`). Se sirve en `/api/workflows/fabian-pass/*` y responde en `<20s` de mediana.
+
+## Atlas — memoria institucional
+
+- **Superficie:** la home web de `atlas.vivla.com`, para compañeros `@vivla.com` (`agents/atlas/index.ts:12`).
+- **Herramientas:** solo conocimiento, ambas de lectura — el vault de **Atlas** (`atlas_buscar_atlas`, `atlas_listar_areas`, `atlas_obtener_documento`) y la wiki de **VIVLA Docs**. Sin vivla-tools: Atlas no opera datos vivos (`agents/atlas/index.ts:40`).
+- **Siempre cita** sus fuentes (`agents/atlas/index.ts:25`).
+- **Modelo:** `ATLAS_MODEL`. `maxSteps: 10` (`agents/atlas/index.ts:49`).
+
+## Simón — analista de datos
+
+- **Superficie:** Slack. Responde a dirección (CEO / jefa de CX) sobre el pulso del negocio: reservas, ocupación, intercambios/alquileres, tickets y SLA, NPS, salud de clientes y conversaciones (`agents/simon/index.ts:97`).
+- **Enfoque SQL-first:** escribe SQL read-only sobre la capa semántica (schema `analytics`), se auto-corrige con el error de Postgres y **cita la query, el rango y la frescura** del dato (`agents/simon/index.ts:17`).
+- **Herramientas** (`agents/simon/index.ts:101`):
+  - Estáticas: las dos tools de analytics (`analytics_query_run`, `analytics_schema_get`) y `render_html_to_pdf`.
+  - Por ToolSearch: el resto del conjunto de lectura, **calculado en vivo** del catálogo del MCP de vivla-tools (se refresca ~cada 15 min) para incorporar tools nuevas sin redesplegar (`tools/vivla-tools-catalog.ts:63`).
+  - Tools propias de UI (report cards), de **envíos programados** y de adjuntar PDF a Slack.
+  - Grounding: Atlas + wiki para definiciones, **nunca** para cifras.
+- **Memoria propia:** `resourceId = "slack:" + userId` (`agents/simon/memory.ts`).
+- **Modelo:** `SIMON_MODEL`. `maxSteps: 15` (`agents/simon/index.ts:123`).
+- **Auto-mejora diaria:** un workflow lee señales (consultas rechazadas, correcciones en Slack) y propone aprendizajes sobre el modelo de datos (ver [Despliegue y operación](/sistemas/vivla-concierge/despliegue)).
+
+<Warning>
+  La lista de propietarios de prueba (`TEST_OWNERS` en `agents/owner-context.ts`) viene sembrada con **placeholders**. Rellenarla con owners reales representativos antes de usarla en serio es **PENDIENTE de confirmar** con el equipo (`README.md:87`).
+</Warning>
