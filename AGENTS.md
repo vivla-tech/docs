@@ -2,17 +2,24 @@
 
 ## About this project
 
-- This is the central documentation site for VIVLA, built on [Mintlify](https://mintlify.com)
-- Pages are MDX files with YAML frontmatter
-- Configuration lives in `docs.json`
-- Run `mintlify dev` to preview locally
-- Hosted at `wiki.vivla.com` behind Cloudflare Access
+- This is the central documentation site for VIVLA. It is built with [Astro Starlight](https://starlight.astro.build) (`site/`) and served by the Cloudflare Worker `vivla-wiki` (`worker/`), which also runs the MCP at `/mcp`
+- Pages are MDX files with YAML frontmatter, in the Mintlify MDX dialect (the site has a compatibility layer)
+- Configuration lives in `docs.json`: tabs, groups, page order and redirects
+- Preview locally: `cd site && pnpm install && VIVLA_DOCS_CONTENT_ROOT=.. pnpm run dev`
+- Hosted at `wiki.vivla.com` behind Cloudflare Access; staging at `wiki-next.vivla.com`
+- Every PR to `main` must pass the **Wiki build check**. The `deploy-wiki` job in `aggregate.yml` deploys on every aggregate run
+
+## Supported components
+
+Use only these: `Note`, `Tip`, `Info`, `Warning`, `Danger`, `Check`, `Card`, `CardGroup`, `Columns`, `Tabs`/`Tab`, `Steps`/`Step`, `Accordion`/`AccordionGroup`, `CodeGroup`, `Frame`, and Mermaid code fences. Any other component breaks the build.
+
+Escape a literal `<` or `{` in prose (`\<`, `\{`), or put it in inline code.
 
 ## Architecture
 
 - **Central repo** (`docs`): Global `docs.json`, shared pages (overview, architecture, infra)
 - **Subrepos** (`vivla-backend`, `vivla-mobile`): Each has a `/docs` folder with its own pages
-- **Aggregation**: GitHub Action (`aggregate.yml`) merges subrepo docs into this repo on push to main
+- **Aggregation**: GitHub Action (`aggregate.yml`) merges subrepo docs into the `docs` branch on push to main, then the `deploy-wiki` job builds and deploys the site and the MCP
 
 ## Terminology
 
