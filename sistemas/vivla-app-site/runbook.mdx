@@ -1,0 +1,52 @@
+---
+title: "Runbook"
+description: "Equipo responsable de vivla-app-site y los fallos más comunes de deep links y landing, con su causa y su arreglo según el código."
+---
+
+## Equipo responsable
+
+Lo mantiene el equipo **mobile** de Vivla (`repos.yml`).
+
+<Warning>
+  Quién está de guardia y los canales de alerta concretos **no viven en el código**: es **PENDIENTE de confirmar** con el equipo mobile.
+</Warning>
+
+## Fallos más comunes
+
+<AccordionGroup>
+  <Accordion title="Un enlace vivla.app no abre la app (abre el navegador)">
+    Causas típicas: el AASA/assetlinks no se sirve con `Content-Type: application/json`, el dominio no está en la tabla host→App ID, o el dispositivo tiene cacheado un AASA antiguo (iOS lo descarga al instalar/actualizar). Comprueba primero que se sirven bien con `curl -I https://vivla.app/.well-known/apple-app-site-association` y `curl https://vivla.app/.well-known/assetlinks.json`, y pásalos por las validaciones de Apple/Google (`README.md:95`). Las cabeceras las fijan `public/_headers:1` y la función (`functions/_middleware.js:33`).
+  </Accordion>
+  <Accordion title="El AASA devuelve App IDs que no tocan (o todos)">
+    El AASA se genera por `hostname` en la Pages Function. Si el host no está en `APP_IDS_BY_HOST`, la función devuelve **todos** los App IDs como fallback (`functions/_middleware.js:27`). Revisa que el dominio esté en la tabla (`functions/_middleware.js:3`). Recuerda que el archivo estático `public/.well-known/apple-app-site-association` **no se sirve**: lo sustituye la función.
+  </Accordion>
+  <Accordion title="App Links de Android no auto-verifican en staging o dev">
+    `assetlinks.json` solo declara el paquete de producción `com.vivla.app` (`public/.well-known/assetlinks.json:9`). Los binarios de Android no productivos (p. ej. `com.vivla.booking.beta`) no están en el archivo, así que no auto-verifican. Si hace falta, hay que añadir su paquete y huella. Ver la advertencia en [Verificación de deep links](/sistemas/vivla-app-site/verificacion-deep-links).
+  </Accordion>
+  <Accordion title="Cambió la huella de firma de Android y dejó de verificar">
+    Android valida el paquete contra las huellas SHA-256 del certificado de firma listadas en `assetlinks.json`. Si se re-firma la app (nueva clave de subida o de Play App Signing) sin actualizar las huellas, la verificación falla. Actualiza `sha256_cert_fingerprints` y redepliega (`public/.well-known/assetlinks.json:9`).
+  </Accordion>
+  <Accordion title="La landing no reabre la app aunque está instalada">
+    La landing solo intenta el salto por esquema si el primer segmento de la ruta está en `APP_ROUTES` y el dominio tiene esquema en `SCHEMES` (`public/index.html:268`, `public/index.html:259`). Una ruta nueva que la app ya resuelve pero que no está en esa lista no dispara el salto: hay que añadirla, en sincronía con el `LINKING_CONFIG` de `vivla-mobile-app`.
+  </Accordion>
+  <Accordion title="La app abre pero pierde el primer segmento de la ruta">
+    La URL de esquema usa **tres barras** a propósito (`scheme:///ruta`) para que el parser de la app no lea el primer segmento como host (`public/index.html:315`). Si alguien lo cambia a dos barras, rutas como `property/arrival-review` pierden `property`.
+  </Accordion>
+  <Accordion title="Un enlace compartido muestra título o descripción genéricos">
+    Los meta tags (title, OG, Twitter) se reescriben por ruta en la función (`functions/_middleware.js:41`). Si la ruta no está en `ROUTE_META`, se usa el meta por defecto "Vivla App" (`functions/_middleware.js:64`). Para un título propio, añade la ruta a `ROUTE_META`.
+  </Accordion>
+  <Accordion title="Una ruta devuelve 404 en vez de la landing">
+    `public/_redirects` manda todo lo que no sea un archivo estático a `/index.html` con 200 (`public/_redirects:3`). Si falta esa regla o el deploy no la incluyó, las rutas profundas dan 404. Verifica que `_redirects` está en el output del deploy.
+  </Accordion>
+</AccordionGroup>
+
+## Verificación tras un deploy
+
+Comprobación manual mínima (`README.md:95`):
+
+```bash
+curl -I https://vivla.app/.well-known/apple-app-site-association
+curl https://vivla.app/.well-known/assetlinks.json
+```
+
+Y las herramientas de validación de Apple y Google descritas en [Verificación de deep links](/sistemas/vivla-app-site/verificacion-deep-links).

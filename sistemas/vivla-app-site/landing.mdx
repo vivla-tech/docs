@@ -1,0 +1,57 @@
+---
+title: "Landing"
+description: "Página de fallback: detección de plataforma, intento de reapertura por esquema propio y meta tags por ruta."
+---
+
+La landing (`public/index.html`) es lo que ve el usuario cuando un enlace `vivla.app` **no** se resuelve en la app (no instalada, o en escritorio). El `_redirects` manda cualquier ruta que no sea un archivo estático a `index.html` con un 200 (`public/_redirects:3`).
+
+## Qué muestra
+
+Un logo, el titular "Esto se vive mejor en la app" y botones de descarga. La página elige qué botones enseñar según el `user-agent` (`public/index.html:246`):
+
+- **iOS**: botón de App Store (`apps.apple.com/app/vivla/6448851807`).
+- **Android**: botón de Google Play (`play.google.com/store/apps/details?id=com.vivla.app`).
+- **Escritorio**: ambos botones.
+
+El pie enlaza a `vivla.com` (`public/index.html:236`).
+
+## Intento de reapertura por esquema
+
+Si la URL tiene una ruta que la app sabe resolver, la landing intenta **reabrir la app por su esquema propio** antes de quedarse como página de descarga (`public/index.html:273`).
+
+<Steps>
+  <Step title="Resuelve el esquema del dominio">
+    `SCHEMES` mapea cada dominio a su esquema (`vivla`, `vivlabeta`, `vivladev`). Si el host no está, no hay nada que abrir (`public/index.html:259`).
+  </Step>
+  <Step title="Comprueba que la ruta es de la app">
+    Solo reabre si el primer segmento está en `APP_ROUTES`: `booking`, `property`, `invite`, `chat`, `survey`, `issues`, `home`, `stays`, `book`, `inbox`, `profile`. Cualquier otra cosa —incluida la raíz— es una visita normal a la landing (`public/index.html:268`).
+  </Step>
+  <Step title="Construye la URL de esquema y salta">
+    Muestra el botón "Abrir en la app", degrada los botones de store a secundarios y, tras dejar pintar la página, hace un único `location.replace` al esquema. Si el salto falla, queda la landing completa en vez de una pantalla en blanco (`public/index.html:284`).
+  </Step>
+</Steps>
+
+<Warning>
+  La URL de esquema usa **tres barras** a propósito (`scheme:///ruta`). El parser de la app (expo-linking) resuelve con `new URL()`; con dos barras leería el primer segmento como host y lo perdería. Con el host vacío la ruta llega entera (`public/index.html:315`).
+</Warning>
+
+<Note>
+  `SCHEMES` y `APP_ROUTES` están copiados de la app móvil (`getSchemeForEnv()` en `app.config.js` y `LINKING_CONFIG` de `vivla-mobile-app`, según los comentarios en `public/index.html:256` y `public/index.html:266`). Si cambian allí, hay que reflejarlos aquí a mano: es **PENDIENTE de confirmar** si existe algún mecanismo que los mantenga en sincronía.
+</Note>
+
+## Meta tags por ruta
+
+La Pages Function reescribe el `<title>` y las etiquetas Open Graph / Twitter de la landing según el primer segmento de la ruta, usando `HTMLRewriter` (`functions/_middleware.js:129`). Así un enlace compartido en WhatsApp o redes muestra un título acorde al contenido.
+
+| Ruta | Título |
+|---|---|
+| `/chat/...` | Vivla — Únete al chat |
+| `/invite/...` | Vivla — Únete a Vivla |
+| `/booking/...` | Vivla — Detalle del booking |
+| `/property/...` | Vivla — Detalle de propiedad |
+| `/home-review/...` o `/property?homeReview=true` | Vivla — Revisión anual de tu hogar |
+| otra | Vivla App (por defecto) |
+
+(`functions/_middleware.js:41`, `functions/_middleware.js:69`)
+
+La URL canónica que se inyecta en `og:url` siempre apunta a `https://vivla.app` + la ruta, independientemente del dominio real (`functions/_middleware.js:130`).
