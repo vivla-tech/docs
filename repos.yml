@@ -1,0 +1,184 @@
+# Manifest of the repos this wiki documents. One entry per repo.
+#
+# Two consumers read it:
+#   - .github/workflows/aggregate.yml (and wiki-build.yml): every `mode: subrepo`
+#     entry with `aggregate: true` is cloned and its `subdir` is copied to
+#     `wiki_section/`.
+#   - vivla-smurfs, the documenter workflow: every `mode: documenter` entry is
+#     read on `prod_branch` and documented under `wiki_section/` in this repo.
+#
+# Fields:
+#   repo          GitHub repo name in vivla-tech.
+#   title         Label of the repo's group or tab in the wiki.
+#   prod_branch   The branch that runs in production. Documenter entries are
+#                 read ONLY from this branch, so the wiki describes what runs.
+#   wiki_section  Folder in this repo that holds the repo's pages.
+#   owner_team    Team that owns the repo (no people's names).
+#   class         core | service | agent | web.
+#   mode          subrepo     the repo keeps docs/wiki + docs.json; the aggregate copies it.
+#                 documenter  a vivla-smurfs agent writes the pages into this repo.
+#   subdir        (subrepo) folder in the repo to copy. Default: docs/wiki.
+#   aggregate     (subrepo) false = not copied yet. Default: true.
+#   engine        (documenter) scribe = the existing Scribe workflow handles it
+#                 (vivla-api, which also feeds the Atlas vault). Default: documenter.
+#   review_first  (documenter) true = the FIRST PR for a section that does not
+#                 exist on main yet is not auto-merged; a human reviews it once.
+#                 Later PRs auto-merge after the Wiki build check.
+#   watched_paths (documenter, optional) path prefixes whose changes trigger a run.
+#                 Default: every path except lockfiles, tests and CI files.
+#   brief         (documenter, optional) what the section must cover, beyond the
+#                 standard minimum.
+#
+# Adding a repo is a new entry here. The smurfs GitHub App must be able to read it.
+
+version: 1
+
+repos:
+  # Core repos with their own docs/wiki (subrepos).
+  - repo: vivla-tools
+    title: Vivla Tools
+    prod_branch: main
+    wiki_section: tools
+    owner_team: plataforma
+    class: core
+    mode: subrepo
+
+  - repo: vivla-mobile-app
+    title: Mobile App
+    prod_branch: main
+    wiki_section: mobile
+    owner_team: mobile
+    class: core
+    mode: subrepo
+
+  - repo: vivla-panel
+    title: Panel
+    prod_branch: main
+    wiki_section: panel
+    owner_team: panel
+    class: core
+    mode: subrepo
+
+  # The repo is the source (not Notion). Its docs/wiki holds .md pages and no
+  # docs.json yet, so the aggregate does not copy it until that exists (phase 3).
+  - repo: vivla-cms
+    title: Web y CMS
+    prod_branch: main
+    wiki_section: cms
+    owner_team: web
+    class: web
+    mode: subrepo
+    aggregate: false
+
+  # vivla-api: documented from outside, read-only, by Scribe (backend/ + operativa/).
+  - repo: vivla-api
+    title: Vivla API
+    prod_branch: master
+    wiki_section: backend
+    owner_team: backend
+    class: core
+    mode: documenter
+    engine: scribe
+    review_first: false
+
+  # Documenter repos (phase 3). Pages live under sistemas/<repo>/ in the
+  # "Sistemas" tab. The first run per repo is triggered by hand.
+  - repo: vivla-concierge
+    title: Concierge (Alma)
+    prod_branch: main
+    wiki_section: sistemas/vivla-concierge
+    owner_team: ia
+    class: agent
+    mode: documenter
+    review_first: true
+    brief: Agent catalog, Lola's tools, MCP clients (wiki, Atlas, Tools), Railway environments, evals.
+
+  - repo: vivla-atlas
+    title: Atlas
+    prod_branch: develop
+    wiki_section: sistemas/vivla-atlas
+    owner_team: ia
+    class: agent
+    mode: documenter
+    review_first: true
+    brief: Vault layout, retrieval API, manual railway up deploy, property filter rules.
+
+  - repo: vivla-smurfs
+    title: Smurfs
+    prod_branch: develop
+    wiki_section: sistemas/vivla-smurfs
+    owner_team: ia
+    class: agent
+    mode: documenter
+    review_first: true
+    brief: Roster of smurfs, schedules, guardrails, webhooks, manual railway up deploy. Derive from CLAUDE.md and the code.
+
+  - repo: vivla-intelligence
+    title: Intelligence
+    prod_branch: main
+    wiki_section: sistemas/vivla-intelligence
+    owner_team: ia
+    class: agent
+    mode: documenter
+    review_first: true
+    brief: Data sources, Slack app, uptime check.
+
+  - repo: micaela
+    title: Micaela
+    prod_branch: master
+    wiki_section: sistemas/micaela
+    owner_team: ia
+    class: agent
+    mode: documenter
+    review_first: true
+    brief: Data sources (CRM, calls), schedules, Sentry smoke check.
+
+  - repo: booking-cloud-functions
+    title: Booking Cloud Functions
+    prod_branch: main
+    wiki_section: sistemas/booking-cloud-functions
+    owner_team: backend
+    class: service
+    mode: documenter
+    review_first: true
+    brief: Function list, triggers, integrations (HubSpot, Notion, Slack, Zendesk).
+
+  - repo: propcos
+    title: PropCos
+    prod_branch: main
+    wiki_section: sistemas/propcos
+    owner_team: proveedor-externo
+    class: service
+    mode: documenter
+    review_first: true
+    brief: Built and run by an external provider. Document the architecture from the repo and how Tools consumes it.
+
+  - repo: bigquery-vivla
+    title: Data warehouse (BigQuery)
+    prod_branch: main
+    wiki_section: sistemas/bigquery-vivla
+    owner_team: datos
+    class: service
+    mode: documenter
+    review_first: true
+    brief: Dataform models, deploy workflows, downstream consumers (Looker, Cube), alerts.
+
+  - repo: vivla-status
+    title: Status
+    prod_branch: main
+    wiki_section: sistemas/vivla-status
+    owner_team: plataforma
+    class: service
+    mode: documenter
+    review_first: true
+    brief: Probe list and assertions, status page, outage reminders, Sentry as code.
+
+  - repo: vivla-app-site
+    title: App site (deep links)
+    prod_branch: main
+    wiki_section: sistemas/vivla-app-site
+    owner_team: mobile
+    class: web
+    mode: documenter
+    review_first: true
+    brief: AASA and assetlinks files, domains per environment, landing.

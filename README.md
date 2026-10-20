@@ -7,7 +7,9 @@ The central wiki for VIVLA: engineering, product and CX. It is private, behind C
 | Part | Where | What it does |
 |---|---|---|
 | Content | `*.mdx` + `docs.json` (this repo) and `docs/wiki/` in each subrepo | The pages. Mintlify-dialect MDX; `docs.json` sets tabs, groups, page order and redirects. |
-| Aggregation | `.github/workflows/aggregate.yml`, job `aggregate` | Copies the subrepo pages into the `docs` branch and merges their `docs.json` tabs. |
+| Manifest | `repos.yml` | One entry per documented repo: production branch, wiki folder, owner team, and how it is documented (`subrepo` or `documenter`). Adding a repo is a new entry. |
+| Aggregation | `.github/workflows/aggregate.yml`, job `aggregate` | Copies the pages of every `mode: subrepo` entry of `repos.yml` into the `docs` branch and merges their `docs.json` tabs. |
+| Documenter | `vivla-smurfs`, workflows `scribe-sync` and `documenter` | Agents read each `mode: documenter` repo on its production branch and write its pages here. Their PRs merge themselves once the Wiki build check passes. |
 | Site | `site/` | An [Astro Starlight](https://starlight.astro.build) build of the `docs` branch, with a compatibility layer for the Mintlify components. |
 | Worker | `worker/` | The Cloudflare Worker `vivla-wiki`. It serves the site, checks the Access JWT and runs the MCP at `/mcp`. |
 | Deploy | `aggregate.yml`, job `deploy-wiki` | Builds the site, the MCP corpus and the search embeddings, runs the tests, then deploys staging and production. |

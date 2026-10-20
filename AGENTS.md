@@ -18,8 +18,9 @@ Escape a literal `<` or `{` in prose (`\<`, `\{`), or put it in inline code.
 ## Architecture
 
 - **Central repo** (`docs`): Global `docs.json`, shared pages (overview, architecture, infra)
-- **Subrepos** (`vivla-backend`, `vivla-mobile`): Each has a `/docs` folder with its own pages
-- **Aggregation**: GitHub Action (`aggregate.yml`) merges subrepo docs into the `docs` branch on push to main, then the `deploy-wiki` job builds and deploys the site and the MCP
+- **Manifest** (`repos.yml`): one entry per documented repo. `mode: subrepo` repos keep their own `docs/wiki`; `mode: documenter` repos are written into this repo by the vivla-smurfs documenter (under `sistemas/<repo>/`, or `backend/` + `operativa/` for vivla-api)
+- **Aggregation**: GitHub Action (`aggregate.yml`) copies the subrepos listed in `repos.yml` into the `docs` branch, then the `deploy-wiki` job builds and deploys the site and the MCP
+- Do not edit pages under a documenter section by hand without a reason: the next documenter run reconciles them with the code
 
 ## Terminology
 

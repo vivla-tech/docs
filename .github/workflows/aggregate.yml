@@ -25,19 +25,31 @@ concurrency:
 jobs:
   aggregate:
     runs-on: ubuntu-latest
-    env:
-      # To add a new subrepo: append a line with format repo:subdir:dest
-      # e.g. vivla-tech/vivla-api:docs/wiki:backend
-      SUBREPOS: |
-        vivla-tech/vivla-tools:docs/wiki:tools
-        vivla-tech/vivla-mobile-app:docs/wiki:mobile
-        vivla-tech/vivla-panel:docs/wiki:panel
     steps:
       - name: Checkout docs repo
         uses: actions/checkout@v4
         with:
           ref: main
           token: ${{ secrets.PUSH_TOKEN }}
+
+      # The subrepo list comes from repos.yml: every `mode: subrepo` entry
+      # with `aggregate` not false, as lines `vivla-tech/<repo>:<subdir>:<dest>`.
+      # To add a subrepo, add an entry to repos.yml. yq is preinstalled on
+      # ubuntu-latest.
+      - name: Read subrepos from repos.yml
+        run: |
+          set -e
+          SUBREPOS="$(yq -r '.repos[] | select(.mode == "subrepo" and .aggregate != false) | "vivla-tech/" + .repo + ":" + (.subdir // "docs/wiki") + ":" + .wiki_section' repos.yml)"
+          if [ -z "$SUBREPOS" ]; then
+            echo "::error::repos.yml lists no subrepos"
+            exit 1
+          fi
+          echo "$SUBREPOS"
+          {
+            echo "SUBREPOS<<EOF"
+            echo "$SUBREPOS"
+            echo "EOF"
+          } >> "$GITHUB_ENV"
 
       - name: Clone subrepos and copy docs
         env:
