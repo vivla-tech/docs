@@ -34,7 +34,35 @@ jobs:
           rsync -a --exclude .git --exclude .aggregated --exclude site \
             --exclude worker --exclude scripts --exclude .github \
             --exclude tools --exclude mobile --exclude panel \
+            --exclude docs.json \
             ./ "$RUNNER_TEMP/content/"
+
+      # docs.json: the PR's version, plus the subrepo tabs that only the
+      # aggregated docs.json has (same tab order as aggregate.yml).
+      - name: Merge docs.json
+        run: |
+          python3 - "$RUNNER_TEMP/content/docs.json" <<'PYTHON'
+          import json, sys
+          out = sys.argv[1]
+          pr = json.load(open('docs.json'))
+          agg = json.load(open('.aggregated/docs.json'))
+          def pages(o):
+              if isinstance(o, str): return [o]
+              if isinstance(o, list): return [p for x in o for p in pages(x)]
+              if isinstance(o, dict): return [p for k in ('groups', 'pages') for p in pages(o.get(k, []))]
+              return []
+          # A subrepo tab: every page lives under a subrepo folder. Like
+          # aggregate.yml, it replaces the stub tab of the same name.
+          sub = [t for t in agg['navigation']['tabs']
+                 if pages(t) and all(p.split('/')[0] in ('tools', 'mobile', 'panel') for p in pages(t))]
+          sub_names = {t.get('tab') for t in sub}
+          tabs = [t for t in pr['navigation']['tabs'] if t.get('tab') not in sub_names] + sub
+          order = ['Overview', 'Vivla Tools', 'Mobile App', 'Vivla API', 'Panel', 'Infra']
+          tabs.sort(key=lambda t: order.index(t.get('tab')) if t.get('tab') in order else len(order))
+          pr['navigation']['tabs'] = tabs
+          json.dump(pr, open(out, 'w'), indent=2, ensure_ascii=False)
+          print(f"{len(tabs)} tabs")
+          PYTHON
 
       - uses: pnpm/action-setup@v4
         with:
