@@ -153,15 +153,17 @@ repos:
     review_first: true
     brief: Built and run by an external provider. Document the architecture from the repo and how Tools consumes it.
 
-  - repo: bigquery-vivla
-    title: Data warehouse (BigQuery)
-    prod_branch: main
-    wiki_section: sistemas/bigquery-vivla
-    owner_team: datos
-    class: service
-    mode: documenter
-    review_first: true
-    brief: Dataform models, deploy workflows, downstream consumers (Looker, Cube), alerts.
+  # Paused 2026-10-20: the smurfs GitHub App has no access to bigquery-vivla
+  # (not granted for now). Uncomment when access is granted.
+  # - repo: bigquery-vivla
+  #   title: Data warehouse (BigQuery)
+  #   prod_branch: main
+  #   wiki_section: sistemas/bigquery-vivla
+  #   owner_team: datos
+  #   class: service
+  #   mode: documenter
+  #   review_first: true
+  #   brief: Dataform models, deploy workflows, downstream consumers (Looker, Cube), alerts.
 
   - repo: vivla-status
     title: Status
