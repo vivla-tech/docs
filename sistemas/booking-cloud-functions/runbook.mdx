@@ -1,0 +1,50 @@
+---
+title: "Runbook"
+description: "Equipo responsable de booking-cloud-functions y los fallos más comunes, con su causa y su arreglo según el código."
+---
+
+## Equipo responsable
+
+Lo mantiene el equipo **backend** de VIVLA. La observabilidad se apoya en los logs de Firebase/Cloud Logging y en los avisos a Slack (ver [Despliegue y operación](/sistemas/booking-cloud-functions/despliegue)).
+
+<Warning>
+  Quién está de guardia y los canales de alerta concretos **no viven en el código**: son **PENDIENTE de confirmar** con el equipo backend.
+</Warning>
+
+## Seguridad: secretos commiteados
+
+<Danger>
+  Hay secretos commiteados en `functions/utils/hs.js`, `functions/utils/slack.js`, `functions/webhooks/hubspotController.js`, `functions/hostaway/hostawayController.js`, `functions/reports/zendeskController.js`, `functions/nps/npstonotion.js`, `functions/nps/tickettonotion.js`, `functions/nps-dashboard/nps-stays.js`, `functions/nps-dashboard/nps-design.js`, `functions/nps-dashboard/nps-tinder.js`, `functions/nps-dashboard/sync-homes.js` y `functions/nps-dashboard/sync-tickets.js`. Rotar y mover a variables de entorno es trabajo para el equipo backend.
+</Danger>
+
+## Fallos más comunes
+
+<AccordionGroup>
+  <Accordion title="Las notificaciones de reserva no llegan a los huéspedes">
+    Hay varias capas de apagado. Revisa en orden: el flag `stopNotifications` (`functions/index.js:174`); para encuestas de llegada/estancia, `stopSurveyNotifications = true` las apaga porque se migraron a **vivla-tools** (`functions/index.js:180`); y la variable `NOTIFICATIONS_API_KEY` del backend de push: si falta, `sendExpoNotification` se salta el envío con un warning (`functions/utils/expo-notifications.js:90`).
+  </Accordion>
+  <Accordion title="Las notificaciones de alquiler/intercambio nunca se disparan">
+    Es **esperado**. Los triggers `onRentBookChange`, `onRentBookUpdate`, `onExchangeBookChange` y `onExchangeBookUpdate` empiezan con `if (true) return null` y solo loggean que están desactivados (`functions/index.js:555`, `functions/index.js:588`). Solo `onRentBookRented` y `onExchangeBookSwapped` siguen activas.
+  </Accordion>
+  <Accordion title="El webhook de Hostaway responde 401">
+    `hostAwayNewReservation` exige **Basic Auth**: compara la cabecera `Authorization` contra `BASIC_AUTH_USER`/`BASIC_AUTH_PASSWORD` del código y responde 401 si falta o no coincide (`functions/hostaway/hostawayController.js:409`). Comprueba que el webhook configurado en Hostaway envía esas credenciales.
+  </Accordion>
+  <Accordion title="Hostaway responde 200 pero la reserva no se crea">
+    La API de Hostaway puede devolver HTTP 200 con `{status: "fail"}`. El código solo trata como éxito `status === "success"` (`functions/hostaway/hostawayController.js`, `isSuccess`). Revisa el cuerpo de la respuesta en los logs, no solo el código HTTP. Además, los eventos con `source: "apiv1"` se ignoran a propósito (`functions/hostaway/hostawayController.js:440`).
+  </Accordion>
+  <Accordion title="El SLA de Zendesk no se actualiza">
+    Lo hace el cron `scheduledActualizarFechaPlanDeAccionYPrimeraRespuesta` cada 5 minutos (`functions/reports/zendeskController.js:23`). Depende de IDs de campos custom y de agentes hardcodeados (`checkboxFieldId`, `dateFieldId`, `agentIds`…); si en Zendesk cambian esos IDs, el cron deja de encontrar los campos (`functions/reports/zendeskController.js:12`). Para depurar un ticket concreto hay endpoints `testActualizar*`.
+  </Accordion>
+  <Accordion title="El sync a Notion falla o duplica páginas">
+    `syncNewGlobalNPSToNotion` crea una página en Notion por cada documento nuevo de `nps-booking` (`functions/nps/npstonotion.js:260`). Si el `NOTION_TOKEN` perdió acceso a la base de datos, o el ID de base (`NOTION_*_DATABASE_ID`) cambió, las creaciones fallan. Las migraciones masivas son endpoints manuales (`migrate*ToNotion`): re-ejecutarlas sobre datos ya migrados puede duplicar.
+  </Accordion>
+  <Accordion title="El sync al dashboard (nps-dashboard) da 401/403">
+    Las funciones de `nps-dashboard/` llaman a `dashboard.vivla.com` con Basic Auth (usuario `developer`). Si esas credenciales cambian en el dashboard, todas las llamadas fallan (`functions/nps-dashboard/sync-tickets.js:89`).
+  </Accordion>
+  <Accordion title="El progreso de reservas no cambia a la hora esperada">
+    `scheduledNotCompletedBooksProgressUpdate` corre a las **9:45 y 15:45** (Madrid): el run de la mañana solo completa checkouts (umbral 9:00) y el de la tarde solo activa check-ins (umbral 15:00), y ambos corren antes del sync horario de la API para que lo recoja en el mismo ciclo (`functions/reports/cxController.js:313`, `functions/utils/book-progress.js`).
+  </Accordion>
+  <Accordion title="Un endpoint de prueba está expuesto">
+    El repo despliega muchos endpoints `test*` sin autenticación propia (`functions/index.js:203`). No son parte del flujo de producción; si uno se está invocando por error, revisa su registro en `functions/index.js` y retíralo o protégelo (requiere re-desplegar).
+  </Accordion>
+</AccordionGroup>
