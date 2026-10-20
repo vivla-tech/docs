@@ -12,6 +12,10 @@
   // 403s every request without a valid Access JWT.
   "workers_dev": false,
   "preview_urls": false,
+  // Cutover (PLAN.md §8.1): the route takes wiki.vivla.com in front of the
+  // proxied CNAME to Mintlify, which stays in place for rollback. Rollback:
+  // delete this route and deploy.
+  "routes": [{ "pattern": "wiki.vivla.com/*", "zone_name": "vivla.com" }],
   "assets": {
     // The Starlight build (site/, `pnpm run build`). Build the site before
     // `wrangler deploy`. Unit tests use wrangler.test.jsonc and its
