@@ -1,0 +1,76 @@
+---
+title: "Fuentes de datos"
+description: "De dónde salen los datos de Micaela: HubSpot (CRM), Aircall/Daniela (llamadas), Gong y las capas de BigQuery, con las tablas donde aterrizan y los workers que las llenan."
+---
+
+Todo aterriza en un único **Postgres** (el mismo que leen web y mcp). Casi todo pasa primero por **BigQuery** y lo copia a Postgres un worker de `packages/ingest`. La tabla canónica de fuentes está en `CLAUDE.md` «Data sources»; aquí va un resumen operativo.
+
+<Note>
+  Desde la migración de 2026-06 (Fases 1–5), **las lecturas de HubSpot salen del dataset nativo de BigQuery** (`growthia.hubspot.*`, vía BigQuery Data Transfer), no de la API de HubSpot. La API directa solo se usa para unos pocos workers que escriben de vuelta o leen propiedades concretas. (`CLAUDE.md`, `docs/investigations/2026-06-08-native-hubspot-bq-migration-analysis.md`.)
+</Note>
+
+## HubSpot (CRM)
+
+El espejo core del CRM. El DTS nativo refresca a diario a las **02:00 UTC** y acaba ~03:30; por eso toda la cascada va después (`scripts/railway-start.sh`, caso `hubspot-ingest`).
+
+| Qué | Tablas Postgres | Worker |
+|---|---|---|
+| Contactos, deals, owners, historial de etapa | `hubspot_contacts`, `hubspot_deals`, `hubspot_owners`, `deal_stage_history` | `hubspot-ingest` |
+| Timestamps reales de transición de etapa | `deal_stage_history` | `hubspot-stage-history-sync` (API de HubSpot) |
+| Atribución / UTM | `*.analytics_attribution` | `hubspot-attribution-sync` (API de HubSpot) |
+| Señales nativas Tier 1 (lead_status, speed-to-lead, CHAMP…) | tablas de señales | `hubspot-native-signals` |
+| Llamadas / meetings / emails (engagements) | `hubspot_calls`, `hubspot_meetings`, `hubspot_emails` | `hubspot-calls-sync`, `hubspot-meetings-sync`, `hubspot-emails-sync` |
+| Propiedades de formulario + outcome | `hubspot_contacts.form_data` | `hubspot-profile-sync` (API de HubSpot) |
+| Membresías de listas (A/B del bot Daniela) | `hubspot_list_memberships` | `hubspot-list-membership-sync` |
+| Señales de engagement (vistas web, emails) | `hubspot_contact_engagement`, `hubspot_engagement_rollup` | `hubspot-engagement-sync`, `hubspot-engagement-rollup-sync` |
+| Poda de filas fantasma (borrados/merges) | `prune_log` + cascada | `hubspot-prune-sync` |
+
+<Note>
+  `hubspot-emails-sync` copia **asunto y fecha, nunca el cuerpo** del email: el texto libre que escriben clientes y comerciales es donde vive el dato sensible (`scripts/railway-start.sh`, caso `hubspot-emails-sync`).
+</Note>
+
+El **grano de evento** del engagement (una fila por page-view/apertura) lo ingiere un **Cloud Run Job** en BigQuery (`engagement-events-sync`, cada 30 min), NO Railway; el worker de Railway `hubspot-engagement-rollup-sync` solo proyecta el rollup por contacto a Postgres (`deploy/engagement-sync/`, `CLAUDE.md`).
+
+## Aircall / Daniela (llamadas)
+
+Llamadas y la capa de IA del bot **Daniela**, que vive en una **Supabase** propia de Daniela.
+
+| Qué | Tablas Postgres | Worker | Cadencia sugerida |
+|---|---|---|---|
+| Llamadas + datos IA (buyer_score, CHAMP) | `aircall_calls`, `touchpoints`, `score_events` | `aircall-sync` | cada 5 min |
+| Tabla `contacts` de Daniela (~7k filas) | — | `daniela-contacts-sync` | cada 5 min |
+| Perfiles consolidados por contacto (~3k) | `aircall_contact_profiles` | `daniela-profiles-sync` | cada 15 min |
+| Mapeo Aircall→HubSpot (~3k) | `aircall_hubspot_enrichments` | `daniela-enrichments-sync` | cada 60 min |
+| Transcripciones crudas de llamada | `aircall_call_transcripts` | `daniela-transcripts-sync` | cada 15–30 min |
+
+La cobertura de Aircall es ~7% de los contactos (`CLAUDE.md`). Las transcripciones de Aircall (y las de Gong) alimentan `property_preferences` vía el worker `property-preferences-extract` (Haiku), con las características de casa deseada por destino.
+
+## Gong (reuniones de AE)
+
+| Qué | Tablas Postgres | Worker |
+|---|---|---|
+| Vídeos/reuniones de AE | `gong_videos`, `touchpoints` (type `gong_video`) | `gong-ingest` |
+| Transcripciones de reunión | `gong_call_transcripts` | `gong-transcripts-sync` |
+| Scorecards + resúmenes de coaching | `gong_scorecard_answers`, `ae_call_summaries` | `ae-call-summary`, `ae-scoring` |
+
+<Note>
+  Gong escribe su export `growthia.gong_backup.*` ~06:07 UTC con su **propio** proceso, que Micaela **no controla**; por eso la rama Gong de la cascada va suelta a las 06:30 y no bloquea el daily review (`scripts/railway-start.sh`, caso `gong-ingest`).
+</Note>
+
+## Capas de BigQuery (silver / gold / Windsor)
+
+| Qué | Tablas Postgres | Worker |
+|---|---|---|
+| Scoring + auditoría de Daniela (silver) | `score_events`, `audit_events` | (vía aircall-sync / pipelines) |
+| Engagement + calidad de campaña (Windsor/gold) | `tofu_scores`, `campaign_quality_daily` | `tofu-score-sync` |
+| Gasto publicitario | `campaign_ad_spend_daily` | `ads-spend-sync` |
+| WhatsApp (HubSpot ThreadMessages) | `whatsapp_messages`, `touchpoints` | `whatsapp-sync` (+ `whatsapp-scoring`) |
+
+<Warning>
+  El **gasto publicitario** es sutil: la fuente canónica son **4 datasets RAW** (Meta `fbads.AdInsights` nativo, Google `ads_CampaignBasicStats` DTS nativo, TikTok/LinkedIn vía **Windsor.ai**), NO el gold-mart `ads_gold.mart_ads_performance` (que pierde ~99% de Google y omite TikTok). TikTok/LinkedIn por Windsor **se caen en silencio** (auth caducada o errores de tipo): el run «sale OK» sin traer datos — vigilar por `max(date)`, no por éxito del run. (`CLAUDE.md` «Common gotchas».)
+</Warning>
+
+## Dónde mirar si un dato está mal
+
+- La definición exacta de cada métrica y sus anclajes vive en `CLAUDE.md` «Common gotchas» (conteos por campaña, costes unitarios, ventanas de calendario, zona horaria Madrid, etc.). Son decisiones deliberadas, no bugs.
+- Un «BQ nativo de HubSpot rancio» en `cron_runs` **no es un bug**: es el guard `hubspot-ingest` abortando si el BQ nativo lleva `>20 h` sin escribirse, para no reprocesar el snapshot de ayer (`packages/ingest/src/workers/native-ingest/freshness.ts`, `CLAUDE.md`).

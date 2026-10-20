@@ -206,6 +206,17 @@
             ]
           },
           {
+            "group": "Micaela",
+            "pages": [
+              "sistemas/micaela/index",
+              "sistemas/micaela/crons-y-monitorizacion",
+              "sistemas/micaela/despliegue",
+              "sistemas/micaela/fuentes-de-datos",
+              "sistemas/micaela/integraciones",
+              "sistemas/micaela/runbook"
+            ]
+          },
+          {
             "group": "PropCos",
             "pages": [
               "sistemas/propcos/index",
