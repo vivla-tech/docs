@@ -32,9 +32,7 @@ Tras el gate hay un segundo middleware que acepta un `model` en el cuerpo de las
 
 El workflow de CI (`.github/workflows/ci.yml`) corre en cada push/PR a `develop` y `main`, pero **solo** hace typecheck, tests y los evals en `--dry-run` — **no despliega** (`.github/workflows/ci.yml:10`).
 
-<Warning>
-  El mecanismo exacto de despliegue continuo (auto-deploy de Railway al hacer push a la rama frente a `railway up` manual) **no está en el repo**. El mapeo rama→entorno de [Entornos](/environments) dice `develop → Railway develop` y `main → Railway production`. Confirmar el disparador real con el equipo IA es **PENDIENTE de confirmar**.
-</Warning>
+Railway despliega solo, al hacer push: el servicio `concierge` está conectado al repo `vivla-tech/vivla-concierge`. Un push a `main` despliega **producción** y un push a `develop` despliega el entorno **develop** (configuración del servicio en Railway, verificada el 2026-10-20). Mergear a `main` es, por tanto, desplegar.
 
 ## Cómo se vuelve atrás
 
