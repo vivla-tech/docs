@@ -1,0 +1,98 @@
+---
+title: "Atlas"
+description: "El cerebro de Vivla: un vault de conocimiento en Markdown y una capa de retrieval con citas que alimenta a Lola y a otros agentes. Qué es, quién lo usa y cómo está montado."
+---
+
+**Atlas** (`vivla-atlas`) es la base de conocimiento institucional de Vivla y la **API de búsqueda** que la sirve. No es una wiki ni un editor: le pasas una pregunta y te devuelve los fragmentos exactos para responderla, **siempre con su cita y su estado de verificación** (`README.md`, `apps/server/src/index.ts`).
+
+La regla de oro del producto: los agentes **no inventan**. Solo responden desde lo que Atlas les devuelve, citando la fuente; si no hay nada verificado, Atlas no responde el dato (`apps/server/src/mcp.ts`).
+
+<Info>
+  Propietario: equipo **IA**. Clase: **agente**. La fuente de verdad de esta sección es el código de la rama de producción `develop`. Para la ubicación del repo en el mapa general, mira [Repositorios](/repositories) y [Entornos](/environments).
+</Info>
+
+<Note>
+  El `README.md` del repo describe una estructura antigua (`src/index.ts`, `src/vault.ts`, …). El código real vive en un **monorepo npm workspaces**: el servicio está en `apps/server/src/` y el sitio lector en `apps/site/`. Donde el README y el código discrepan, manda el código.
+</Note>
+
+## Qué es y qué no
+
+- **Es** una capa de retrieval full-text/híbrida sobre un *vault* de Markdown versionado en git. El vault (`knowledge/`) **es la verdad**; el índice de búsqueda es derivado y reconstruible (`ARCHITECTURE.md`).
+- **No es** el editor ni el autor del conocimiento. La autoría (flujo de solicitud → aprobación por responsable de área) vive fuera, en `vivla-tools` (`ARCHITECTURE.md`, `README.md`).
+- **No usa vector DB por defecto**: el corpus es pequeño y lleno de identificadores exactos (nombres de casa, códigos, horarios), donde el full-text iguala o supera al RAG vectorial. Los embeddings son una capa opcional (`ARCHITECTURE.md`, `apps/server/src/embeddings.ts`).
+
+## Quién lo usa
+
+Atlas es un servicio para **agentes y superficies**, no para humanos directamente:
+
+<CardGroup cols={2}>
+  <Card title="Lola y los agentes de Alma" icon="robot">
+    El Concierge (`vivla-concierge`, Mastra) consume Atlas por **MCP** para responder con la verdad de la empresa. Ver [Concierge](/sistemas/vivla-concierge/index).
+  </Card>
+  <Card title="Claude Code y otros agentes" icon="terminal">
+    Cualquier cliente MCP puede instalar la tool `buscar_atlas` (`README.md`).
+  </Card>
+  <Card title="El chat web de Atlas" icon="comments">
+    La home de `atlas.vivla.com` monta un chat que habla con el agente Atlas en Concierge/Mastra (`functions/api/chat.ts`).
+  </Card>
+  <Card title="El lector web" icon="book-open">
+    El sitio Starlight (`apps/site`) renderiza el vault para compañeros `@vivla.com`, con solicitudes de cambio en el pie de cada doc (`functions/api/solicitudes.ts`).
+  </Card>
+</CardGroup>
+
+## Stack
+
+| Pieza | Elección | Fuente |
+|---|---|---|
+| Servicio | **Hono + TypeScript**, Node ≥ 22 | `apps/server/package.json`, `.nvmrc` |
+| API para agentes | **Servidor MCP** (SDK oficial + `@hono/mcp`, Streamable HTTP) | `apps/server/src/mcp.ts` |
+| Índice (opcional) | **Postgres** `tsvector` (BM25) + **pgvector** (HNSW), fusión RRF | `apps/server/src/db.ts` |
+| Embeddings (opcional) | **Cloudflare Workers AI** `@cf/baai/bge-m3` (1024 dims) | `apps/server/src/embeddings.ts` |
+| Reescritura/rerank (opcional) | **Claude Haiku** (`claude-haiku-4-5`) | `apps/server/src/rewrite.ts` |
+| Observabilidad (opcional) | **Langfuse** (SDK v5 sobre OpenTelemetry) | `apps/server/src/telemetry.ts` |
+| Lector web | **Astro + Starlight** (`apps/site`) + Pages Functions | `apps/site/astro.config.mjs`, `functions/` |
+
+Todas las capas opcionales son **fail-soft**: si falta su variable de entorno, esa capa se desactiva con un log y el servicio sigue (`apps/server/src/index.ts`).
+
+## Estructura del repo
+
+```
+knowledge/              ← EL VAULT (la verdad): Markdown + frontmatter, una carpeta por área
+  index.md              ← índice navegable
+  casas/ zonas/         ← indicaciones ligadas a un lugar
+  cx/ operaciones/ ...  ← áreas de la empresa
+apps/
+  server/               ← la capa de retrieval (Hono + MCP)
+    src/index.ts        ← API HTTP: /health, /buscar, /reload, /mcp, /solicitudes
+    src/vault.ts        ← lee y trocea el vault por apartados
+    src/search.ts       ← pipeline de búsqueda (fusión RRF + rerank Haiku)
+    src/db.ts           ← índice Postgres híbrido (BM25 + vector)
+    src/mcp.ts          ← tools MCP (buscar_atlas, listar_areas, …)
+    src/migrations/     ← SQL idempotente de la tabla atlas_chunks + solicitudes
+  site/                 ← el lector web (Astro + Starlight)
+functions/api/          ← Pages Functions (proxies de chat y solicitudes)
+CODEOWNERS              ← responsable por área (veto a nivel git)
+railway.json            ← config de despliegue (Railway)
+```
+
+(Verificado contra el árbol del repo; `package.json` declara `workspaces: ["apps/*"]`.)
+
+## Dónde seguir
+
+<CardGroup cols={2}>
+  <Card title="El vault" icon="folder-tree" href="/sistemas/vivla-atlas/vault">
+    Layout de `knowledge/`, frontmatter, tiers, audiencias y las reglas de propiedad.
+  </Card>
+  <Card title="API de retrieval" icon="magnifying-glass" href="/sistemas/vivla-atlas/retrieval">
+    Endpoints HTTP, tools MCP, el pipeline híbrido y el filtro de propiedad fail-closed.
+  </Card>
+  <Card title="Despliegue y operación" icon="server" href="/sistemas/vivla-atlas/despliegue">
+    Railway, `railway up` manual, entornos, rollback, auth y variables de entorno.
+  </Card>
+  <Card title="Integraciones" icon="plug" href="/sistemas/vivla-atlas/integraciones">
+    A qué llama, quién le llama y sus credenciales (solo por nombre).
+  </Card>
+  <Card title="Runbook" icon="life-ring" href="/sistemas/vivla-atlas/runbook">
+    Equipo responsable, crons, monitorización y fallos más comunes.
+  </Card>
+</CardGroup>

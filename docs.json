@@ -163,6 +163,17 @@
         "tab": "Sistemas",
         "groups": [
           {
+            "group": "Atlas",
+            "pages": [
+              "sistemas/vivla-atlas/index",
+              "sistemas/vivla-atlas/despliegue",
+              "sistemas/vivla-atlas/integraciones",
+              "sistemas/vivla-atlas/retrieval",
+              "sistemas/vivla-atlas/runbook",
+              "sistemas/vivla-atlas/vault"
+            ]
+          },
+          {
             "group": "Concierge (Alma)",
             "pages": [
               "sistemas/vivla-concierge/index",
@@ -171,6 +182,16 @@
               "sistemas/vivla-concierge/evals",
               "sistemas/vivla-concierge/integraciones",
               "sistemas/vivla-concierge/runbook"
+            ]
+          },
+          {
+            "group": "PropCos",
+            "pages": [
+              "sistemas/propcos/index",
+              "sistemas/propcos/despliegue",
+              "sistemas/propcos/integraciones",
+              "sistemas/propcos/runbook",
+              "sistemas/propcos/tareas-y-monitorizacion"
             ]
           },
           {
