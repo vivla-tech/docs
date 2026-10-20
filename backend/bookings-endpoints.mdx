@@ -65,6 +65,14 @@ Referencia de la superficie de reservas de `vivla-api`. Todas las rutas son **v2
   **Los endpoints dedicados de v1 ya no existen.** `publish-third-home`, `unpublish-third-home`, `exchange-third-home`, `:id/rent`, `rent/approve`, `:id/liberate`, `add-referral-bonus`, `keys/transfer`, `pending-exchanges`, etc. se retiraron. Esas operaciones se hacen ahora con `register` / `:id/edit` / `add-stay` y el estado de aprobación `BookingApproval`. El **coste en llaves por casa** se fija ahora desde el módulo Properties: `POST /v2/admin/properties/:homeId/set-keys`.
 </Note>
 
+## Tools (máquina a máquina)
+
+`src/bookings/v2/tools/bookings.tools.controller.ts` · path `tools/bookings`, versión 2. Protegido con firma HMAC (`HmacMiddleware`, `src/bookings/bookings.module.ts:58`), no con sesión de usuario.
+
+| Método | Ruta | Acceso | Qué hace |
+|--------|------|--------|----------|
+| GET | `/v2/tools/bookings` | HMAC | Reservas no canceladas desde hace un mes, paginadas (`page`, `limit`). |
+
 ## Calendario
 
 App en `src/calendars/v2/apps/calendars.apps.controller.ts` (path `calendars`); admin en `src/calendars/v2/admin/calendars.admin.controller.ts` (path `admin/calendars`). Ambos versión 2.

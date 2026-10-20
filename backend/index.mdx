@@ -15,7 +15,7 @@ Esta documentación describe el **estado actual del código**. Cada regla apunta
 
 ## Versionado por URI
 
-La API versiona por URI. Cada ruta empieza por su versión: `/v1/...` o `/v2/...`. No hay prefijo global de API. El versionado se activa en `src/main.ts:39` con `VersioningType.URI`.
+La API versiona por URI. Cada ruta empieza por su versión: `/v1/...` o `/v2/...`. No hay prefijo global de API. El versionado se activa en `src/main.ts:16` con `VersioningType.URI`. Quedan rutas `/v1` en casas (`src/homes/v1`), usuarios (`src/users/v1`) y `common` (`src/common/v1`); reservas y calendario ya son solo `/v2`.
 
 <Warning>
   **No hay OpenAPI ni Swagger.** El proyecto no expone ningún esquema autogenerado (no usa `@nestjs/swagger`). La única "spec" por endpoint son comentarios `@reference` que enlazan a páginas de Notion en las cabeceras de los controllers. No son navegables desde aquí y requieren acceso al workspace de Notion de VIVLA.
@@ -51,13 +51,13 @@ La API se organiza en módulos NestJS (`src/app.module.ts`).
 | **Homes** | Casas: lectura de las casas del usuario, listados y localizaciones (v1/v2 + controller `tools` por HMAC). Sus endpoints de catálogo `admin` se están migrando al módulo **Properties**. |
 | **Properties** | Catálogo de propiedades (dirección, amenities, proveedores, bancos, hosting, parking, documentos e imágenes). Controllers `admin` y `apps`; destino de la migración desde `Homes`. |
 | **Users** | Usuarios y perfiles. Controllers v1/v2 + variantes `admin` y `tools`. |
-| **Auth** | Autenticación y guard de permisos (`PermissionGuard` + `@RequirePermission`). |
-| **Notifications** | Envío de notificaciones (push / buzón Firestore). |
+| **Auth** | Autenticación y guard de permisos (`PermissionGuard` + `@RequirePermission`). Convive con un `AuthModule` antiguo en `src/auth_deprecated`. |
+| **Notificaciones** | No es un módulo propio: el buzón de notificaciones de la app vive en Users (`src/users/v2/apps/notifications.apps.controller.ts`) y los eventos salen por la cola de eventos (`EventManagerService`). |
 | **Invitations** | Invitaciones de asistentes a reservas. |
 | **Configuration** | Tabla `configurations` (parámetros clave/valor). |
 | **ScheduledJobs** | Crons: caducidad de llaves, bono anual, refresco de caché de casas, envío de la cola de eventos (incluida la sincronización con Hostaway), auditoría diaria Vivla ↔ Hostaway y transferencia de usuarios. |
 | **Firestore / Database** | Conexión a Firestore (v1) y a Postgres/TypeORM (v2). |
-| **Common** | Filtros de error, i18n, utilidades, entidades compartidas. |
+| **Common** | Filtros de error, i18n, utilidades, entidades compartidas, comprobaciones de salud (`/health`, `/health/ready`), cliente de Hostaway y servicio de Zendesk. |
 
 ## Por dónde seguir
 

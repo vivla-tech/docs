@@ -11,13 +11,13 @@ Las llaves son la moneda del intercambio entre copropietarios. Todo lo relativo 
 
 El saldo se guarda en la tabla `exchange_keys_wallet`, con registros que tienen fecha de caducidad. Los movimientos se registran en `exchange_keys`.
 
-- **Caducidad: 24 meses.** Cada asignación de llaves caduca a 24 meses de su fecha de creación (`DateUtils.getDateMonthsFromNow(24)`, `src/bookings/v2/bookings.common.repository.ts:1845`).
+- **Caducidad: 24 meses.** Cada asignación de llaves caduca a 24 meses de su fecha de creación (`DateUtils.getDateMonthsFromNow(24)`, `src/bookings/v2/bookings.common.repository.ts:1860`).
 - **Consumo FIFO por caducidad.** Al gastar llaves se descuentan primero las que caducan antes (`expiresAt` ascendente).
 - Las asignaciones con la misma fecha de caducidad se acumulan en el mismo registro.
 
 ## Movimientos: los 12 conceptos
 
-Cada movimiento tiene un `concept` (`src/common/database/v2/entities/bookings/exchange-key.entity.ts:10`):
+Cada movimiento tiene un `concept` (`src/common/database/v2/entities/bookings/exchange-key.entity.ts:12`):
 
 | Concepto | Significado |
 |----------|-------------|
@@ -38,7 +38,7 @@ Cada movimiento tiene un `concept` (`src/common/database/v2/entities/bookings/ex
 
 - **Bono de fidelización (`FIDELIZATION_BONUS`): +2 llaves** si el usuario tuvo **2 o más intercambios válidos** en el año. Lo otorga el cron de fin de año y emite el evento `KEYS_YEARLY_BONUS` (`src/bookings/v2/commands/yearly-bonus.command.ts:146`).
 - **Bono de referido (`REFERRAL_BONUS`):** el concepto sigue existiendo, pero el endpoint dedicado `add-referral-bonus` de v1 se eliminó; ahora se registra como un movimiento manual desde `POST /v2/admin/bookings/keys/:userId/register-movement`.
-- **Regalo de bienvenida (`WELCOME_GIFT`):** al recibir llaves por su **primer** intercambio (flag `first_exchange` del usuario), el código otorga un bono igual al importe recibido — es decir, **duplica** la ganancia de ese primer intercambio (`src/bookings/v2/bookings.common.repository.ts:1900`).
+- **Regalo de bienvenida (`WELCOME_GIFT`):** al recibir llaves por su **primer** intercambio (flag `first_exchange` del usuario), el código otorga un bono igual al importe recibido — es decir, **duplica** la ganancia de ese primer intercambio (`src/bookings/v2/bookings.common.repository.ts:1915`).
 
 <Warning>
   **Importe fijo del bono de bienvenida: PENDIENTE confirmar por CX/negocio.** El concepto `WELCOME_GIFT` existe y el código lo usa para duplicar las llaves del primer intercambio. Si existe además un importe fijo de bienvenida al alta (no ligado a un intercambio), no está en el código.
@@ -50,7 +50,7 @@ El cron de caducidad corre a diario y comprueba todos los monederos (`src/bookin
 
 1. **Avisos previos.** Si a un registro le quedan tantos días como alguno de los configurados en `keys_expiration_warning_days` (CSV en la tabla `configurations`), se emite el evento `KEYS_EXPIRING_SOON` (notificación al copropietario) (`key-expires.command.ts:46` y `:81`).
 2. **Primera caducidad → prórroga automática de 12 meses.** Si un registro caduca hoy y el usuario **no** ha sido prorrogado antes (`user.prorrogatedKeys`), se le amplía la caducidad 12 meses, una sola vez, y se emite el evento `KEYS_EXTENDED` (`key-expires.command.ts:93` y `:108`).
-3. **Segunda caducidad → se pierden.** Si el usuario ya fue prorrogado, las llaves caducadas se eliminan y se registra un movimiento `EXPIRATION` (`key-expires.command.ts:116`).
+3. **Segunda caducidad → se pierden.** Si el usuario ya fue prorrogado, las llaves caducadas se eliminan y se registra un movimiento `EXPIRATION` (`key-expires.command.ts:129`).
 
 <Warning>
   **Valor de `keys_expiration_warning_days`: PENDIENTE confirmar.** Es dato de la tabla `configurations`; los días concretos de aviso no están en el código.
@@ -62,7 +62,7 @@ Ver [Crons y configuración](/backend/crons-y-configuracion) para el horario del
 
 Con la retirada de v1 **ya no hay dos motores de intercambio**: desaparecieron el motor viejo de match por fechas (`to_swap`), la flag `NEW_EXCHANGE_SYSTEM`/`NEW_EXCHANGE_SYSTEM_ENABLED_USERS` (que el código ya no lee) y la regla temporal de lanzamiento con fecha fija `15/03/2026`. Queda un único sistema, en v2.
 
-El intercambio se paga con llaves del wallet. El **cobro es instantáneo** si el slot se reserva con **≥ 9 meses de antelación** y su **temporada tiene `instant_keys = true`** (`src/bookings/v2/apps/bookings.apps.repository.ts:402`; también `src/calendars/v2/apps/calendars.apps.repository.ts:106`). Cuando se cumplen ambas condiciones, al crear la reserva se marca `keysPaid = true` y se cobra automáticamente (`src/bookings/v2/bookings.common.repository.ts:1132`). En caso contrario la reserva queda con el cobro **pendiente** (`keysPaid = false`).
+El intercambio se paga con llaves del wallet. El **cobro es instantáneo** si el slot se reserva con **≥ 9 meses de antelación** y su **temporada tiene `instant_keys = true`** (`src/bookings/v2/apps/bookings.apps.repository.ts:402`; también `src/calendars/v2/apps/calendars.apps.repository.ts:106`). Cuando se cumplen ambas condiciones, al crear la reserva se marca `keysPaid = true` y se cobra automáticamente (`src/bookings/v2/bookings.common.repository.ts:1145`). En caso contrario la reserva queda con el cobro **pendiente** (`keysPaid = false`).
 
 <Note>
   `instant_keys` es ahora un flag booleano **por temporada** (columna de la entidad `Season` de v2), configurable en Postgres; antes el comportamiento "la temporada no es baja" se deducía del slug. Ver [Calendario y temporadas](/backend/calendario-temporadas).
@@ -70,16 +70,16 @@ El intercambio se paga con llaves del wallet. El **cobro es instantáneo** si el
 
 ## Coste en llaves de una reserva de intercambio (v2)
 
-Al registrar un intercambio desde la app o el panel, el coste en llaves se calcula **siempre en el momento de validar los slots**, haya o no una estancia asociada a la reserva (`src/bookings/v2/admin/bookings.admin.service.ts:630`; `src/bookings/v2/apps/bookings.apps.service.ts:1134`). El coste es:
+Al registrar un intercambio desde la app o el panel, el coste en llaves se calcula **siempre en el momento de validar los slots**, haya o no una estancia asociada a la reserva (`src/bookings/v2/admin/bookings.admin.service.ts:646`; `src/bookings/v2/apps/bookings.apps.service.ts:1221`). El coste es:
 
-- **Intercambio de última hora → 1 llave fija** (`bookings.apps.service.ts:1279`; `bookings.admin.service.ts:630`). El disfrute de última hora en la propia casa no es un intercambio y no gasta llaves.
-- **Resto de intercambios →** coste de la temporada de la casa × número de slots. El coste por temporada sale de la tabla de equivalencias de la casa (`calculateSlotKeys`, `src/bookings/v2/bookings.common.repository.ts:629`).
+- **Intercambio de última hora → 1 llave fija** (`bookings.apps.service.ts:1369`; `bookings.admin.service.ts:648`). El disfrute de última hora en la propia casa no es un intercambio y no gasta llaves.
+- **Resto de intercambios →** coste de la temporada de la casa × número de slots. El coste por temporada sale de la tabla de equivalencias de la casa (`calculateSlotKeys`, `src/bookings/v2/bookings.common.repository.ts:634`).
 
-Si la casa **no tiene coste en llaves configurado** para esa temporada, `calculateSlotKeys` devuelve 0 y el registro del intercambio se rechaza con el error `KEYS_NOT_CONFIGURED` ("No hay un coste en llaves configurado para la temporada de la casa seleccionada") (`bookings.apps.service.ts:1140`; `bookings.admin.service.ts:637`). Es una salvaguarda para no crear intercambios de 0 llaves.
+Si la casa **no tiene coste en llaves configurado** para esa temporada, `calculateSlotKeys` devuelve 0 y el registro del intercambio se rechaza con el error `KEYS_NOT_CONFIGURED` ("No hay un coste en llaves configurado para la temporada de la casa seleccionada") (`bookings.apps.service.ts:1230`; `bookings.admin.service.ts:655`). Es una salvaguarda para no crear intercambios de 0 llaves.
 
-Al **cambiar el tipo** de una reserva a intercambio desde el panel, la reserva debe tener una **temporada asociada** en su slot; si no la tiene no se puede convertir (se necesita para calcular las llaves) (`bookings.common.repository.ts:2270`).
+Al **cambiar el tipo** de una reserva a intercambio desde el panel, la reserva debe tener una **temporada asociada** en su slot; si no la tiene no se puede convertir (se necesita para calcular las llaves) (`bookings.common.repository.ts:1494`).
 
-En sentido contrario, al **cambiar el tipo de una reserva que ya es un intercambio con las llaves cobradas** (`keysPaid`), la conversión revierte el cobro y **retira** al propietario las llaves de ese intercambio. Antes de aplicarlo, el servicio comprueba que el propietario tenga **saldo disponible ≥ las llaves de la reserva**; si no llega, el cambio se rechaza con el error `NO_AVAILABLE_EXCHANGES` ("No hay suficientes llaves de intercambio disponibles") (`src/bookings/v2/admin/bookings.admin.service.ts:1354`). Es una validación de negocio previa: si no existiera, el movimiento negativo lo abortaría `ExchangeKeySubscriber` con una excepción interna. La comprobación solo se hace si el tipo actual es intercambio, las llaves están cobradas, hay importe de llaves y hay propietario.
+En sentido contrario, al **cambiar el tipo de una reserva que ya es un intercambio con las llaves cobradas** (`keysPaid`), la conversión revierte el cobro y **retira** al propietario las llaves de ese intercambio. Antes de aplicarlo, el servicio comprueba que el propietario tenga **saldo disponible ≥ las llaves de la reserva**; si no llega, el cambio se rechaza con el error `NO_AVAILABLE_EXCHANGES` ("No hay suficientes llaves de intercambio disponibles") (`src/bookings/v2/admin/bookings.admin.service.ts:1443`). Es una validación de negocio previa: si no existiera, el movimiento negativo lo abortaría `ExchangeKeySubscriber` con una excepción interna. La comprobación solo se hace si el tipo actual es intercambio, las llaves están cobradas, hay importe de llaves y hay propietario.
 
 ## ThirdHome
 
