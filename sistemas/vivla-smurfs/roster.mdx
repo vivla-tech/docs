@@ -26,7 +26,7 @@ Corren dentro de un clon del repo objetivo. El modelo por defecto es **opus** (`
 | **Scribe** | `scribe.ts` | Sync diario de las reglas de negocio de vivla-api (leídas de `master`) hacia **docs** (wiki) y **vivla-atlas** | LIVE |
 | **Documenter** | `documenter.ts` | Sync del wiki dirigido por el `repos.yml` del repo `docs`: documenta cada entrada `mode: documenter` bajo `sistemas/<repo>/` (**este pitufo escribe esta sección**) | LIVE (diff) |
 | **Handy** | `sentry-fixer.ts` | Mejor issue de Sentry → arreglo (PR borrador) o veredicto → entrega a `triage()` de Postman; nunca escribe en Linear | LIVE |
-| **Brainy** | `brainy.ts` | «Mano derecha» de Linear: un issue mencionado/delegado → un PLAN, una INVESTIGACIÓN de solo lectura, o un PR borrador | event-driven |
+| **Brainy** | `brainy.ts` | «Mano derecha» de Linear: un issue mencionado/delegado → un PLAN, una INVESTIGACIÓN de solo lectura, o un PR borrador. Investiga con Claude; el build lo delega a **Cursor** (`composer-2.5` o `grok-4.6`, `src/mastra/tools/cursor-agents.ts`) | event-driven |
 | **Grouchy** | `security-auditor.ts` | `npm audit` + barrido OWASP → issues | stub/off |
 | **Guardian** | `supabase-security.ts` | Advisors de Supabase → PR borrador de migración correctiva | stub/off |
 
@@ -47,12 +47,32 @@ Sin acceso a repo. Los `Agent` de Mastra van por el router de modelos (prefijo `
 | **Alma analyst** | `alma-analyst.ts` | Digest diario de actividad de Lola (métricas + commits) → Slack | Agent · haiku | LIVE |
 | **Lola weekly analyst** | `lola-weekly-analyst.ts` | Análisis semanal (lunes 09:00) de los 7 días previos de Lola → informe interno | Agent · haiku | LIVE |
 | **Lola watcher** | *(sin agente — `lola-watcher.ts`)* | Cada 2 min: avisa en Slack de mensajes nuevos / borradores en canales donde responde un agente | código puro | LIVE |
-| **Postman** | `postman.ts` | **El pitufo cartero**: triaje de Product Requests en Slack → responde, deduplica, abre un issue de Linear con el hilo sincronizado, o pasa a Don Draper | Agent · opus | event-driven; SHADOW por defecto |
+| **Postman** | `postman.ts` | **El pitufo cartero**: triaje de Product Requests en Slack → responde, deduplica, abre un issue de Linear con el hilo sincronizado, o pasa a Don Draper | Agent · `claude-opus-5` (`POSTMAN_MODEL`) | event-driven; **en vivo en producción** (`POSTMAN_SHADOW=0`, verificado el 2026-10-20) |
 | **Iconero** | `src/icons/iconero.ts` | **El pitufo de los iconos**: dibuja iconos del set VIVLA para la Content Factory, con revisora independiente | ClaudeSDKAgent (`query()`) · `claude-opus-5-5` (`ICONERO_MODEL`) | event-driven |
 | **Design** | *(sin agente — `design-intake.ts`)* | La puerta de Postman al equipo HOM: «Materiales de casas» → issue de HOM determinista | código puro | event-driven (mismo webhook que Postman) |
 | **Brainy (triage stub)** | `triage-classifier.ts` | Enruta items a un pitufo (placeholder legado) | Agent · haiku | stub/off |
 
 (Tabla derivada de `CLAUDE.md`, sección «Roster». Los detalles de triaje de Postman, el flujo de Brainy y el enrutado de Cursor viven en `CLAUDE.md`.)
+
+## Modelos y facturación
+
+Verificado en el código y en las variables de Railway el 2026-10-20:
+
+| Qué | Modelo | Se paga con |
+|---|---|---|
+| Pitufos de código (`ClaudeSDKAgent`: Architect, Painter, Vanity, Hefty, Nosey, Tailor, Papa, Editor, Scribe, Documenter, Handy, Brainy al investigar) y Poet | `claude-opus-4-8` (Poet: `claude-haiku-4-5`) | La **suscripción** de Claude (`CLAUDE_CODE_OAUTH_TOKEN`) |
+| Iconero (Claude Agent SDK, `query()`) | `claude-opus-5-5` | La suscripción de Claude |
+| Postman | `claude-opus-5` | Clave de API propia, `POSTMAN_ANTHROPIC_API_KEY` |
+| Reporter | `claude-opus-5` | Clave de API propia, `REPORTER_ANTHROPIC_API_KEY` |
+| Alma analyst y Lola weekly analyst | `claude-haiku-4-5` | Clave de API propia, `ALBA_ANTHROPIC_API_KEY` |
+| Brainy al construir | Cursor `composer-2.5` / `grok-4.6` | Plan de Cursor (`CURSOR_API_KEY`) |
+| Revisor cross-model de PRs (F2) | Gemini (`REVIEW_PROVIDER=gemini`) | `GEMINI_API_KEY` |
+
+<Warning>
+  **`ANTHROPIC_API_KEY` debe quedarse sin poner en Railway.** Es global al proceso y el Claude Agent SDK la prefiere sobre `CLAUDE_CODE_OAUTH_TOKEN`: si existe, todos los pitufos de código pasan a pagar por token. Por eso los pitufos de texto llevan cada uno su clave por modelo (`src/mastra/agents/postman.ts:50`).
+</Warning>
+
+El Documenter apunta en cada ejecución los tokens usados y un coste estimado a precio de API (`estimateCostUsd`, `src/mastra/tools/documenter-logic.ts`). Con la suscripción no se factura aparte: consume el cupo de uso.
 
 <Tip>
   Cada pitufo tiene un lanzador one-shot en `runners/run-<nombre>.ts` para prueba manual o CI, que importa el `run*()` del workflow y lo ejecuta una vez sin el scheduler (p. ej. `pnpm handy`, `pnpm nightly:architect`, `pnpm sweep:sentry`) (`package.json`, `CLAUDE.md`, sección Runtime).

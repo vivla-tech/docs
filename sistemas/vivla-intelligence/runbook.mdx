@@ -1,0 +1,64 @@
+---
+title: "Runbook"
+description: "Equipo responsable de Intelligence y los fallos más comunes, con su causa y su arreglo según el código y el historial de incidentes del repo."
+---
+
+## Equipo responsable
+
+Intelligence lo mantiene el equipo **IA** de VIVLA. Cada turno de agente se observa en **Langfuse** y los errores en **Sentry** (proyecto `vivla-lifestyle/vivla-intelligence`); ver [Despliegue y operación](/sistemas/vivla-intelligence/despliegue).
+
+<Warning>
+  Quién está de guardia y los canales de alerta concretos **no viven en el código** (los IDs de canal están hardcodeados en varios sitios, pero sus nombres y responsables no). Es **PENDIENTE de confirmar** con el equipo IA.
+</Warning>
+
+## Fallos más comunes
+
+<AccordionGroup>
+  <Accordion title="api.vivla.ai/health no responde (sonda de uptime roja)">
+    La sonda de GitHub Actions avisa en Slack cada 10 min mientras `GET /health` no dé `200` tras dos intentos (`.github/workflows/uptime.yml`). Revisa Railway: el servicio `mastra` puede estar caído, colgado o en bucle de reinicio. Este backstop externo existe precisamente para el caso del 13-ago-2026, en que el contenedor se quedó colgado tras un OOM y Railway no lo reinició. Recuerda que `/health` solo confirma que el proceso responde, no sus dependencias.
+  </Accordion>
+  <Accordion title="El contenedor OOM'ea o muere y Railway no reinicia">
+    El watchdog (`apps/mastra/scripts/start-watchdog.mjs`) es el proceso padre: cuando el hijo muere sin SIGTERM, avisa a Slack y **sale con código de fallo** para forzar el reinicio de Railway (`ON_FAILURE`, máx. 10 reintentos). Si ves el aviso rojo seguido del aviso verde de arranque, el ciclo funcionó. Si no arranca, mira los logs de Railway del servicio `mastra`.
+  </Accordion>
+  <Accordion title="Un GET /api/workflows/.../runs devuelve 400 con mensaje de «limit capped at 10»">
+    Es **intencionado**. Un `limit=50` en ese endpoint (lo pedía la vista de runs de Studio) cargaba snapshots enormes, aguantaba 34 s, daba 500 y el reintento OOM'eaba el heap — fue la causa de la caída de 5 días del 13-ago-2026. Un middleware topa el `limit` a 10; pagina con `limit<=10` (`apps/mastra/src/mastra/index.ts:231`).
+  </Accordion>
+  <Accordion title="Los crons de producción se disparan (o no se disparan)">
+    Los crons solo se programan si `RAILWAY_ENVIRONMENT_NAME === "production"` (`apps/mastra/src/mastra/index.ts:85`). Si **no** disparan: confirma que el entorno es `production` y revisa el log `[cron-bootstrap] scheduled all crons`. Si **se duplican** (p. ej. alertas de Daniela repetidas o en formato viejo): hay un deploy de `testing` vivo programando los mismos crons contra el canal de producción — ese fue el origen del bug; apaga o re-despliega el `testing`.
+  </Accordion>
+  <Accordion title="Respuestas dobles de Daniela a un mismo lead">
+    Dos runs del workflow en paralelo (webhooks casi simultáneos) respondían dos veces. El fix es un «claim» de inbound: `INSERT ... ON CONFLICT DO NOTHING` sobre `daniela_inbound_claims`; el primer run gana y los demás se saltan (`CHANGELOG.md`, `2026-05-07`). Si la tabla falta o el DB está caído, `claimInbound` devuelve `true` y el workflow degrada a «duplicados ocasionales» en lugar de bloquear todas las respuestas — comprueba que la tabla existe en prod.
+  </Accordion>
+  <Accordion title="Los eventos de Slack no producen respuesta y no hay error visible">
+    Históricamente los `POST /slack/events` fallaban en silencio (incidente del 14-may-2026). Hay un logger a nivel de módulo para que cada entrada y fallo asíncrono aparezca en los logs de Railway (`apps/mastra/src/lib/slack/index.ts:14`). Mira esos logs; causas típicas: firma inválida (revisa `SLACK_SIGNING_SECRET`), token de bot ausente para ese agente (`SLACK_BOT_TOKEN_{AGENTE}` o `SLACK_BOT_TOKEN`), o un evento deduplicado.
+  </Accordion>
+  <Accordion title="Un agente de Slack lanza «No Slack bot token found»">
+    No se resolvió token para ese agente: ni `SLACK_BOT_TOKEN_{AGENTE}` (p. ej. `SLACK_BOT_TOKEN_TEMIS`, `SLACK_BOT_TOKEN_DANIELA`) ni el genérico `SLACK_BOT_TOKEN`. Pon uno de los dos en Railway (`apps/mastra/src/lib/slack/client.ts:63`).
+  </Accordion>
+  <Accordion title="Las tools de Drive de un agente devuelven 403">
+    El service account (`GOOGLE_CLIENT_EMAIL`) no tiene permiso sobre esa carpeta de Drive. Los cambios de código no bastan: hay que darle al menos **Viewer** (Editor para la carpeta de escritura de Hermes) en la UI de Drive (`CLAUDE.md`).
+  </Accordion>
+  <Accordion title="Sentry no recibe nada">
+    Está apagado si `SENTRY_DSN` no está puesto (por diseño en local). En prod, confirma el DSN. Ojo: el exporter debe invocarse con una llamada explícita (`createSentryExporter()`), nunca como import de side-effect — el bundler de Mastra tree-shakea esos imports y deja la init fuera del bundle. Verifícalo con `grep SENTRY_DSN .mastra/output/mastra.mjs` tras el build (`apps/mastra/src/lib/sentry.ts`).
+  </Accordion>
+  <Accordion title="El build de Railway no coge mis últimos commits">
+    Railway decide qué commits despliegan por sus `watchPatterns` (`/apps/mastra/**`), fijados en el **dashboard**, no en `railway.toml`. Un cambio fuera de esa ruta puede no disparar deploy. El `railway.toml` incluso lleva un «deploy-marker» en el `index.ts` para forzar builds cuando el trigger se saltó commits (`apps/mastra/src/mastra/index.ts:1`, `railway.toml`).
+  </Accordion>
+</AccordionGroup>
+
+## Dónde mirar primero
+
+<Steps>
+  <Step title="Logs de Railway">
+    Servicio `mastra`. El deploy banner (`[deploy] commit=… branch=… deployment=…`) dice exactamente qué commit corría (`apps/mastra/src/mastra/index.ts:102`).
+  </Step>
+  <Step title="Langfuse">
+    Traza del turno de agente que falló (sessions con formato `hubspot-{channelId}-contact-{contactId}` para Daniela).
+  </Step>
+  <Step title="Sentry">
+    Errores no controlados de ruta y excepciones de proceso, con el tag de entorno y de deployment de Railway.
+  </Step>
+  <Step title="CHANGELOG.md del repo">
+    Historial de cambios con causa, modos de fallo y cómo se verificó cada uno. Toda reversión debe llevar su motivo.
+  </Step>
+</Steps>

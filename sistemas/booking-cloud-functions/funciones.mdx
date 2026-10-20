@@ -1,0 +1,129 @@
+---
+title: "Funciones y triggers"
+description: "Catálogo de las Cloud Functions de booking-cloud-functions por tipo de disparador: Firestore, HTTP, webhooks y tareas programadas."
+---
+
+Todas las funciones se registran en `functions/index.js`. Esta página las agrupa por **tipo de disparador**. Los nombres son los de `exports.*` (el nombre desplegado).
+
+<Note>
+  Varias funciones de disparo convivien con flags que las dejan inactivas. En `functions/index.js:174` `stopNotifications = false` y `stopSurveyNotifications = true`: las encuestas de llegada y de estancia (`arrival-review`/`stay-review`) se migraron al sistema de notificaciones de **vivla-tools** y están desactivadas aquí para no duplicar envíos (`functions/index.js:176`).
+</Note>
+
+## Triggers de Firestore
+
+Reaccionan a escrituras en colecciones del proyecto `vivla-app`.
+
+| Función | Documento | Evento | Fuente |
+|---|---|---|---|
+| `createBook` | `homes/{home_ref}/books/{book_ref}` | onCreate | `functions/dashboard/create-book.js:12` |
+| `bookUpdate` | `homes/{home_ref}/books/{book_ref}` | onUpdate | `functions/dashboard/update-book-status.js:11` |
+| `bookServiceUpdate` | `homes/{home_ref}/books/{book_ref}` | onUpdate | `functions/dashboard/update-book-services.js:8` |
+| `bookToRent` | `homes/{home_ref}/books/{book_ref}` | onUpdate | `functions/dashboard/update-book-rent.js:8` |
+| `onDeleteBook` | `homes/{home_ref}/books/{book_ref}` | onDelete | `functions/dashboard/delete-book.js:9` |
+| `postCancelBook` | `homes/{home_ref}/books/{book_ref}` | onUpdate | `functions/books/bookController.js:10` |
+| `createAppHome` | `homes/{homeRef}` | onCreate | `functions/dashboard/create-app-home.js:7` |
+| `deleteAppHome` | `homes/{homeRef}` | onDelete | `functions/dashboard/delete-app-home.js:5` |
+| `historicalHomeStatus` | `homes/{homeId}` | onUpdate | `functions/dashboard/update-home-status.js:5` |
+| `updateOpenCalendar` | `home-calendar/{ref}` | onUpdate | `functions/dashboard/update-home-calendar.js:6` |
+| `createAppUser` | `tmp_users/{userId}` | onCreate | `functions/dashboard/create-app-users.js:11` |
+| `removeAppUser` | `del_users/{userId}` | onCreate | `functions/dashboard/remove-app-users.js:8` |
+| `updateUserStatus` | `users/{userId}` | onCreate | `functions/dashboard/update-user-status.js:38` |
+| `historicalUserStatus` | `users/{userId}` | onUpdate | `functions/dashboard/update-user-status.js:9` |
+| `newAuthUser` | Firebase Auth (alta de usuario) | user().onCreate | `functions/dashboard/create-app-users.js:86` |
+| `onRentBookRented` | `rentBooks/{rentBookId}` | onUpdate | `functions/index.js:577` |
+| `onRentBookChange` | `rentBooks/{rentBookId}` | onCreate | `functions/index.js:551` |
+| `onRentBookUpdate` | `rentBooks/{rentBookId}` | onUpdate | `functions/index.js:566` |
+| `onExchangeBookSwapped` | `exchangeBooks/{exchangeBookId}` | onUpdate | `functions/index.js:610` |
+| `onExchangeBookChange` | `exchangeBooks/{exchangeBookId}` | onCreate | `functions/index.js:584` |
+| `onExchangeBookUpdate` | `exchangeBooks/{exchangeBookId}` | onUpdate | `functions/index.js:599` |
+| `syncNpsStays` | `nps-booking/{documentId}` | onCreate | `functions/nps-dashboard/nps-stays.js:138` |
+| `syncNewGlobalNPSToNotion` | `nps-booking/{docId}` | onCreate | `functions/nps/npstonotion.js:260` |
+| `syncNpsDesign` | `nps-home-responses/{documentId}` | onCreate | `functions/nps-dashboard/nps-design.js:177` |
+| `syncNpsTinder` | `nps-home-excellence-values/{documentId}` | onCreate | `functions/nps-dashboard/nps-tinder.js:159` |
+| `syncHome` | `homes/{documentId}` | onCreate | `functions/nps-dashboard/sync-homes.js:110` |
+
+<Warning>
+  `onRentBookChange`, `onRentBookUpdate`, `onExchangeBookChange` y `onExchangeBookUpdate` tienen una guarda `if (true) return null` al principio: aunque están desplegadas, **no envían nada** (notificaciones de alquiler/intercambio desactivadas) (`functions/index.js:555`, `functions/index.js:588`). Solo `onRentBookRented` y `onExchangeBookSwapped` siguen activas.
+</Warning>
+
+## Webhooks (llamadas de sistemas externos)
+
+Endpoints HTTP que consumen terceros. El detalle de autenticación y payloads está en [Integraciones](/sistemas/booking-cloud-functions/integraciones).
+
+| Función | Llamante | Qué hace | Fuente |
+|---|---|---|---|
+| `hostAwayNewReservation` | Hostaway | Guarda/actualiza reservas en `hostawayReservations` y notifica nuevas consultas | `functions/hostaway/hostawayController.js:405` |
+| `typeformWebhook` | Typeform | Guarda respuestas de formulario en Firestore | `functions/typeform/typeformController.js:10` |
+| `typeformCustomerWebhook` | Typeform | Guarda datos de cliente | `functions/typeform/typeformController.js:37` |
+| `completeStayReview` | Typeform (stay review) | Guarda el token de review de estancia | `functions/index.js:136` |
+| `hbUpdateContact` | HubSpot (deal actualizado) | Resuelve contacto del deal y lo reenvía a un webhook de Airtable | `functions/webhooks/hubspotController.js:8` |
+| `syncZendeskTicket` | Zendesk | Alta de ticket desde webhook | `functions/nps-dashboard/sync-tickets.js:198` |
+| `updateZendeskTicket` | Zendesk | Edición de ticket desde webhook | `functions/nps-dashboard/sync-tickets.js:256` |
+| `deleteZendeskTicket` | Zendesk | Baja de ticket desde webhook | `functions/nps-dashboard/sync-tickets.js:230` |
+
+## Endpoints HTTP para app y panel
+
+| Función | Tipo | Qué hace | Fuente |
+|---|---|---|---|
+| `homeCalendar` | onRequest | Devuelve el calendario de una casa | `functions/calendars/homeCalendarController.js:34` |
+| `homeList` | onRequest | Lista de casas | `functions/calendars/homeCalendarController.js:6` |
+| `isBookCancellable` | onRequest | Si una reserva es cancelable | `functions/books/cancellationController.js:27` |
+| `cancellationPolicy` | onRequest | Política de cancelación | `functions/books/cancellationController.js:10` |
+| `getBookOptions` | onRequest | Opciones de una reserva | `functions/books/bookController.js:65` |
+| `rentPrice` | onCall | Calcula precio de alquiler (callable) | `functions/rent/rentController.js:56` |
+| `getRentPrice` | onRequest | Precio de alquiler (HTTP) | `functions/rent/rentController.js:7` |
+| `getFinanceReportUrl` | onRequest | URL del informe financiero | `functions/reports/financeController.js:87` |
+| `getBudgetReportUrl` | onRequest | URL del informe de presupuesto | `functions/reports/financeController.js:20` |
+| `addReportFeedback` | onRequest | Feedback de un informe | `functions/reports/financeController.js:163` |
+| `addHomeNPS` | onRequest | Alta de NPS de casa | `functions/reports/cxController.js:476` |
+| `downloadBooksReport` | onRequest | Descarga informe de reservas | `functions/reports/cxController.js` |
+| `activeBooksReport` | onRequest | Reservas activas por usuario | `functions/reports/cxController.js:154` |
+| `generateLastHourStaysReport` | onRequest | Informe de estancias de última hora | `functions/reports/lastHourStaysReport.js:226` |
+| `proxyGCS` | onRequest | Proxy de lectura de archivos de GCS (`vivla-app.appspot.com`) | `functions/proxy/proxy.js:9` |
+| `sendInAppNotification` | onRequest | Crea notificación in-app | `functions/utils/inapp-notifications.js` |
+| `deleteInAppNotification` | onRequest | Borra notificación in-app | `functions/utils/inapp-notifications.js` |
+| `apiNotifications` | onRequest | Envía notificación push desde el panel | `functions/notifications/dashboardNotificationController.js:10` |
+| `apiPushStats` | onRequest | Estadísticas de push | `functions/notifications/dashboardNotificationController.js:123` |
+
+## Endpoints HTTP de administración y migración
+
+Pensados para ejecución manual (importar datos, migrar NPS/tickets a Notion, recalcular históricos). No deberían exponerse al público.
+
+| Función | Fuente |
+|---|---|
+| `importSlots`, `addCalendarSlots`, `copyCalendar` | `functions/dashboard/import-slots.js` |
+| `historicalUserStatus`, `historicalHomeStatus` | `functions/dashboard/update-user-status.js`, `functions/dashboard/update-home-status.js` |
+| `loadHomeRentPrices` | `functions/rent/rentController.js:101` |
+| `migrateNPSToNotion`, `syncNPSToNotion`, `migrateGlobalNPSToNotion`, `syncNewGlobalNPSToNotion` | `functions/nps/npstonotion.js` |
+| `migrateTicketToNotion`, `migrateTicketsByHouseToNotion`, `migrateHomeTicketStats`, `getAllHomeStats`, `migrateAllHomeStatsToNotion` | `functions/nps/tickettonotion.js` |
+
+<Warning>
+  Hay además endpoints `test*` desplegados (`testSlack`, `testPendingBooksNotification`, `testNextStayNotification`, `testInProgressStayNotification`, `testStayReview`, `testHomeNPSNotification`, `testRentBookNotification`, `testExchangeBookNotification`, `testArrivalReviewSynthetic`, varios `testActualizar*` de Zendesk, `updateCompletedStaysReviewStatusTest`). Hay **13 funciones de prueba** desplegadas y activas en producción (verificado el 2026-10-20). Son endpoints de prueba sin autenticación propia en el código; si deben protegerse o retirarse es una decisión **PENDIENTE** (`functions/index.js:203`, `functions/index.js:457`).
+</Warning>
+
+## Tareas programadas (crons)
+
+Todas usan la zona horaria **Europe/Madrid**. El cron está en notación estándar salvo los que usan la sintaxis App Engine (`every ...`).
+
+| Función | Cron | Cuándo | Fuente |
+|---|---|---|---|
+| `scheduledActualizarFechaPlanDeAccionYPrimeraRespuesta` | `every 5 minutes` | SLA de tickets de Zendesk | `functions/reports/zendeskController.js:23` |
+| `scheduledHomeStatsMigration` | `every 2 hours` | Migra estadísticas de casa a Notion | `functions/nps/tickettonotion.js:710` |
+| `scheduleCleanSwapBooks` | `00 05 * * *` | Limpia reservas de intercambio | `functions/notifications/scheduledFunctions.js:141` |
+| `scheduleRemoveDemoBooks` | `30 5 * * *` | Borra reservas demo | `functions/dashboard/remove-demo-books.js:43` |
+| `scheduleSyncUserStatus` | `0 7 * * *` | Sincroniza estado de usuarios | `functions/dashboard/update-user-status.js:58` |
+| `scheduledCleanRentBooks` | `30 05 * * *` | Limpia reservas de alquiler | `functions/notifications/scheduledFunctions.js:219` |
+| `scheduleInitBookFlags` | `00 06 * * *` | Inicializa flags de reservas | `functions/notifications/scheduledFunctions.js:47` |
+| `scheduledBooksReport` | `0 7 * * 1` | Informe semanal de reservas (lunes) | `functions/reports/cxController.js:328` |
+| `scheduleOpenCloseCalendar` | `30 8 * * *` | Abre/cierra calendarios | `functions/notifications/scheduledFunctions.js:356` |
+| `scheduledNextStayNotifications` | `30 9 * * *` | Aviso de reservas próximas | `functions/index.js:228` |
+| `scheduledNotCompletedBooksProgressUpdate` | `45 9,15 * * *` | Calcula progreso de reservas (mañana completa checkouts, tarde activa check-ins) | `functions/reports/cxController.js:313` |
+| `scheduledIncommingBooks` | `30 11 * * *` | Reservas entrantes | `functions/notifications/scheduledFunctions.js:299` |
+| `scheduledPastBooks` | `0 12 * * *` | Reservas pasadas (1 día después) | `functions/notifications/scheduledFunctions.js:322` |
+| `scheduledLastStayDay` | `0 12 * * *` | Último día de estancia | `functions/notifications/scheduledFunctions.js:335` |
+| `scheduledPendingBooksNotifications` | `0 12 1 * *` | Reservas pendientes (día 1 de cada mes) | `functions/index.js:183` |
+| `scheduledSendNPSStartNotifications` | `30 9 15 9 *` | NPS de casa, inicio (15 sep) | `functions/index.js:482` |
+| `scheduledSendNPSEndNotifications` | `30 9 15 2 *` | NPS de casa, fin (15 feb) | `functions/index.js:501` |
+| `scheduleUpdateCalendar` | `0 0 1 1 *` | Actualiza calendarios (1 ene) | `functions/notifications/scheduledFunctions.js:346` |
+
+Programadas pero **inactivas** por el flag `stopSurveyNotifications` (migradas a vivla-tools): `scheduledInProgressStayNotifications` (`00 10 * * *`), `scheduledStayReview6h` (`00 16 * * *`), `scheduledStayReview24h` (`00 10 * * *`), `scheduledStayReview48h` (`00 10 * * *`) (`functions/index.js:274`, `functions/index.js:384`).

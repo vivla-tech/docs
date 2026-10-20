@@ -57,6 +57,6 @@ Las parejas (repo, proyecto Sentry) que Handy barre son **configuración, no có
 
 Reporter cubre **10 repos** por defecto (`src/config/reporter-targets.ts:44`), más allá de los dos objetivos de código, porque **solo lee** (nunca escribe): `vivla-tools`, `vivla-mobile-app`, `vivla-api`, `vivla-panel`, `vivla-cms`, `vivla-atlas`, `vivla-smurfs`, `vivla-concierge`, `micaela` y `vivla-intelligence`. Cada objetivo declara su rama de trabajo y su rama de producción (a menudo distintas); se sustituye con `REPORTER_TARGETS_JSON` sin redeploy.
 
-<Note>
-  Para `vivla-smurfs` y `vivla-concierge`, Reporter marca `prodBranch: develop` porque **`main` está congelada** y Railway despliega directamente desde `develop` (`src/config/reporter-targets.ts:52`). Coincide con lo que dice [Entornos](/environments).
-</Note>
+<Warning>
+  Reporter marca `prodBranch: develop` para `vivla-smurfs` y `vivla-concierge` (`src/config/reporter-targets.ts:52`). Para smurfs es correcto: se despliega `develop` con `railway up`. Para **concierge no lo es**: en Railway, producción despliega `main` y `develop` va a su propio entorno (verificado el 2026-10-20). Reporter cuenta como «en producción» cambios de concierge que todavía no lo están. Se corrige en el código o con `REPORTER_TARGETS_JSON`.
+</Warning>

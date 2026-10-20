@@ -1,0 +1,64 @@
+---
+title: "Verificación de deep links"
+description: "Archivos AASA (iOS) y assetlinks.json (Android), su reparto por dominio y la Pages Function que sirve el AASA dinámico."
+---
+
+Para que un enlace `vivla.app` abra la app directamente, el sistema operativo descarga un archivo de verificación de `/.well-known/`. Cada plataforma usa el suyo.
+
+## Dominios, entornos y binarios
+
+Cada dominio pertenece a un binario distinto de la app. Esta es la partición que usa tanto la Pages Function (`functions/_middleware.js:3`) como la landing (`public/index.html:259`):
+
+| Dominio | Entorno | App ID de iOS | Esquema de la app |
+|---|---|---|---|
+| `vivla.app` | Producción | `CWS9W34U5U.com.vivla.app` | `vivla` |
+| `staging.vivla.app` | Beta Prod | `CWS9W34U5U.com.vivla.booking.beta.prod` | `vivlabeta` |
+| `dev.vivla.app` | Development | `CWS9W34U5U.com.vivla.booking.beta` | `vivladev` |
+
+`CWS9W34U5U` es el Apple Team ID (identificador público del equipo de desarrollo, no un secreto) (`functions/_middleware.js:1`). El esquema es el prefijo con el que la app se reabre a sí misma; ver [Landing](/sistemas/vivla-app-site/landing).
+
+## iOS — apple-app-site-association (AASA)
+
+<Warning>
+  El archivo estático `public/.well-known/apple-app-site-association` **no es lo que se sirve**. La Pages Function intercepta esa ruta exacta y devuelve un AASA **generado por dominio** antes de llegar al archivo estático (`functions/_middleware.js:118`). El archivo estático queda como referencia.
+</Warning>
+
+La función construye el AASA según el `hostname` de la petición (`functions/_middleware.js:24`):
+
+- Devuelve solo el App ID que corresponde a ese dominio, con dos componentes: excluye `/.well-known/*` y hace match de todas las demás rutas (`*`) (`functions/_middleware.js:9`).
+- Añade `webcredentials` con el mismo App ID (para autocompletar credenciales).
+- Si el host es **desconocido**, devuelve **todos** los App IDs como fallback (`functions/_middleware.js:27`).
+
+Cabeceras de la respuesta: `Content-Type: application/json`, `Access-Control-Allow-Origin: *` y `Cache-Control: public, max-age=3600` (`functions/_middleware.js:33`).
+
+<Note>
+  iOS descarga el AASA al instalar y al actualizar la app, y lo cachea. Un cambio aquí no es inmediato en dispositivos ya instalados.
+</Note>
+
+## Android — assetlinks.json
+
+A diferencia del AASA, `assetlinks.json` **se sirve estático** (la función no lo intercepta). Es el mismo archivo en los tres dominios (`public/.well-known/assetlinks.json`).
+
+Declara la relación `delegate_permission/common.handle_all_urls` para el paquete **`com.vivla.app`** con dos huellas SHA-256 del certificado de firma (`public/.well-known/assetlinks.json:9`).
+
+<Note>
+  Las huellas SHA-256 del certificado de firma son **públicas por diseño**: `assetlinks.json` es un archivo público que Android descarga para verificar App Links. No son credenciales.
+</Note>
+
+<Warning>
+  `assetlinks.json` solo declara el paquete de producción `com.vivla.app`, **en los tres dominios**: así lo sirven hoy `vivla.app`, `dev.vivla.app` y `staging.vivla.app` (verificado el 2026-10-20). El AASA de iOS sí cambia por dominio (`com.vivla.booking.beta` en dev, `com.vivla.booking.beta.prod` en staging). Por tanto, los binarios Android no productivos (`com.vivla.booking.beta`, según `README.md:52`) no pasan la verificación automática de App Links. Falta decidir con el equipo mobile si es intencionado.
+</Warning>
+
+## Comprobar que se sirven bien
+
+Tras un deploy, verifica los archivos (`README.md:95`):
+
+```bash
+curl -I https://vivla.app/.well-known/apple-app-site-association
+curl https://vivla.app/.well-known/assetlinks.json
+```
+
+Herramientas de validación oficiales (`README.md:93`):
+
+- **Apple**: App Search Validation Tool (`search.developer.apple.com/appsearch-validation-tool/`).
+- **Android**: Digital Asset Links Validator de Google.

@@ -34,7 +34,7 @@ La lista completa, con su motor, modelo y estado, está en [Roster de pitufos](/
 |---|---|---|
 | Runtime | **Mastra** (`@mastra/core`): agentes + workflows + scheduler + servidor | `package.json`, `src/mastra/index.ts:113` |
 | Motor de código | **Claude Agent SDK** (`@mastra/claude` sobre `@anthropic-ai/claude-agent-sdk`), `permissionMode: 'bypassPermissions'` | `CLAUDE.md`, sección «Engines» |
-| LLM | **Claude** — opus (`claude-opus-4-8`) para código, haiku (`claude-haiku-4-5`) para texto barato | `src/config/models.ts:11` |
+| LLM | **Claude** — opus (`claude-opus-4-8`) para código, haiku (`claude-haiku-4-5`) para texto barato; algunos pitufos de texto usan `claude-opus-5`. Quién paga cada uno está en [Roster](/sistemas/vivla-smurfs/roster#modelos-y-facturación) | `src/config/models.ts:11` |
 | Estado durable | **LibSQL** (`@mastra/libsql`), un fichero en un volumen de Railway | `src/mastra/index.ts:209` |
 | Despliegue | **Railway**, imagen desde `Dockerfile` (Node 22 slim + `git` + `gh`) | `railway.json:4`, `Dockerfile:12` |
 | Node / gestor | Node **22.12.0**, pnpm **9.15.4**, ESM | `.nvmrc`, `package.json` |

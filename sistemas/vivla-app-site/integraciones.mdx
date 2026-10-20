@@ -1,0 +1,38 @@
+---
+title: "Integraciones"
+description: "A qué llama vivla-app-site, quién le llama y sus credenciales solo por nombre."
+---
+
+Este sitio no tiene backend propio ni base de datos. Sus "integraciones" son sobre todo **quién le llama** y las dependencias externas de la landing.
+
+## Quién le llama
+
+- **iOS y Android (el SO del dispositivo)**: descargan `/.well-known/apple-app-site-association` y `/.well-known/assetlinks.json` para habilitar Universal Links / App Links. Ver [Verificación de deep links](/sistemas/vivla-app-site/verificacion-deep-links).
+- **La app móvil (`vivla-mobile-app`)**: depende de que estos archivos listen sus App IDs y paquetes. Los esquemas y rutas de la landing están copiados de la app (`public/index.html:258`, `public/index.html:266`).
+- **Clientes que abren un enlace `vivla.app`** (navegadores, previsualizaciones de enlaces en WhatsApp, Slack, redes): reciben la landing con los meta tags reescritos por ruta.
+
+## A qué llama
+
+- **App Store**: enlace de descarga a `apps.apple.com/app/vivla/6448851807` (`public/index.html:213`). El mismo app-id está en el meta `apple-itunes-app` (`public/index.html:12`).
+- **Google Play**: enlace de descarga a `play.google.com/store/apps/details?id=com.vivla.app` (`public/index.html:219`).
+- **Google Fonts**: la landing carga la fuente Inter desde `fonts.googleapis.com` / `fonts.gstatic.com` (`public/index.html:32`).
+- **vivla.com**: enlace del pie (`public/index.html:236`).
+- **Esquema propio de la app** (`vivla://`, `vivlabeta://`, `vivladev://`): la landing intenta reabrir la app por su esquema; ver [Landing](/sistemas/vivla-app-site/landing).
+
+No hace llamadas a la API de Vivla ni a ningún servicio interno. La Pages Function solo lee el `hostname` y la ruta de la petición entrante.
+
+## Credenciales
+
+El código no usa variables de entorno ni secretos en tiempo de ejecución: la función solo inspecciona la petición. El `.gitignore` excluye `.dev.vars` (variables locales de wrangler), pero el repo no referencia ninguna (`.gitignore:3`).
+
+| Credencial (por nombre) | Para qué | Dónde |
+|---|---|---|
+| Token de API de Cloudflare / sesión `wrangler login` | Desplegar el proyecto de Pages (`wrangler pages deploy`) | Fuera del repo, en la cuenta de Cloudflare de VIVLA |
+
+<Warning>
+  El valor de la credencial de despliegue de Cloudflare **no vive en el código** y no debe commitearse. Quién la custodia es **PENDIENTE de confirmar** con el equipo mobile.
+</Warning>
+
+<Note>
+  El Apple Team ID (`CWS9W34U5U`), los bundle IDs y las huellas SHA-256 del certificado Android que aparecen en los archivos de verificación son **identificadores públicos por diseño**, no secretos: forman parte de archivos que el sistema operativo descarga públicamente.
+</Note>

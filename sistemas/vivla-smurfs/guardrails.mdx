@@ -15,7 +15,7 @@ Los guardrails viven en `src/config/guardrails.ts` y son **innegociables**: se h
     Tras terminar, el harness automático commitea, hace push de la rama, aplica etiquetas y abre el **PR en borrador** como el bot de la flota. El pitufo deja el árbol de trabajo sucio y resume lo hecho en su mensaje final (que se convierte en el cuerpo del PR) (`src/config/guardrails.ts:54`).
   </Step>
   <Step title="Solo PRs en borrador, solo contra develop">
-    La única rama que un pitufo puede apuntar con un PR es `develop` por defecto (`BASE_BRANCH`). La flota **nunca** mergea, nunca hace push a `main`, nunca despliega (`src/config/guardrails.ts:10`, `src/config/guardrails.ts:63`).
+    La única rama que un pitufo puede apuntar con un PR es `develop` por defecto (`BASE_BRANCH`). La flota **nunca** mergea, nunca hace push a `main`, nunca despliega (`src/config/guardrails.ts:10`, `src/config/guardrails.ts:63`). **Única excepción:** Scribe y el Documenter abren su PR del wiki en estado READY y lo squash-mergean en `docs` cuando pasa el *Wiki build check* (`src/mastra/tools/wiki-automerge.ts`). La primera sección de un repo nuevo espera revisión humana (`review_first` en `repos.yml`).
   </Step>
   <Step title="Superficies protegidas">
     Nunca se modifica `auth`, `payments`, `booking core`, `secrets` ni `migrations` — salvo que sea el trabajo explícito del pitufo (`PROTECTED_SURFACES`). Aun entonces solo se edita: el PR borrador lo revisa y mergea un humano (`src/config/guardrails.ts:32`).
@@ -54,6 +54,12 @@ En **modo token**, clonar/push van por HTTPS con el token embebido en la URL y `
 <Note>
   Un token de instalación de App **muere en una hora, y la URL `origin` del clon lo lleva dentro**. Por eso toda llamada git de red dentro de un clon existente pasa por `refreshOriginAuth(dir)` (`src/mastra/tools/repo.ts`), que re-estampa `origin` con un token fresco — `pushBranch` y `deepenToCommit` lo hacen. Es no-op en modo local/SSH. Saltárselo solo falla en runs de más de una hora (toda sesión de Brainy, ningún cron) (`CLAUDE.md`, sección «Hard guardrails»).
 </Note>
+
+### La App de GitHub en producción
+
+Producción usa el modo App: la App `vivla-smurfs-app`, instalada en la organización `vivla-tech` con acceso a repos seleccionados. Permisos: contenido y PRs con escritura, issues con escritura, Actions y metadatos con lectura. GitHub no permite permisos distintos por repo, así que cada repo añadido recibe los mismos.
+
+Repos con acceso (verificado el 2026-10-20): `booking-cloud-functions`, `docs`, `micaela`, `propcos`, `vivla-api`, `vivla-app-site`, `vivla-atlas`, `vivla-cms`, `vivla-concierge`, `vivla-intelligence`, `vivla-mobile-app`, `vivla-panel`, `vivla-smurfs`, `vivla-status` y `vivla-tools`. `bigquery-vivla` queda fuera a propósito, y por eso está en pausa en `repos.yml`.
 
 ## Claude Skills empaquetados
 

@@ -1,0 +1,126 @@
+---
+title: "El vault de conocimiento"
+description: "Layout de knowledge/: áreas, frontmatter, tiers, audiencias, verificación y las reglas de propiedad (property_ids / property_hids)."
+---
+
+El **vault** (`knowledge/`) es la fuente de verdad de Atlas: Markdown con frontmatter YAML, versionado en git, una carpeta por área. Todo lo demás (índice, caché, embeddings) es derivado y reconstruible desde aquí (`ARCHITECTURE.md`).
+
+## Layout
+
+```
+knowledge/
+  index.md                 ← índice navegable del vault
+  _templates/              ← plantillas (se ignoran al indexar)
+  general/                 ← área transversal "Vivla"
+  cx/                      ← atención al copropietario
+  operaciones/             ← Home Excellence / operaciones
+  experiencias/            ← servicios, concierge, recomendaciones
+  legal/                   ← copropiedad, fiscalidad, contratos
+  producto/                ← app, modelo, tech
+  growth/                  ← comercial
+  finanzas/                ← cuotas, derramas, pagos
+  recursos/                ← recursos transversales
+  casas/                   ← indicaciones de UNA casa (ligadas a propiedad)
+  zonas/                   ← indicaciones compartidas por una zona geográfica
+```
+
+Las áreas válidas están fijadas en el tipo `Area` (`apps/server/src/types.ts`) y espejadas en el sidebar del lector y en el esquema de contenido del sitio (`apps/site/astro.config.mjs`, `apps/site/src/content.config.ts`).
+
+<Note>
+  `casas/` y `zonas/` **no son áreas nuevas**: el `area:` de sus páginas sigue siendo `cx`, `operaciones`, etc. Son carpetas transversales para contenido ligado a un lugar (`knowledge/index.md`).
+</Note>
+
+### Cómo se indexa
+
+El cargador recorre el vault de forma recursiva e **ignora toda entrada que empiece por `_` o `.`** (plantillas, ocultos). Solo indexa ficheros `.md` con frontmatter válido (`title` y `area` presentes); el resto se salta (`apps/server/src/vault.ts`).
+
+Cada página se **trocea por apartados de segundo nivel (`##`)**: cada `##` es un *chunk*, que es la unidad de búsqueda y de cita. El `#` (H1) se ignora porque es el título. El `id` de un chunk es `` `${path}#${slug-del-heading}` `` (`apps/server/src/vault.ts`).
+
+<Warning>
+  Dos apartados de la misma página que slugifican igual (p.ej. «Wifi» y «WiFi») colisionan en el mismo `id` y **uno se pierde en silencio** en el índice (gana el último). El cargador avisa por log con el path y el heading exactos (`apps/server/src/vault.ts`, `apps/server/src/db.ts`).
+</Warning>
+
+## Frontmatter
+
+Convención declarada en el tipo `Frontmatter` (`apps/server/src/types.ts`) y en `knowledge/_templates/page.md`:
+
+```yaml
+title:            # título humano (requerido)
+area:             # general | cx | operaciones | experiencias | legal | producto | growth | finanzas | recursos (requerido)
+owner:            # responsable que aprueba cambios (sale en la cita)
+audience: []      # public | owner | guest | cx | ops | legal | interno  (filtro de retrieval)
+tier:             # 1 = respondible | 2 = minado | 3 = solo drift, nunca fuente
+lang:             # es | ca | fr | de | en
+property_ids: []  # opcional: casas a las que aplica (slugs, p.ej. casa-saona)
+property_hids: [] # opcional: mismas casas, hid canónico de vivla-tools (string, p.ej. "39692529")
+verified_by:      # quién verificó
+verified_at:      # YYYY-MM-DD
+verified_until:   # YYYY-MM-DD — si caduca, el dato deja de responderse
+status:           # draft | approved | stale
+tags: []
+source:           # procedencia del contenido (solo informativo)
+```
+
+<Tip>
+  `property_hids` es puramente numérico: si se escribe sin comillas, YAML lo parsea como número. El cargador lo coacciona a `string` para que el resto del pipeline (filtros, columna `TEXT[]` de Postgres) siempre vea texto (`apps/server/src/vault.ts`).
+</Tip>
+
+### Tier: qué se responde
+
+El `tier` decide si un chunk puede ser fuente de respuesta (`apps/server/src/types.ts`, `apps/server/src/search.ts`):
+
+| Tier | Significado | ¿Se responde? |
+|---|---|---|
+| **1** | Verdad respondible | **Sí** — único tier que la búsqueda devuelve como fuente |
+| **2** | Minado | No como fuente |
+| **3** | Solo drift (detección de contradicciones) | Nunca como fuente |
+
+La búsqueda **solo** devuelve chunks `tier = 1`. Los demás quedan fuera del resultado (`apps/server/src/search.ts`, `apps/server/src/db.ts`).
+
+### Audiencia: quién puede ver
+
+El consumidor declara su `audience` en la petición (por defecto `public`). Un chunk es visible si su `audience` **solapa** con `['public', audiencia-del-consumidor]`: lo público lo ve cualquiera, y además cada consumidor ve lo suyo (`apps/server/src/search.ts`, `apps/server/src/db.ts`).
+
+### Verificación: datos caducados
+
+El estado de verificación sale de `verified_until` (`apps/server/src/search.ts`):
+
+- Sin `verified_until` → `unverified` (se responde, marcado como no verificado).
+- `verified_until` hoy o futuro → `verified`.
+- `verified_until` pasado → `stale`: **el chunk no se devuelve**; el agente debe decir «te confirmo con el equipo».
+
+Toda cita lleva este estado (`status`) para que el consumidor sepa qué fiabilidad tiene (`apps/server/src/types.ts`).
+
+## Reglas de propiedad (property_ids / property_hids)
+
+El contenido ligado a una casa (carpeta `casas/`) lleva `property_ids` (slug, p.ej. `casa-saona`) y/o `property_hids` (hid canónico de vivla-tools, p.ej. `"39692529"`). Esto habilita un **aislamiento fail-closed entre casas**, porque ahí van cosas sensibles como códigos de cerradura (`apps/server/src/types.ts`, `knowledge/index.md`):
+
+<Steps>
+  <Step title="Chunk general (sin property)">
+    Si un chunk no tiene `property_ids` ni `property_hids`, es **general** y siempre es elegible (sujeto a tier/audiencia/verificación).
+  </Step>
+  <Step title="Petición con property">
+    Con `property` en la petición (acepta slug o hid), la búsqueda devuelve los chunks generales **más** los de esa casa concreta — nunca los de otra.
+  </Step>
+  <Step title="Petición sin property">
+    Sin `property`, solo salen los chunks generales. **Todo lo ligado a una casa queda inaccesible** hasta que se declara la propiedad.
+  </Step>
+</Steps>
+
+<Warning>
+  El aislamiento se aplica en la **capa SQL** (CTE `eligible` de `hybridCandidates`), no en memoria, para que no dependa de que el llamante lo respete. El fallback in-memory replica la misma semántica en `visibleToProperty` (`apps/server/src/db.ts`, `apps/server/src/search.ts`).
+</Warning>
+
+<Danger>
+  La tool MCP `obtener_documento` **no** aplica el filtro de propiedad: sirve un documento por `path` explícito. Es una decisión intencional asumida en el código — si alguien conoce o adivina el path de una casa, obtiene el documento sin segunda comprobación. El punto exacto donde filtrarlo, si deja de ser aceptable, está documentado en el propio código (`apps/server/src/mcp.ts`). Riesgo residual a vigilar.
+</Danger>
+
+Las páginas de `zonas/` **no** llevan `property_ids`/`property_hids`: se recuperan como cualquier doc general, por texto/área (`knowledge/index.md`).
+
+## Gobernanza
+
+El veto por área es a **nivel git**: `CODEOWNERS` marca un responsable por subárbol de `knowledge/`, approver obligatorio de los cambios a su área (con protección de rama). El editor de `vivla-tools` traduce esto a una UI de solicitud → aprobación para que el no-técnico no toque git (`CODEOWNERS`, `ARCHITECTURE.md`).
+
+<Warning>
+  Los handles de `CODEOWNERS` son **placeholders**: hoy todo apunta a un único handle. La asignación real de responsables por área es **PENDIENTE de confirmar** con el equipo (`CODEOWNERS` lo dice explícitamente).
+</Warning>
