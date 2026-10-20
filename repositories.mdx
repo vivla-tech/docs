@@ -11,7 +11,9 @@ Inventario de los repositorios de VIVLA que están en producción, agrupados por
   **Cómo se documenta cada repo.** Hay dos modelos:
 
   - **Subrepo:** el repo tiene su carpeta `docs/wiki` con su `docs.json`. El workflow `aggregate.yml` de este repo la copia a la wiki.
-  - **Agente:** un agente de `vivla-smurfs` lee el código cada día y escribe las páginas directamente en este repo.
+  - **Agente:** un agente de `vivla-smurfs` lee el código de la rama de producción cada día y escribe las páginas directamente en este repo. Sus PRs se mergean solos cuando pasa el build de la wiki.
+
+  La lista de repos y su modelo está en `repos.yml`, en la raíz del repo de la wiki.
 
   Los repos marcados «Sin documentar» se cubren en la fase 3 del plan de cobertura.
 </Note>
