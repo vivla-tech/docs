@@ -1,23 +1,43 @@
 ---
 title: "Entornos"
-description: "Ambientes de desarrollo, staging y producción"
+description: "Entornos de desarrollo, staging y producción de cada sistema, con sus ramas y URLs"
 ---
 
-## Ambientes
+## Ramas y entornos por sistema
 
-| Ambiente | Backend | Docs |
-|----------|---------|------|
-| Development | Local (`localhost:3000`) | `mint dev` |
-| Staging | Railway (preview) | - |
-| Production | Railway (main) | `wiki.vivla.com` |
+Cada repo tiene su propio flujo de ramas. Esta tabla muestra qué rama alimenta cada entorno.
+
+| Sistema | Desarrollo / staging | Producción |
+|---|---|---|
+| **vivla-api** | `stage` → Railway `staging` | `master` → Railway `production` |
+| **Tools API** (vivla-tools) | `develop` → Railway `develop` (`api.tools.vivla.dev`) | `main` → Railway `production` (`api.tools.vivla.com`) |
+| **Frontend de Tools** | `develop` → Vercel (entorno `develop`) | `main` → Vercel producción (`tools.vivla.com`) |
+| **App de propietarios** | `develop` → builds de preview (EAS) | `main` → App Store y Google Play (EAS) |
+| **Panel CX** | `staging` → Vercel staging | `main` → Vercel producción |
+| **vivla-concierge** | `develop` → Railway `develop` | `main` → Railway `production` (`concierge.vivla.com`) |
+| **vivla-atlas** | — | `railway up` manual → `atlas-server` (`mcp.atlas.vivla.com`) |
+| **vivla-smurfs** | — | `railway up` manual desde `develop` → servicio `smurfs` |
+| **vivla-app-site** | `staging.vivla.app`, `dev.vivla.app` | `vivla.app` (Cloudflare Pages) |
+| **Wiki** (docs) | `wiki-next.vivla.com` (Worker `vivla-wiki-staging`) | `wiki.vivla.com` (Worker `vivla-wiki`) |
+
+<Note>
+  En vivla-api, `develop` es la rama de integración y **no** se despliega. Lo que corre en producción es `master`. La documentación de la pestaña [Vivla API](/backend/index) describe `master`.
+</Note>
+
+## Desarrollo local
+
+Cada repo explica cómo arrancarlo en local en su propia documentación:
+
+- [Tools — Getting started](/tools/index)
+- [App — Getting started](/mobile/getting-started)
+- [Panel — Inicio rápido](/panel/quick-start)
+
+Para la wiki, `site/` tiene el sitio (Astro Starlight) y `worker/` el Worker. El `README.md` del repo `docs` explica cómo verla en local.
 
 ## Variables de entorno
 
-Cada repo mantiene sus propias variables de entorno. Consultar la documentación específica:
-
-- [Backend — Getting started](/backend/getting-started)
-- [Mobile — Getting started](/mobile/getting-started)
+Cada repo mantiene sus propias variables de entorno: Railway, Vercel, Cloudflare o EAS según dónde corre. Consulta la documentación de cada sistema.
 
 <Warning>
-  Nunca commitear archivos `.env` ni credenciales en ningún repositorio.
+  No hagas commit de archivos `.env` ni de credenciales en ningún repositorio. Usa `.env.example` para documentar qué variables hacen falta.
 </Warning>

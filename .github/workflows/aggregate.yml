@@ -7,6 +7,20 @@ on:
   workflow_dispatch:
   repository_dispatch:
     types: [aggregate]
+  # Safety net for subrepos without a dispatch step (vivla-panel) and for
+  # missed dispatches. GitHub cron is UTC and best effort: every 2 h from
+  # 04:00 to 18:00 UTC on weekdays (06–20 Madrid in summer, 05–19 in winter),
+  # once a day at 07:00 UTC on weekends.
+  schedule:
+    - cron: "0 4-18/2 * * 1-5"
+    - cron: "0 7 * * 0,6"
+
+# One aggregate at a time: two runs that push the `docs` branch at once would
+# race. A newer trigger waits; GitHub keeps only the latest pending run, which
+# is fine because every run aggregates the current state of all subrepos.
+concurrency:
+  group: aggregate-docs
+  cancel-in-progress: false
 
 jobs:
   aggregate:
