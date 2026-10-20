@@ -1,0 +1,59 @@
+---
+title: "Tareas y monitorización"
+description: "Colas BullMQ y workers de PropCos, el único cron (índice nocturno de Drive), y la monitorización con Sentry."
+---
+
+PropCos no es solo HTTP: al arrancar, `app/server.ts` importa cinco **workers BullMQ**, lo que instancia sus singletons y los pone a escuchar en Redis (`app/server.ts:9`). No hay un proceso de worker aparte: corren en el mismo servicio que la app.
+
+## Colas y workers (BullMQ sobre Redis)
+
+| Cola | Qué hace | Disparo | Concurrencia |
+|---|---|---|---|
+| `invoice-payments` | Ejecuta el pago de una factura llamando a cashflow/Qonto (`POST {BANK_API_URL}/payments/invoice`, timeout 15 s) | Al confirmar un pago desde el dashboard | 1 (`app/server/queue/payment.worker.ts:134`) |
+| `invoice-ocr` | OCR de facturas con Gemini para extraer y auto-emparejar datos | Al subir una factura | `WORKER_CONCURRENCY` (`app/server/queue/invoice-ocr.worker.ts:180`) |
+| `deed-ocr` | OCR de escrituras/documentos de propiedad con Gemini | Al subir una escritura | `WORKER_CONCURRENCY` (`app/server/queue/deed-ocr.worker.ts:270`) |
+| `drive-index` | Indexa la carpeta «VIVLA CORE/BY HOME» de Google Drive (solo cuentas) | Cron nocturno + ejecución manual | 1 (`app/server/queue/drive-index.worker.ts:17`) |
+| `tools-webhook` | Envía el webhook a Vivla Tools cuando cambian propietarios o lotes (debounce 30 s, 5 reintentos con backoff) | Cambios de propiedad | 2 (`app/server/queue/tools-webhook.worker.ts:19`) |
+
+La conexión a Redis sale de `REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD` (`app/server/queue/redis.config.ts:5`).
+
+<Warning>
+  `WORKER_CONCURRENCY` para los workers de OCR no aparece documentada con su valor por defecto en `.env.example`: el valor efectivo en producción es **PENDIENTE de confirmar**.
+</Warning>
+
+## Tareas programadas (crons)
+
+El **único** cron del repo es el índice nocturno de Drive. Se registra con `upsertJobScheduler` (idempotente, cada instancia lo puede registrar al boot) y corre a las **05:30 hora de Madrid** (`Europe/Madrid`), solo si Google Drive está configurado (`app/server/queue/drive-index.worker.ts:24`):
+
+```
+pattern: "30 5 * * *"   tz: Europe/Madrid   data: { execute: true }
+```
+
+El índice también se puede lanzar a mano por `POST /api/internal/drive-index/run` y consultar su estado por `GET /api/internal/drive-index/run?jobId=` (ambos devuelven **solo conteos**, nunca nombres de casa ni de propietario) (`app/routes/api/internal/drive-index/run.ts:12`, `app/server/queue/drive-index.worker.ts:9`).
+
+<Note>
+  Los crons de conciliación bancaria y de Stripe **no viven en PropCos**: viven en el microservicio **vivla-cashflow**, que luego avisa a PropCos por `POST /api/webhooks/sync-completed` (`app/routes/api/webhooks/sync-completed.ts:36`). Sus horarios son **PENDIENTE de confirmar** en la documentación de cashflow.
+</Note>
+
+## Monitorización
+
+### Sentry
+
+El arranque de Sentry (`@sentry/node`) es lo primero que carga el servidor, para capturar errores desde el inicio (`app/server.ts:3`, `app/server/instrument.ts:1`). Solo reporta cuando hay DSN **y** `NODE_ENV=production`: en local y en tests no envía nada aunque haya DSN (`app/server/instrument.ts:9`).
+
+- **Proyecto:** org `vivla-lifestyle`, proyecto `propcos` (`.env.example`, `SENTRY_ORG`/`SENTRY_PROJECT`).
+- **Release:** `propcos@<RAILWAY_GIT_COMMIT_SHA>`; `environment` sale de `RAILWAY_ENVIRONMENT_NAME` (por defecto `production`) (`app/server/instrument.ts:11`).
+- **Source maps:** `scripts/sentry-sourcemaps.mjs` los sube en el build con `SENTRY_AUTH_TOKEN`; sin token no hace nada (`scripts/sentry-sourcemaps.mjs:14`).
+- **PII:** `sendDefaultPii: false` y un `beforeSend` que descarta errores esperados y limpia el evento (`shared/utils/sentry-scrub`). Los datos de los jobs no se adjuntan a los errores porque pueden contener datos personales (`app/server.ts:30`).
+- **Rejections:** integración `onUnhandledRejection` en modo `strict`: reporta y deja caer el proceso para que Railway lo reinicie (`app/server/instrument.ts:16`).
+- Los fallos de un job solo se reportan cuando **agota sus reintentos**, con la cola y el id del job como contexto (`app/server.ts:30`).
+
+El cliente de navegador también lleva Sentry (`@sentry/react`, `app/client/utils/sentry.ts`), con su propio `VITE_SENTRY_DSN`.
+
+### Notificación de deploys
+
+Cada deploy terminado en Railway se publica en Slack **#deploy-notifications** (éxito o fallo), con enlaces a PropCos, a la release de Sentry y a Railway (`.github/scripts/deploy-notify.sh:63`). Detalle en [Despliegue](/sistemas/propcos/despliegue).
+
+<Warning>
+  **No hay endpoint de health/readiness en el código** (`app/routes/api/` no define `/health` ni similar). La sonda de estado que use Railway/Cloudflare y las alertas de Sentry (a quién avisan, por qué canal) son **PENDIENTE de confirmar** con el equipo proveedor.
+</Warning>

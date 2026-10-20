@@ -1,0 +1,87 @@
+---
+title: "PropCos"
+description: "Dashboard financiero y legal de las PropCos de Vivla. Qué es, quién lo usa, su stack y cómo encaja con Tools y cashflow. Lo construye y lo opera un proveedor externo."
+---
+
+**PropCos** (repo `propcos`, interno `vivla-finance-dashboard`) es el panel financiero y legal de las **PropCos** de Vivla: las sociedades propietarias de cada casa. Gestiona propiedades, fracciones, propietarios, presupuestos, gastos, ingresos por alquiler, cuotas y los informes anuales de cada propietario (`README.md:1`, `app/server/swagger/index.ts:14`).
+
+Es una aplicación **TanStack Start** (React 19 + Nitro) con backend propio sobre **PostgreSQL** y colas en **Redis/BullMQ**. Lo construye y lo opera un **proveedor externo** (Digio, autor en `package.json:10`); Vivla lo consume y lo tiene desplegado en su propia infraestructura (Railway).
+
+<Info>
+  Propietario: equipo **proveedor-externo**. Clase: **service**. La fuente de verdad de esta sección es el código de la rama de producción. El clon se nos entrega en `main`; la producción corre la rama `master` (ver [Despliegue](/sistemas/propcos/despliegue)). Para la vista desde Tools, mira [PropCos en Tools](/tools/platform/propcos); para su lugar en el mapa, [Repositorios](/repositories) y [Entornos](/environments).
+</Info>
+
+## Qué es y quién lo usa
+
+PropCos es la fuente de verdad de los datos **societarios y financieros** de cada casa compartida: quién es propietario de qué fracción, qué gastos e ingresos tiene la casa, y qué cuota le corresponde a cada propietario. A partir de ahí genera los **informes anuales** que recibe el propietario.
+
+<CardGroup cols={2}>
+  <Card title="Equipo de finanzas y legal de Vivla" icon="building-columns">
+    Opera el dashboard web: propiedades, propietarios, fracciones, presupuestos, gastos, cuotas, facturas e informes anuales (`app/routes/dashboard/`).
+  </Card>
+  <Card title="Vivla Tools" icon="plug">
+    Lee en vivo clientes y propiedades de PropCos y sincroniza propietarios y lotes vía los endpoints `/api/internal/*` y un webhook (`app/server/swagger/index.ts:96`).
+  </Card>
+  <Card title="vivla-cashflow" icon="building-columns">
+    Microservicio bancario: PropCos le pide movimientos, pagos de Stripe y la ejecución de pagos a proveedores por Qonto, y recibe de él sincronizaciones de ledger (`app/server/cashflow/cashflow.service.ts:32`).
+  </Card>
+  <Card title="Propietarios (indirecto)" icon="user">
+    No entran a PropCos; reciben sus informes anuales a través de los productos de propietario de Vivla.
+  </Card>
+</CardGroup>
+
+<Warning>
+  El reparto exacto de permisos y qué roles humanos entran al dashboard **no viven en el código** (el código no implementa su propia autenticación de usuarios; el acceso humano va por Cloudflare Access, ver [Despliegue](/sistemas/propcos/despliegue)). **PENDIENTE de confirmar** con el equipo proveedor y con Vivla.
+</Warning>
+
+## Stack
+
+| Pieza | Elección |
+|---|---|
+| Framework | **TanStack Start** (React 19, TanStack Router/Query) servido por **Nitro** (`package.json:28`, `README.md:7`) |
+| Backend | Funciones de servidor y rutas `app/routes/api/**` dentro de la misma app (`app/server.ts:1`) |
+| Base de datos | **PostgreSQL** con **Drizzle ORM**; migraciones con `drizzle-kit` (`package.json`, `drizzle.config.ts`) |
+| Colas | **BullMQ** sobre **Redis** (OCR de facturas y escrituras, pagos, índice de Drive, webhook a Tools) (`app/server/queue/`) |
+| Ficheros | Almacenamiento **S3**-compatible vía `@aws-sdk/client-s3` (RustFS en local) (`app/server/files/storage/storage.config.ts:1`) |
+| OCR / IA | **Google Gemini** (`gemini-2.5-flash` por defecto) para leer facturas y escrituras (`app/server/ai/ai.config.ts:6`) |
+| Observabilidad | **Sentry** (`@sentry/node` + `@sentry/react`), solo en builds de producción (`app/server/instrument.ts:7`) |
+| Lint / formato | **Biome**; tests con **Jest** + SWC; gestor **pnpm**, Node ≥ 22 (`package.json`) |
+
+## Estructura del repo
+
+```
+app/
+  routes/           rutas TanStack (dashboard/ web, api/** backend, api/internal/** máquina a máquina)
+  server/           lógica de servidor por dominio
+    cashflow/       cliente del microservicio vivla-cashflow (banco, Stripe, pagos)
+    payments/       pagos de facturas (encola a la cola de pagos → Qonto vía cashflow)
+    queue/          colas y workers BullMQ + config de Redis
+    drive/          índice de solo lectura de «VIVLA CORE/BY HOME» en Google Drive
+    ai/             OCR de facturas y escrituras con Gemini
+    sync/, tools/, tools-webhook/   integración con Vivla Tools
+    quotas/, financial-reports/, reports/   cuotas, ledger e informes
+    database/       esquema Drizzle, conexión y seeds
+    instrument.ts   arranque de Sentry
+  shared/           modelos, tipos y utilidades compartidos cliente/servidor
+db/                 migraciones SQL generadas por drizzle-kit
+devops/staging/     Job de Kubernetes de migraciones (pipeline del proveedor)
+```
+
+(verificado contra el árbol de `app/` y `app/server/`)
+
+## Dónde seguir
+
+<CardGroup cols={2}>
+  <Card title="Despliegue y entornos" icon="server" href="/sistemas/propcos/despliegue">
+    Hosting (Railway), URLs, rama de producción, cómo se despliega y cómo se vuelve atrás.
+  </Card>
+  <Card title="Integraciones" icon="plug" href="/sistemas/propcos/integraciones">
+    cashflow/Qonto, Vivla Tools, Google Drive, Gemini, S3 y credenciales por nombre.
+  </Card>
+  <Card title="Tareas y monitorización" icon="gauge" href="/sistemas/propcos/tareas-y-monitorizacion">
+    Colas BullMQ, el cron nocturno de Drive y Sentry.
+  </Card>
+  <Card title="Runbook" icon="life-ring" href="/sistemas/propcos/runbook">
+    Equipo responsable y fallos más comunes con su causa y arreglo.
+  </Card>
+</CardGroup>

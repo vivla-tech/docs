@@ -1,0 +1,72 @@
+---
+title: "Integraciones"
+description: "A qué llama PropCos (cashflow/Qonto, Google Drive, Gemini, S3), quién le llama (Vivla Tools, cashflow) y sus credenciales, solo por nombre."
+---
+
+PropCos integra con varios servicios de Vivla y de terceros. Todas las credenciales se nombran **solo por su variable de entorno**; sus valores viven en Railway/los dashboards, nunca en la wiki. La plantilla de variables es `.env.example`.
+
+## A qué llama PropCos (salientes)
+
+### vivla-cashflow (banco y pagos Qonto)
+
+El cliente `CashflowService` habla con el microservicio **vivla-cashflow** para leer movimientos bancarios, pagos de Stripe y resúmenes, usando `BANK_API_URL` y autenticando con `BANK_API_KEY` en la cabecera `X-Qonto-Staging-Token` (`app/server/cashflow/cashflow.service.ts:32`, `:56`). Si falta `BANK_API_URL` el servicio lanza un error al construirse; si falta `BANK_API_KEY` solo avisa (`app/server/cashflow/cashflow.service.ts:42`).
+
+La **ejecución de pagos a proveedores** se encola en BullMQ y el worker hace `POST {BANK_API_URL}/payments/invoice` (mismo token), con un timeout de 15 s; cashflow ejecuta la transferencia por **Qonto** y devuelve `transferId`/`beneficiaryId` (`app/server/queue/payment.worker.ts:49`, `:52`).
+
+### Google Drive — índice «VIVLA CORE/BY HOME»
+
+Cliente de **solo lectura** (`drive.readonly`) que indexa la carpeta BY HOME de Google Drive. Habla directamente con la API REST de Drive y firma el JWT de la cuenta de servicio con `node:crypto` (sin `googleapis`) (`app/server/drive/google-drive.client.ts:36`). Variables:
+
+- `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON` — JSON de la cuenta de servicio (`client_email` + `private_key`).
+- `GOOGLE_DRIVE_BY_HOME_FOLDER_ID` — carpeta raíz a indexar.
+- `GOOGLE_DRIVE_IMPERSONATE` — usuario `@vivla.com` que la cuenta impersona por delegación de dominio.
+
+Sin la cuenta o sin el folder id, la integración queda **deshabilitada** y nunca llama a Google (`app/server/drive/google-drive.client.ts:36`, `app/.env.example`).
+
+### Google Gemini (OCR)
+
+OCR de facturas y de escrituras (deeds) con **Gemini** vía el AI SDK de Google. Modelo `gemini-2.5-flash` por defecto, configurable con `GEMINI_MODEL`; clave en `GOOGLE_GENERATIVE_AI_API_KEY` (`app/server/ai/ai.config.ts:6`, `@ai-sdk/google` en `package.json`).
+
+### Almacenamiento S3
+
+Ficheros (adjuntos, documentos de propiedad) en un bucket **S3**-compatible mediante `@aws-sdk/client-s3` y URLs prefirmadas. En local es RustFS. Variables: `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET_NAME`, `S3_ENDPOINT` (`app/server/files/storage/storage.config.ts:6`).
+
+### Webhook a Vivla Tools
+
+Cuando cambian propietarios o lotes, PropCos encola un webhook (debounce de 30 s por propiedad) a `POST {TOOLS_API_URL}/owners/sync-from-propcos/webhook` con la cabecera `x-api-key: TOOLS_API_KEY`. Null (apagado) si falta cualquiera de las dos variables (`app/server/tools-webhook/tools-webhook.ts:19`, `:50`).
+
+## Quién llama a PropCos (entrantes)
+
+### Vivla Tools — lectura en vivo y sincronización
+
+Tools consume dos familias de endpoints bajo `/api/internal/*` (ver [PropCos en Tools](/tools/platform/propcos)):
+
+- **Internal Tools** (`/api/internal/tools/**`): lectura en vivo de clientes y propiedades por ids de Tools, con el write-back del id (`app/server/swagger/index.ts:96`, `app/routes/api/internal/tools/`).
+- **Internal Sync** (`/api/internal/sync/**`): export keyset de solo lectura de las tablas finance, página a página con cursor opaco, incluidas las filas con soft-delete (`app/server/sync/sync.swagger.ts:211`, `app/routes/api/internal/sync/finance.ts`).
+
+### vivla-cashflow — sincronización de ledger y webhook
+
+- `POST /api/internal/ledger/sync`: cashflow dispara acciones de ledger (`sync-fee-income`, `backfill-year`, `backfill-rental-incomes`, `backfill-all-years`, `generate-yearly-balances`) (`app/routes/api/internal/ledger/sync.ts:12`).
+- `POST /api/webhooks/sync-completed`: cashflow avisa de que su pipeline de conciliación terminó. Hoy el handler **solo registra** el evento; el procesamiento de owner-fee-incomes se migró al propio cashflow (`app/routes/api/webhooks/sync-completed.ts:36`).
+
+## Autenticación de los endpoints internos
+
+Todas las rutas `/api/internal/*` exigen la cabecera `x-internal-api-key` igual a `DASHBOARD_INTERNAL_API_KEY`. Comparación en tiempo constante (SHA-256 + `timingSafeEqual`) y **fail-closed**: si la variable está vacía o falta, se rechaza toda petición con 401 (`app/server/utils/internal-auth.ts:11`). Además, el servicio está detrás de Cloudflare Access (`app/server/sync/sync.swagger.ts:25`).
+
+## Credenciales (solo por nombre)
+
+| Variable | Para qué |
+|---|---|
+| `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT` | Conexión a PostgreSQL |
+| `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` | Redis / BullMQ (`app/server/queue/redis.config.ts:5`) |
+| `BANK_API_URL`, `BANK_API_KEY` | Microservicio vivla-cashflow (cabecera `X-Qonto-Staging-Token`) |
+| `DASHBOARD_INTERNAL_API_KEY` | Clave compartida de `/api/internal/*` (cabecera `x-internal-api-key`) |
+| `TOOLS_API_URL`, `TOOLS_API_KEY` | Webhook saliente a Vivla Tools (cabecera `x-api-key`) |
+| `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON`, `GOOGLE_DRIVE_BY_HOME_FOLDER_ID`, `GOOGLE_DRIVE_IMPERSONATE` | Índice de Google Drive |
+| `GOOGLE_GENERATIVE_AI_API_KEY`, `GEMINI_MODEL` | OCR con Gemini |
+| `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `S3_BUCKET_NAME`, `S3_ENDPOINT` | Almacenamiento S3 |
+| `SENTRY_DSN`, `VITE_SENTRY_DSN`, `SENTRY_ORG`, `SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN` | Sentry (ver [Tareas y monitorización](/sistemas/propcos/tareas-y-monitorizacion)) |
+
+<Danger>
+  Hay un secreto commiteado en `.env.example`.
+</Danger>

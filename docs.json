@@ -172,6 +172,16 @@
               "sistemas/vivla-concierge/integraciones",
               "sistemas/vivla-concierge/runbook"
             ]
+          },
+          {
+            "group": "PropCos",
+            "pages": [
+              "sistemas/propcos/index",
+              "sistemas/propcos/despliegue",
+              "sistemas/propcos/integraciones",
+              "sistemas/propcos/runbook",
+              "sistemas/propcos/tareas-y-monitorizacion"
+            ]
           }
         ]
       }
