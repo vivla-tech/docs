@@ -1,0 +1,74 @@
+---
+title: "Despliegue y operación"
+description: "Dónde corre Micaela en Railway, sus servicios y URLs, la rama de producción, cómo se construye, cómo se despliega y cómo se vuelve atrás."
+---
+
+## Dónde corre
+
+Micaela corre en **Railway**, todos los servicios dentro de un único proyecto (**VIVLA-Micaela**), contra el **mismo Postgres** (`CLAUDE.md` «Deploy targets», `docs/monitoring.md`). El `railway.json` de la raíz aplica a todos los servicios; un dispatcher elige qué arrancar según `RAILWAY_SERVICE_NAME` (`railway.json`, `scripts/railway-start.sh`).
+
+### Superficies desplegadas
+
+| Servicio | Qué es | URL |
+|---|---|---|
+| `web` | Dashboard Next.js para RevOps | `micaela.vivla.ai` |
+| `mcp` | Servidor MCP (Custom Connector de Claude) | `mcp.micaela.vivla.ai` (dominio propio en Railway) |
+| `ingest` (muchos servicios) | Workers + crons de sincronización | — (sin HTTP) |
+
+<Note>
+  Verificado en Railway y Cloudflare el 2026-10-20:
+  - Proyecto Railway **VIVLA-Micaela**, entorno `production`: 37 servicios de la app (más Postgres), todos conectados al repo `vivla-tech/micaela`, rama `master`. Un push a `master` despliega solo.
+  - `web` → `micaela.vivla.ai`, con el proxy de Cloudflare activo y sin Cloudflare Access: la propia app pide el login.
+  - `mcp` → `mcp.micaela.vivla.ai`, DNS directo a Railway (sin proxy ni Access): lo protege solo la autenticación del servidor MCP.
+  - Healthcheck de Railway: `/api/health/live` en todos los servicios (`railway.json`). Las dos superficies responden también en `/api/health/ready` (web) y `/health/ready` (mcp).
+  - El proyecto tiene además un entorno `native` con los ingests del repo `micaela-native`.
+</Note>
+
+### Entornos
+
+| Entorno | Rama | Dónde |
+|---|---|---|
+| Producción | `master` | Railway (proyecto VIVLA-Micaela) |
+| Desarrollo local | — | Máquina local, **apuntando a la BD de PRODUCCIÓN** |
+
+<Danger>
+  **No hay base de datos de desarrollo.** `.env.local` lleva la URL de proxy de la base real (`CLAUDE.md` «Running locally»). Abrir páginas solo lee, pero **pulsar un botón que guarda escribe datos reales** en las tablas del negocio. Ningún agente debe pulsar Guardar en una verificación local; la prueba de escritura la hace una persona, deliberadamente. Hubo un incidente (2026-07-27) con 15 filas escritas en `sales_targets` por una verificación automática.
+</Danger>
+
+No hay evidencia en el repo de un entorno de **staging** desplegado. El valor `staging` aparece solo como entorno de Sentry para la prueba de humo (`scripts/sentry-smoke.ts`), no como un despliegue propio.
+
+## Cómo se construye
+
+El build también se despacha por `RAILWAY_SERVICE_NAME` (`scripts/railway-build.sh`):
+
+- Solo `web` corre `next build` (`pnpm --filter @micaela/web build`). Antes limpia `apps/web/.next/cache/*` porque una caché persistente de BuildKit llegó a servir código rancio (2026-05-21).
+- Todo lo demás (`mcp` + los crons de `ingest`) **no compila**: corre con `tsx` en runtime, así que saltarse el build evita que un error de la web tumbe el build de todos los servicios a la vez.
+
+El `buildCommand` del proyecto es `corepack enable && pnpm install --frozen-lockfile && bash scripts/railway-build.sh` con builder **NIXPACKS** (`railway.json:3`).
+
+## Cómo se despliega
+
+Railway despliega solo al hacer **push/merge a `master`**: los servicios están conectados al repo y el código se despliega al mergear (`CLAUDE.md` — «el código se despliega solo al mergear»). Mergear a `master` es, por tanto, desplegar.
+
+CI corre aparte en GitHub Actions y **no despliega** (`.github/workflows/ci.yml`):
+
+- Job `ci`: `pnpm typecheck` + `pnpm lint` + `pnpm test` en cada push a `master` y en cada PR.
+- Job `build-web`: reproduce `next build` porque es la única puerta que valida rutas tipadas y prerender RSC (cosas que `tsc --noEmit` no ve). Usa valores dummy de entorno: postgres-js conecta de forma perezosa, así que el build llega a exit 0 sin BD real.
+
+<Warning>
+  **Railway no corre migraciones en el deploy.** Las migraciones de base de datos se aplican **a mano y ANTES de mergear** (el código lee la columna nueva en cuanto despliega). Además `drizzle-kit migrate` no funciona contra prod por desincronización del bookkeeping; la receta manual está en `CLAUDE.md` «Common gotchas». Ver también el [runbook](/sistemas/micaela/runbook).
+</Warning>
+
+### Cambios en MCP
+
+Cambiar `apps/mcp/src/tools/*.ts` o cualquier cosa que exponga `@micaela/queries` exige **redeploy del servicio `mcp`** en Railway para que Claude.ai lo vea; poner variables de entorno sin redeploy no basta (`CLAUDE.md`).
+
+## Cómo se vuelve atrás
+
+- **Reinicio automático ante fallo:** `restartPolicyType: ON_FAILURE` con hasta **3 reintentos**; healthcheck en `/api/health/live` con timeout de 300 s (`railway.json:7`).
+- **Apagar la emisión a Sentry (rollback de la instrumentación):** borrar la variable `SENTRY_DSN` del servicio deja `initSentry` como un no-op total; apaga la emisión entera **sin desplegar nada** (`packages/ingest/src/ops/sentry.ts:50`).
+- **Frenar un cron de escritura:** quitarle la `cronSchedule` NO es seguro — un servicio de Railway sin schedule arranca, termina y Railway lo **reinicia en bucle**; en los workers con `--escribir-de-verdad` (p. ej. `hubspot-scores-push`, `hubspot-top-pages-push`) eso son escrituras reales a HubSpot cada pocos segundos (`scripts/railway-start.sh`). Para parar uno de esos, pausarlo en Railway, no dejarlo sin schedule.
+
+<Note>
+  Railway conserva los despliegues anteriores de cada servicio: desde su historial se puede volver a desplegar uno previo. Como cada push a `master` despliega, revertir el commit en `master` también vuelve atrás. Si el cambio llevaba una migración ya aplicada a mano, revisa el [runbook](/sistemas/micaela/runbook) antes.
+</Note>

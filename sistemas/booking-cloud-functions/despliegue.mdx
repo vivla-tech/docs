@@ -1,0 +1,88 @@
+---
+title: "Despliegue y operación"
+description: "Cómo se despliega booking-cloud-functions a Firebase, cómo se vuelve atrás, entornos y monitorización."
+---
+
+## Entornos
+
+El repo apunta a un único proyecto de Firebase, **`vivla-app`**, como `default` (`.firebaserc:3`). En el código **no hay** un proyecto separado de staging ni alias adicionales.
+
+| Entorno | Proyecto / rama | Fuente |
+|---|---|---|
+| Producción | Firebase `vivla-app`, rama `main` | `.firebaserc:3`, repos.yml |
+| Local (emulador) | Emulador de Functions + Firestore (puerto 8080) | `firebase.json:14` |
+
+<Info>
+  `vivla-app` es **producción**. Existe un proyecto Firebase aparte, **VIVLA Staging** (`vivla-staging`), pero no tiene ninguna función desplegada y este repo no lo referencia: estas funciones solo corren en producción (verificado el 2026-10-20).
+</Info>
+
+## Cómo se despliega
+
+El despliegue es con la **Firebase CLI**. Los scripts de npm están en `functions/package.json:4`:
+
+<Steps>
+  <Step title="Lint (predeploy)">
+    `firebase.json` define un `predeploy` que ejecuta `npm --prefix functions run lint` (ESLint) antes de subir. Si el lint falla, no se despliega (`firebase.json:11`).
+  </Step>
+  <Step title="Deploy">
+    ```bash
+    cd functions && npm run deploy
+    # equivale a: firebase deploy --only functions
+    ```
+    Despliega todas las funciones al proyecto `default` (`vivla-app`) (`functions/package.json:8`).
+  </Step>
+</Steps>
+
+<Note>
+  No hay workflow de CI/CD en el repo (`.github/` no existe). El despliegue es manual con la Firebase CLI autenticada. De las 140 funciones activas, 104 llevan la etiqueta de despliegue `cli-firebase` y 36 son de **Firebase Extensions** (exportación de Firestore a BigQuery, `ext-firestore-bigquery-export-*`), que no están en este repo. Hay además 3 funciones en un codebase `functions` que el `firebase.json` del repo no declara (verificado el 2026-10-20).
+</Note>
+
+### Desarrollo local
+
+```bash
+cd functions
+npm run serve   # firebase emulators:start --only functions
+npm run shell   # firebase functions:shell
+```
+
+El emulador de Firestore escucha en el puerto `8080` y la UI del emulador está activada (`firebase.json:14`). Para probar llamadas a Hostaway sin tocar la API real, se puede fijar `HOSTAWAY_API_URL` a un stub local (`functions/hostaway/hostawayController.js:16`).
+
+## Rollback
+
+Firebase Functions no tiene un comando de rollback nativo de un clic; la forma soportada es **volver a desplegar la versión anterior del código**:
+
+<Steps>
+  <Step title="Recuperar el código estable">
+    Hacer checkout del commit/tag anterior conocido como bueno en `main`.
+  </Step>
+  <Step title="Re-desplegar">
+    Ejecutar de nuevo `firebase deploy --only functions` (o solo la función afectada con `--only functions:<nombre>`) desde ese código.
+  </Step>
+</Steps>
+
+<Info>
+  Las funciones de primera generación no guardan versiones anteriores para reactivar. Volver atrás es **redesplegar el commit anterior**: `git checkout <commit>` y `firebase deploy --only functions:<nombre>` para una función, o sin `--only` para todas.
+</Info>
+
+### Desactivar comportamiento sin desplegar menos funciones
+
+El código usa **flags** para apagar envíos sin retirar funciones:
+
+- `stopNotifications` (`functions/index.js:174`) — apaga las notificaciones programadas.
+- `stopSurveyNotifications = true` (`functions/index.js:180`) — apaga las encuestas de llegada/estancia, migradas a vivla-tools.
+- Guardas `if (true) return null` en los triggers de alquiler/intercambio (`functions/index.js:555`).
+
+Cambiar un flag requiere re-desplegar la función.
+
+## Monitorización
+
+| Señal | Cómo | Fuente |
+|---|---|---|
+| Logs | `functions.logger` (structured logging) → consola de Firebase / Cloud Logging. `npm run logs` = `firebase functions:log` | `functions/package.json:9` |
+| Alertas operativas | Mensajes a Slack (`ge_notifications`, pre-reservas) desde las notificaciones | `functions/utils/slack.js` |
+
+<Warning>
+  **No hay Sentry** ni sondas de salud (`/health`) en el código de este repo. Qué alertas de Cloud Monitoring existen fuera del repo es **PENDIENTE de confirmar**.
+</Warning>
+
+Equipo responsable y fallos típicos en el [Runbook](/sistemas/booking-cloud-functions/runbook).

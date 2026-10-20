@@ -21,9 +21,13 @@ El servicio principal es la app Mastra (`apps/mastra`), desplegada en **Railway*
 - **API de Mastra (producción):** `https://api.vivla.ai` — es la que vigila la sonda de uptime contra `/health` (`.github/workflows/uptime.yml`). También responde en la URL interna del servicio en Railway, declarada en la allowlist de CORS (`apps/mastra/src/mastra/index.ts:262`).
 - **Web (producción):** `https://app.vivla.ai`, servicio `web`, desplegado aparte (`apps/mastra/src/mastra/index.ts:263`).
 
-<Warning>
-  El mapeo exacto de dominios personalizados a servicios Railway (quién sirve `api.vivla.ai` y `app.vivla.ai`) vive en el dashboard de Railway/DNS, no en el código. Está **PENDIENTE de confirmar** contra el dashboard.
-</Warning>
+<Note>
+  Verificado en Railway y Cloudflare el 2026-10-20 (proyecto Railway **VIVLA-INTELLIGENCE**, entorno `production`):
+  - `mastra` → `api.vivla.ai` (y `vivla-intelligence-production.up.railway.app`).
+  - `web` → `app.vivla.ai` (y `web-production-13e2e.up.railway.app`).
+  - Los dos dominios pasan por el proxy de Cloudflare y **no** tienen Cloudflare Access: la autenticación es la de la propia app.
+  - Hay un entorno `testing` con un servicio `vivla-intelligence` en la rama `feat/notion-integration`; su último despliegue falló.
+</Note>
 
 ### Build y arranque del servicio `mastra`
 
@@ -31,9 +35,13 @@ El servicio principal es la app Mastra (`apps/mastra`), desplegada en **Railway*
 - **Arranque:** el `start` del paquete **no** es `mastra start` directo, sino un watchdog: `node scripts/start-watchdog.mjs` (`apps/mastra/package.json`). `start:raw` lo salta si hiciera falta.
 - **Healthcheck:** `GET /health` (público, sin auth), timeout 300 s, política de reinicio `ON_FAILURE` con hasta 10 reintentos (`railway.toml`, `apps/mastra/src/mastra/index.ts:273`).
 
-<Warning>
-  El `railway.toml` lo dice explícito: el **dashboard de Railway pisa** su propio `startCommand` y sus `watchPatterns` (`/apps/mastra/**`) deciden qué commits llegan a desplegarse. Por eso el watchdog vive dentro del script `start` (así se ejecuta venga el arranque de donde venga). Los valores reales del dashboard (watchPatterns, startCommand, auto-deploy) son **PENDIENTE de confirmar** contra Railway.
-</Warning>
+<Note>
+  El `railway.toml` avisa de que el **dashboard de Railway pisa** su `startCommand`, y sus `watchPatterns` (`/apps/mastra/**`) deciden qué commits se despliegan. Valores reales en el dashboard (verificado el 2026-10-20):
+  - `mastra`: conectado a `vivla-tech/vivla-intelligence`, rama `main`, arranque `pnpm --filter mastra start`. Ese script es el watchdog (`node scripts/start-watchdog.mjs`), así que el watchdog **sí** corre en producción.
+  - `web`: misma rama `main`, arranque `pnpm --filter web dev`. En Railway, ese script ejecuta `vite preview` sobre el build, no un servidor de desarrollo.
+  - Un push a `main` despliega solo, si toca rutas de los `watchPatterns`.
+  - `daniela-followups-cron` es una imagen `alpine` con `curl` y horario `0 0 1 1 *`: corre una vez al año, en la práctica está parado.
+</Note>
 
 ## Cómo se despliega
 
@@ -103,6 +111,7 @@ Cuatro capas, cada una cubriendo lo que la anterior no ve:
 
 - **Cadencia:** `*/10 * * * *` (cada 10 minutos), más `workflow_dispatch` manual.
 - **Chequeo:** `GET https://api.vivla.ai/health` con `--max-time 25`; si no da `200`, reintenta a los 30 s. Solo falla si fallan los dos intentos.
+- **Estado:** las últimas 20 ejecuciones de `uptime.yml` pasaron (verificado el 2026-10-20). `vivla-status` no tiene sondas de Intelligence: este workflow es la única vigilancia externa.
 - **Alerta:** si falla, publica en un canal de Slack de producto vía `chat.postMessage` con el token `SLACK_BOT_TOKEN`. Avisa **en cada ejecución fallida** (cada 10 min mientras dure la caída: ruido sostenido para una caída sostenida).
 
 <Warning>

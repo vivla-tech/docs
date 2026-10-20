@@ -1,0 +1,72 @@
+---
+title: "Runbook"
+description: "Equipo responsable de Micaela y los fallos más comunes, con su causa y su respuesta."
+---
+
+## Equipo responsable
+
+Propietario: equipo **IA**. Clase: **agente** ([repos.yml](/repositories#micaela)).
+
+<Warning>
+  Guardia, escalado y contactos nominales: **PENDIENTE de confirmar**. El repo no nombra personas; el canal de alertas operativas es **`#micaela-alerts`** en Slack (`docs/monitoring.md`).
+</Warning>
+
+## Fallos más comunes
+
+<AccordionGroup>
+  <Accordion title="Un cron sale 'success' pero no hace nada / no aparece en Sentry">
+    Dos causas distintas con el mismo síntoma (`cron_runs` impecable):
+
+    - **Proceso corto que no vació Sentry.** Los CLIs acaban en `process.exit()`, que no ejecuta los `beforeExit` donde el SDK entrega su cola. Si falta `await vaciarSentry()`, la emisión es un no-op silencioso. Comprueba que `vaciarSentry()` sigue llamándose antes de cada salida y corre `pnpm sentry:humo` (`scripts/sentry-smoke.ts`).
+    - **Cron sin `SENTRY_DSN`.** Un servicio nuevo **no hereda** la variable (está puesta servicio a servicio, no compartida). Sin DSN, `initSentry` es un no-op total. Añádela a mano y censa el resto con el bucle de `railway variables` de `CLAUDE.md` (ojo: el shell por defecto es **zsh**, hay que leer línea a línea).
+  </Accordion>
+
+  <Accordion title="Un servicio de cron escribe en bucle / escrituras repetidas a HubSpot">
+    Un servicio de Railway **sin `cronSchedule` no es un cron**: arranca, termina y Railway lo **reinicia en bucle**. En workers con `--escribir-de-verdad` (`hubspot-scores-push`, `hubspot-top-pages-push`) eso son escrituras reales cada pocos segundos. Respuesta: ponerle la schedule (o pausarlo); nunca conectar el repo antes de fijar la schedule (`scripts/railway-start.sh`).
+  </Accordion>
+
+  <Accordion title="'BQ nativo de HubSpot rancio' en cron_runs">
+    **No es un bug.** `hubspot-ingest` aborta si el BQ nativo lleva `>20 h` sin escribirse, para no reprocesar el snapshot de ayer y mostrar T-2 sin avisar (`packages/ingest/src/workers/native-ingest/freshness.ts`). La respuesta es **retrasar la rama**, no revertir: esperar a que el DTS (02:00, acaba ~03:30) deje datos frescos.
+  </Accordion>
+
+  <Accordion title="daily-review-insights deja prose=null varios días">
+    Un fallo de validación de la prosa LLM **no es fatal** (el cron sigue «success»), pero queda en `cron_runs.error_message`. Varios días seguidos de `prose=null` en `daily_review_insights` significa que el validador lleva rechazando al modelo: investigar vía `processing_errors` (pipeline `daily-review-insights`, `error_type=validation_error`), no asumir ruido de un día (`scripts/railway-start.sh`).
+  </Accordion>
+
+  <Accordion title="Una migración de BD no aplica / una página se cae tras desplegar">
+    `drizzle-kit migrate` **no funciona contra prod** (bookkeeping desincronizado; muere en `0047`). Railway tampoco corre migraciones en el deploy. Aplica el SQL **a mano** y registra su hash en la misma transacción (receta en `CLAUDE.md`). **Orden clave: la migración va ANTES de mergear** — el código despliega al mergear y, si lee una columna que aún no existe, tumba la página.
+  </Accordion>
+
+  <Accordion title="El gasto publicitario baja a 0 o un canal desaparece">
+    TikTok/LinkedIn (vía Windsor.ai) **se caen en silencio**: auth caducada o errores de tipo en el upload a BQ. El run «sale OK» pero no trae datos. Vigila por `max(date)` de la tabla, no por el éxito del run. El gasto canónico son 4 datasets RAW, no el gold-mart (ver [Fuentes de datos](/sistemas/micaela/fuentes-de-datos)).
+  </Accordion>
+
+  <Accordion title="Web y MCP devuelven números distintos para la misma pregunta">
+    Síntoma de SQL duplicado. El SQL lo posee **`@micaela/queries`**; web es re-export fino y mcp envuelve con zod + PII. La única excepción viva es `lead-detail` (SQL inline, guardado por `scripts/check-mcp-sync.sh`). Un cambio en tools MCP o en `@micaela/queries` exige **redeploy del servicio `mcp`** para que Claude.ai lo vea (`CLAUDE.md`, `apps/mcp/README.md`).
+  </Accordion>
+
+  <Accordion title="Un servicio HTTP (web/mcp) no responde">
+    El watchdog alerta `http_down` si el healthcheck no es 2xx. Comprueba `GET /api/health/ready` (web, hace `select 1`) y `GET /health/ready` (mcp). Railway reinicia ante fallo (`ON_FAILURE`, 3 reintentos). Si la capa 2 también está muerta, es señal de caída total de Railway/Postgres y lo caza Healthchecks.io (ver [Crons y monitorización](/sistemas/micaela/crons-y-monitorizacion)).
+  </Accordion>
+</AccordionGroup>
+
+## Verificaciones rápidas
+
+```sql
+-- ¿Está corriendo el watchdog?
+SELECT job_name, status, rows_processed, started_at, completed_at
+FROM cron_runs WHERE job_name = 'watchdog'
+ORDER BY started_at DESC LIMIT 5;
+
+-- ¿Qué alertas hay abiertas ahora mismo?
+SELECT job_name, alert_kind, last_alerted_at, last_resolved_at
+FROM watchdog_state
+WHERE last_alerted_at IS NOT NULL
+  AND (last_resolved_at IS NULL OR last_resolved_at < last_alerted_at);
+```
+
+(De `docs/monitoring.md`.)
+
+<Danger>
+  El dev local apunta a la **BD de producción**. No pulses «Guardar» en una verificación local ni pruebes escrituras sin fotografiar el estado antes y restaurarlo después: hubo un incidente con 15 filas escritas en `sales_targets` (`CLAUDE.md`).
+</Danger>

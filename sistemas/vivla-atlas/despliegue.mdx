@@ -1,0 +1,109 @@
+---
+title: "Despliegue y operación"
+description: "Dónde corre Atlas, cómo se despliega con railway up manual y cómo se vuelve atrás, su autenticación y sus variables de entorno."
+---
+
+## Dónde corre
+
+Atlas tiene dos piezas desplegables:
+
+| Pieza | Qué es | Dónde | URL |
+|---|---|---|---|
+| **Servidor de retrieval** | API Hono + MCP (`apps/server`) | Railway, servicio `atlas-server` | `mcp.atlas.vivla.com` |
+| **Lector + chat web** | Sitio Starlight (`apps/site`) + Pages Functions (`functions/`) | Cloudflare Pages, proyecto `vivla-atlas` | `atlas.vivla.com` |
+
+Fuente: [Entornos](/environments), [Repositorios](/repositories), `functions/api/chat.ts` (autodetección de Pages). El servidor construye con **Nixpacks** y arranca con `npm run start -w @atlas/server`; el healthcheck es `GET /health` (`railway.json:3`, `railway.json:5`, `railway.json:7`).
+
+<Note>
+  **El vault viaja dentro de la imagen.** El servidor resuelve `knowledge/` desde el módulo (`apps/server/src/index.ts → ../../../knowledge`), no desde el cwd, salvo que se defina `KNOWLEDGE_DIR`. Por eso un cambio en el vault requiere re-desplegar (o llamar a `/reload` si el disco ya tiene el cambio) (`apps/server/src/index.ts`, `apps/server/src/vault.ts`).
+</Note>
+
+El lector web es el proyecto de Cloudflare Pages **`vivla-atlas`**, conectado a GitHub (`vivla-tech/vivla-atlas`). Construye con `npm install && npm run build -w @atlas/site` y publica `apps/site/dist`. Sus dominios son `atlas.vivla.com` y `vivla-atlas.pages.dev` (verificado el 2026-10-20).
+
+<Warning>
+  **La rama de producción de Pages es `main`, no `develop`.** Un push a `develop` (o a cualquier otra rama) solo crea un *preview* (`develop.vivla-atlas.pages.dev`). Hoy `atlas.vivla.com` sirve `main` en `983bf24`, del **2026-09-01**: el lector web no muestra los cambios del vault posteriores a esa fecha hasta que se mergee `develop` en `main` (verificado el 2026-10-20).
+</Warning>
+
+## Entornos y rama de producción
+
+El servidor se despliega desde **`develop`**. El lector web se publica desde **`main`** (ver arriba). No hay entorno de staging separado: Railway solo tiene el entorno `production` {V}.
+
+| Entorno | Rama | Destino |
+|---|---|---|
+| Producción (servidor) | `develop` | `railway up` manual → proyecto Railway `vivla-atlas`, servicio `atlas-server` (`mcp.atlas.vivla.com`) |
+| Producción (lector web) | `main` | Cloudflare Pages `vivla-atlas`, automático al hacer push (`atlas.vivla.com`) |
+| Preview (lector web) | cualquier otra | Cloudflare Pages, `<rama>.vivla-atlas.pages.dev` |
+
+<Note>
+  No hay CI commiteado (`.github/` no existe en el repo): ni typecheck, ni tests, ni despliegue automático. Los tests existen (`npm test -w @atlas/server`) pero se corren a mano.
+</Note>
+
+## Cómo se despliega
+
+El despliegue es **manual**, no automático por push. Desde la rama `develop` se publica con el CLI de Railway:
+
+```bash
+railway up
+```
+
+Railway construye con Nixpacks y arranca `npm run start -w @atlas/server` (`railway.json`). Esto es consistente con lo descrito en [Entornos](/environments) y [Repositorios](/repositories).
+
+El servicio `atlas-server` **no está conectado a GitHub** en Railway: cada despliegue es una subida con `railway up` desde un checkout local, sin commit asociado en Railway. Hay que hacerlo con el CLI enlazado al proyecto `vivla-atlas`, entorno `production`, servicio `atlas-server` (verificado el 2026-10-20).
+
+## Cómo se vuelve atrás
+
+Railway reinicia el contenedor ante un fallo: `restartPolicyType: ON_FAILURE` (`railway.json:6`). El healthcheck es `GET /health` (`railway.json:7`).
+
+Ante `SIGTERM` (redeploy) o `SIGINT` (Ctrl-C local), el servidor hace un apagado ordenado que incluye el flush de Langfuse antes de salir (`apps/server/src/index.ts`).
+
+Para volver atrás, redespliega una versión anterior desde el historial de despliegues del servicio en Railway, o haz `railway up` desde un commit anterior de `develop`. Como los despliegues son subidas del CLI, Railway no guarda el commit: anota qué commit subes. En el lector web, Cloudflare Pages permite hacer *rollback* a un despliegue de producción anterior desde el dashboard (verificado el 2026-10-20).
+
+## Autenticación (gate)
+
+El gate del servidor es **env-driven y fail-closed** (`apps/server/src/auth.ts`):
+
+- Si **no** hay ninguna variable de gating, el servidor queda **abierto** (modo dev) y loguea un aviso al arrancar.
+- En cuanto hay alguna, todas las rutas salvo `/health` exigen autorización; cualquier error de verificación da `401` (nunca un crash).
+
+Dos métodos, no excluyentes (`apps/server/src/auth.ts`):
+
+<Tabs>
+  <Tab title="x-api-key (máquinas)">
+    Cabecera `x-api-key` comparada en **tiempo constante** contra `ATLAS_API_KEY`. Es lo que usan los proxies de `atlas.vivla.com` al reenviar al servidor (`functions/api/solicitudes.ts`).
+  </Tab>
+  <Tab title="Bearer JWT (Auth0)">
+    `Authorization: Bearer <jwt>` validado (RS256) contra el JWKS de Auth0, con `issuer` y `audience` comprobados. Requiere **ambas** `AUTH0_DOMAIN` y `AUTH0_AUDIENCE`.
+  </Tab>
+</Tabs>
+
+En producción están **los dos métodos activos**: el servicio tiene definidas `ATLAS_API_KEY` y `AUTH0_DOMAIN` + `AUTH0_AUDIENCE` (tenant `vivlapro.eu.auth0.com`, audiencia `https://mcp.atlas.vivla.com`). `GET /health` responde sin autenticación (verificado el 2026-10-20).
+
+<Note>
+  `mcp.atlas.vivla.com` apunta directamente a Railway, sin pasar por el proxy de Cloudflare: **Cloudflare Access no lo protege**. La única protección es este gate del servidor (verificado el 2026-10-20).
+</Note>
+
+## Variables de entorno
+
+Todas las capas son fail-soft salvo el puerto. Nombres (nunca valores) según `apps/server/.env.example` y el código:
+
+| Variable | Para qué | Si falta |
+|---|---|---|
+| `PORT` | Puerto del servicio (Railway lo inyecta; default 3000) | Usa 3000 |
+| `KNOWLEDGE_DIR` | Apuntar a otro vault | Usa `knowledge/` del repo |
+| `ATLAS_DATABASE_URL` | Postgres del índice híbrido | Fallback in-memory (solo BM25) |
+| `WORKERS_AI_ACCOUNT_ID` · `WORKERS_AI_API_TOKEN` | Embeddings bge-m3 (Workers AI) | Sin vector, solo BM25 |
+| `WORKERS_AI_EMBED_MODEL` · `WORKERS_AI_BATCH_SIZE` | Ajuste de embeddings | Defaults (`@cf/baai/bge-m3`, 50) |
+| `ANTHROPIC_API_KEY` | Haiku (expand/rerank de query) | Query cruda (passthrough) |
+| `ANTHROPIC_MODEL` | Modelo Haiku | Default `claude-haiku-4-5` |
+| `ATLAS_API_KEY` | Gate por `x-api-key` | Sin ese método de gate |
+| `AUTH0_DOMAIN` · `AUTH0_AUDIENCE` | Gate por JWT de Auth0 | Sin ese método de gate |
+| `ATLAS_CACHE_TTL_MS` | TTL de la caché de búsqueda | Default 5 min |
+| `ATLAS_RERANK_SKIP_MARGIN` | Margen para saltar el rerank | Default 0.25 |
+| `LANGFUSE_PUBLIC_KEY` · `LANGFUSE_SECRET_KEY` | Observabilidad de coste Haiku | Instrumentación no-op |
+| `LANGFUSE_BASE_URL` · `LANGFUSE_ENVIRONMENT` | Endpoint y entorno de Langfuse | Defaults (cloud, `dev`) |
+
+Las credenciales de los **proxies web** (`CONCIERGE_URL`, `ATLAS_SERVER_URL`, …) son variables de Cloudflare Pages, no del servidor — ver [Integraciones](/sistemas/vivla-atlas/integraciones).
+
+<Warning>
+  No hagas commit de `.env` ni de credenciales. Usa `.env.example` para documentar qué variables hacen falta.
+</Warning>
