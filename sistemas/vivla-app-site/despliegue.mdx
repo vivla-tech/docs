@@ -19,9 +19,9 @@ Sitio estático en **Cloudflare Pages**, proyecto `vivla-app-site`. La carpeta p
 
 Los tres dominios los sirve el **mismo** proyecto de Pages; lo que cambia por dominio es el AASA que genera la función (ver [Verificación de deep links](/sistemas/vivla-app-site/verificacion-deep-links)). `main` es la rama de producción (`repos.yml`, [Entornos](/environments)).
 
-<Warning>
-  Cómo se asigna cada dominio a una rama o a un entorno de Pages (producción vs. preview) **no está en el código del repo**: es **PENDIENTE de confirmar** en el panel de Cloudflare Pages.
-</Warning>
+<Note>
+  Un solo proyecto de Cloudflare Pages, `vivla-app-site`, sirve los cuatro dominios: `vivla.app`, `dev.vivla.app`, `staging.vivla.app` y `vivla-app-site.pages.dev`. Los tres dominios propios apuntan al despliegue de **producción** (rama `main`); no hay un despliegue por entorno. La Pages Function distingue el dominio en cada petición y genera el AASA que toca (verificado el 2026-10-20).
+</Note>
 
 ## Cómo se despliega
 
@@ -37,17 +37,17 @@ npx wrangler pages dev public
 
 No hay workflows de CI en el repo (no existe `.github/`): el deploy, tal como está el código, es **manual**.
 
-<Warning>
-  Si Cloudflare Pages está conectado al repo de GitHub para desplegar automáticamente en cada push a `main`, eso **no se ve en el código**: es **PENDIENTE de confirmar**. Desplegar requiere autenticación de Cloudflare para `wrangler` (token de API de Cloudflare / `wrangler login`), por nombre; su valor no está en el repo.
-</Warning>
+<Note>
+  El proyecto de Pages **no está conectado a GitHub**: un push a `main` no despliega nada. Se despliega a mano con `wrangler pages deploy` (despliegue *ad hoc*), con un token de API de Cloudflare o `wrangler login`. El último despliegue de producción es del 2026-08-04, commit `15c2b56`, que coincide con `main` hoy (verificado el 2026-10-20).
+</Note>
 
 ## Cómo se vuelve atrás
 
 El repo no define un procedimiento de rollback.
 
-<Warning>
-  El rollback **no está en el código**. Cloudflare Pages conserva los deployments anteriores y permite promover uno previo desde su panel, pero el procedimiento concreto es **PENDIENTE de confirmar** con el equipo mobile. Alternativa por código: revertir el commit en `main` y volver a desplegar.
-</Warning>
+<Note>
+  Cloudflare Pages conserva los despliegues anteriores: desde el panel del proyecto se puede volver a uno previo. Como el proyecto no está conectado a Git, la alternativa por código es volver a desplegar un commit anterior con `wrangler pages deploy`.
+</Note>
 
 ## Cabeceras y caché
 
@@ -66,5 +66,5 @@ El repo no define un procedimiento de rollback.
 </Note>
 
 <Warning>
-  **No hay Sentry ni sondas de estado en este repo** (ninguna referencia a Sentry ni a monitorización en el código). Las sondas de disponibilidad de VIVLA viven en el repo **vivla-status** (ver [Repositorios](/repositories)); si `vivla.app` o los archivos `/.well-known/` se vigilan desde allí es **PENDIENTE de confirmar**. La comprobación que sí documenta el repo es manual, con `curl` y las herramientas de validación de Apple/Google (`README.md:89`).
+  **Nadie vigila `vivla.app`.** No hay Sentry en el repo y `vivla-status` no tiene ninguna sonda para `vivla.app` ni para los archivos de `/.well-known/` (verificado el 2026-10-20). Si el AASA o `assetlinks.json` dejan de servirse, los enlaces universales fallan sin aviso. La comprobación documentada es manual, con `curl` y las herramientas de Apple y Google (`README.md:89`).
 </Warning>

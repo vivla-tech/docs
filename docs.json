@@ -163,6 +163,38 @@
         "tab": "Sistemas",
         "groups": [
           {
+            "group": "App site (deep links)",
+            "pages": [
+              "sistemas/vivla-app-site/index",
+              "sistemas/vivla-app-site/despliegue",
+              "sistemas/vivla-app-site/integraciones",
+              "sistemas/vivla-app-site/landing",
+              "sistemas/vivla-app-site/runbook",
+              "sistemas/vivla-app-site/verificacion-deep-links"
+            ]
+          },
+          {
+            "group": "Atlas",
+            "pages": [
+              "sistemas/vivla-atlas/index",
+              "sistemas/vivla-atlas/despliegue",
+              "sistemas/vivla-atlas/integraciones",
+              "sistemas/vivla-atlas/retrieval",
+              "sistemas/vivla-atlas/runbook",
+              "sistemas/vivla-atlas/vault"
+            ]
+          },
+          {
+            "group": "Booking Cloud Functions",
+            "pages": [
+              "sistemas/booking-cloud-functions/index",
+              "sistemas/booking-cloud-functions/despliegue",
+              "sistemas/booking-cloud-functions/funciones",
+              "sistemas/booking-cloud-functions/integraciones",
+              "sistemas/booking-cloud-functions/runbook"
+            ]
+          },
+          {
             "group": "Concierge (Alma)",
             "pages": [
               "sistemas/vivla-concierge/index",
@@ -174,14 +206,23 @@
             ]
           },
           {
-            "group": "App site (deep links)",
+            "group": "PropCos",
             "pages": [
-              "sistemas/vivla-app-site/index",
-              "sistemas/vivla-app-site/despliegue",
-              "sistemas/vivla-app-site/integraciones",
-              "sistemas/vivla-app-site/landing",
-              "sistemas/vivla-app-site/runbook",
-              "sistemas/vivla-app-site/verificacion-deep-links"
+              "sistemas/propcos/index",
+              "sistemas/propcos/despliegue",
+              "sistemas/propcos/integraciones",
+              "sistemas/propcos/runbook",
+              "sistemas/propcos/tareas-y-monitorizacion"
+            ]
+          },
+          {
+            "group": "Status",
+            "pages": [
+              "sistemas/vivla-status/index",
+              "sistemas/vivla-status/despliegue",
+              "sistemas/vivla-status/monitorizacion",
+              "sistemas/vivla-status/runbook",
+              "sistemas/vivla-status/sondas"
             ]
           }
         ]

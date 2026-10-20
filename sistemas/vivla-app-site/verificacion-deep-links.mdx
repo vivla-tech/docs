@@ -46,7 +46,7 @@ Declara la relación `delegate_permission/common.handle_all_urls` para el paquet
 </Note>
 
 <Warning>
-  `assetlinks.json` solo declara el paquete de producción `com.vivla.app`. El README mapea Android de `dev.vivla.app` al paquete `com.vivla.booking.beta` (`README.md:52`), pero ese paquete **no aparece** en `assetlinks.json`. Si hace falta verificación automática de App Links para los binarios no productivos de Android, es **PENDIENTE de confirmar** con el equipo mobile si es intencionado.
+  `assetlinks.json` solo declara el paquete de producción `com.vivla.app`, **en los tres dominios**: así lo sirven hoy `vivla.app`, `dev.vivla.app` y `staging.vivla.app` (verificado el 2026-10-20). El AASA de iOS sí cambia por dominio (`com.vivla.booking.beta` en dev, `com.vivla.booking.beta.prod` en staging). Por tanto, los binarios Android no productivos (`com.vivla.booking.beta`, según `README.md:52`) no pasan la verificación automática de App Links. Falta decidir con el equipo mobile si es intencionado.
 </Warning>
 
 ## Comprobar que se sirven bien

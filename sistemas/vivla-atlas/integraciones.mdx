@@ -1,0 +1,82 @@
+---
+title: "Integraciones"
+description: "A qué llama Atlas, quién le llama, los proxies de Cloudflare Pages y sus credenciales (solo por nombre)."
+---
+
+Atlas es a la vez **servicio** (le llaman agentes y las superficies web) y **cliente** (llama a varios proveedores, todos opcionales y fail-soft). Las credenciales se nombran solo por su variable de entorno, nunca su valor.
+
+## Quién le llama
+
+<CardGroup cols={2}>
+  <Card title="Agentes de Alma (Concierge)" icon="robot">
+    Lola y los demás agentes de `vivla-concierge` consumen Atlas por **MCP** (`POST /mcp`, tool `buscar_atlas`) para responder citando. Ver [Concierge](/sistemas/vivla-concierge/integraciones).
+  </Card>
+  <Card title="Clientes MCP genéricos" icon="terminal">
+    Cualquier cliente MCP (Claude Code, etc.) puede instalar el servidor `atlas` (`apps/server/src/mcp.ts`).
+  </Card>
+  <Card title="Chat web de atlas.vivla.com" icon="comments">
+    El proxy `functions/api/chat.ts` reenvía el chat al agente Atlas en Concierge/Mastra (no es el servidor de retrieval directamente).
+  </Card>
+  <Card title="Lector web" icon="book-open">
+    El pie de cada doc llama a `functions/api/solicitudes.ts` para crear/listar solicitudes de cambio.
+  </Card>
+</CardGroup>
+
+## A qué llama Atlas
+
+| Servicio | Para qué | Credenciales (por nombre) | Fuente |
+|---|---|---|---|
+| **Postgres** | Índice híbrido + cola de solicitudes | `ATLAS_DATABASE_URL` | `apps/server/src/db.ts` |
+| **Cloudflare Workers AI** | Embeddings `@cf/baai/bge-m3` (REST) | `WORKERS_AI_ACCOUNT_ID`, `WORKERS_AI_API_TOKEN` | `apps/server/src/embeddings.ts` |
+| **Anthropic (Claude Haiku)** | Reescritura/expansión y rerank de query | `ANTHROPIC_API_KEY` (modelo `ANTHROPIC_MODEL`) | `apps/server/src/rewrite.ts` |
+| **Langfuse** | Trazas de coste de las llamadas Haiku | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`, `LANGFUSE_ENVIRONMENT` | `apps/server/src/telemetry.ts` |
+| **Auth0** | Validación de JWT del gate (JWKS, RS256) | `AUTH0_DOMAIN`, `AUTH0_AUDIENCE` | `apps/server/src/auth.ts` |
+
+Todas estas integraciones son **opcionales**: sin su variable, la capa se apaga sola y el servicio sigue (`apps/server/src/index.ts`).
+
+<Note>
+  Langfuse usa el SDK v5 sobre OpenTelemetry (`@langfuse/otel` + `@langfuse/tracing`). La ingesta v3 del SDK viejo la apaga Langfuse Cloud el 16-nov-2026; este código ya está en el camino soportado. El entorno se separa con `LANGFUSE_ENVIRONMENT` (default `dev`); el `.env.example` de la raíz menciona el proyecto `project-alma` (`apps/server/src/telemetry.ts`, `.env.example`).
+</Note>
+
+## Los proxies de Cloudflare Pages
+
+El sitio de `atlas.vivla.com` publica dos **Pages Functions** en `functions/api/`. Ambas ocultan al cliente la URL y las claves del backend (`functions/api/chat.ts`, `functions/api/solicitudes.ts`).
+
+### /api/chat → Concierge/Mastra
+
+Reenvía la conversación al agente Atlas en Mastra:
+
+```
+POST /api/chat  { message, threadId }
+  → ${CONCIERGE_URL}/api/agents/${ATLAS_AGENT_ID ?? 'atlas'}/stream
+```
+
+- `CONCIERGE_URL` (obligatoria): URL de Concierge/Mastra en Railway.
+- `ATLAS_AGENT_ID` (opcional): id del agente, default `atlas`.
+- `CONCIERGE_API_KEY` (opcional): si está, se envía como `x-api-key` al reenviar; debe coincidir con el gate de Concierge.
+
+El `resourceId` es fijo `atlas-web` + el `threadId` del cliente para memoria multivuelta por hilo (`functions/api/chat.ts`).
+
+### /api/solicitudes → servidor de Atlas
+
+Proxy a la cola de solicitudes del servidor:
+
+```
+GET  /api/solicitudes  → ${ATLAS_SERVER_URL}/solicitudes
+POST /api/solicitudes  → ${ATLAS_SERVER_URL}/solicitudes
+```
+
+- `ATLAS_SERVER_URL` (obligatoria): URL del servidor de Atlas en Railway.
+- `ATLAS_API_KEY` (opcional): si está, se envía como `x-api-key` al reenviar.
+- **No** expone `PATCH`: resolver una solicitud es tarea de operador (fase 2), no del cliente web.
+
+<Danger>
+  **Identidad autoritativa:** en `POST`, el proxy pisa `solicitante_email` con el header `Cf-Access-Authenticated-User-Email` que añade **Cloudflare Access**. El cliente no puede falsear quién solicita. El nombre se deriva de la parte local del email (`functions/api/solicitudes.ts`).
+</Danger>
+
+`atlas.vivla.com` está detrás de la app de Cloudflare Access **«Atlas»**: política `Vivla Users` (correos `@vivla.com`), login con Auth0 (Vivla Identity) con redirección automática y sesión de 7 días. Las variables de Pages en producción son `ATLAS_SERVER_URL`, `ATLAS_API_KEY`, `CONCIERGE_URL` y `CONCIERGE_API_KEY` (verificado el 2026-10-20).
+
+## Relación con otros repos
+
+- **`vivla-concierge`**: hospeda el agente Atlas (chat) y es el principal consumidor MCP del retrieval. Ver [Concierge](/sistemas/vivla-concierge/index).
+- **`vivla-tools`**: donde vivirá el editor del vault con el flujo de solicitud → aprobación (fuera de este repo, pendiente de v1 según `ARCHITECTURE.md`).

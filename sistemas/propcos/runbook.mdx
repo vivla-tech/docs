@@ -1,0 +1,66 @@
+---
+title: "Runbook"
+description: "Equipo responsable de PropCos y los fallos más comunes, con su causa y su arreglo según el código."
+---
+
+## Equipo responsable
+
+PropCos lo **construye y lo opera un proveedor externo** (Digio, autor en `package.json:10`); el equipo interno responsable en Vivla es **proveedor-externo**. La observabilidad en producción está en **Sentry** (org `vivla-lifestyle`, proyecto `propcos`) y las notificaciones de deploy en Slack **#deploy-notifications** (ver [Tareas y monitorización](/sistemas/propcos/tareas-y-monitorizacion)).
+
+Los errores van al proyecto de Sentry **`propcos`** (organización `vivla-lifestyle`). Ese proyecto no tiene reglas de alerta declaradas en `vivla-status`, y no hay sonda de estado para `propcos.vivla.com` (verificado el 2026-10-20).
+
+<Warning>
+  El contacto del proveedor y quién está de guardia no están en ningún sistema: los conoce el equipo de Tech.
+</Warning>
+
+## Fallos más comunes
+
+<AccordionGroup>
+  <Accordion title="Un pago de factura queda en FAILED con errorCode TIMEOUT">
+    El worker de pagos llama a cashflow (`POST {BANK_API_URL}/payments/invoice`) con un timeout de **15 s**; si cashflow/Qonto no responde a tiempo, aborta y marca el pago `FAILED` con `TIMEOUT` (`app/server/queue/payment.worker.ts:11`, `:107`). Revisa que cashflow esté arriba y que `BANK_API_URL` apunte al entorno correcto. El worker tiene `attempts: 1`: no reintenta solo, hay que relanzar el pago (`app/server/queue/payment.queue.ts:27`).
+  </Accordion>
+  <Accordion title="Un pago falla con QONTO_API_ERROR">
+    cashflow devolvió un no-2xx: el worker propaga su `errorCode`/`message` y marca el pago `FAILED` (`app/server/queue/payment.worker.ts:73`). La causa está del lado de cashflow/Qonto (IBAN, beneficiario, saldo); revisa el detalle en cashflow, no en PropCos.
+  </Accordion>
+  <Accordion title="El índice de Drive no corre por la noche">
+    El scheduler `drive-index-nightly` solo se registra si Google Drive está configurado; si no, verás el warn `[DriveIndex] Google Drive env vars not set — the BY HOME index is disabled` (`app/server/queue/drive-index.worker.ts:30`). Comprueba `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON` y `GOOGLE_DRIVE_BY_HOME_FOLDER_ID`; para leer una carpeta compartida solo dentro de vivla.com hace falta además `GOOGLE_DRIVE_IMPERSONATE` (delegación de dominio) (`app/server/drive/google-drive.client.ts:36`).
+  </Accordion>
+  <Accordion title="Tools o cashflow reciben 401 en /api/internal/*">
+    La autenticación interna **falla cerrada**: si `DASHBOARD_INTERNAL_API_KEY` está vacía o no coincide con la cabecera `x-internal-api-key`, rechaza con 401 (`app/server/utils/internal-auth.ts:11`). Verifica que la variable esté puesta en PropCos y que el llamante mande la misma clave. Recuerda que además hay Cloudflare Access delante.
+  </Accordion>
+  <Accordion title="Tools no se entera de un cambio de propietario o lote">
+    El webhook a Tools está **apagado** si falta `TOOLS_API_URL` o `TOOLS_API_KEY` (devuelve `{ sent: false }` sin error) (`app/server/tools-webhook/tools-webhook.ts:19`). Si están puestas, los cambios sobre una misma propiedad se **debouncean 30 s** y colapsan en un solo job; un no-2xx reintenta hasta 5 veces con backoff exponencial (`app/server/tools-webhook/tools-webhook.ts:30`, `:50`).
+  </Accordion>
+  <Accordion title="El servicio cae solo y Railway lo reinicia">
+    La integración de Sentry está en modo `strict`: una promesa rechazada sin capturar se reporta y **deja caer el proceso**, para que Railway lo reinicie como haría Node sin Sentry (`app/server/instrument.ts:16`). Busca la rejection en Sentry (release `propcos@<sha>`).
+  </Accordion>
+  <Accordion title="No llegan errores a Sentry">
+    Es esperado fuera de producción: Sentry solo inicializa con DSN **y** `NODE_ENV=production` (`app/server/instrument.ts:9`). En producción, comprueba que `SENTRY_DSN` esté puesta. Además se descartan los errores de negocio 4xx (`isExpectedError`) a propósito (`app/server/instrument.ts:22`).
+  </Accordion>
+  <Accordion title="Stack traces de producción ilegibles (sin source maps)">
+    La subida de source maps necesita `SENTRY_AUTH_TOKEN` en el build; sin él, el paso avisa y sigue (el deploy importa más que las trazas legibles) (`scripts/sentry-sourcemaps.mjs:1`, `:15`). Pon el token en el build de Railway.
+  </Accordion>
+  <Accordion title="Fallan los OCR de facturas o escrituras">
+    Los workers `invoice-ocr` y `deed-ocr` usan Gemini; necesitan `GOOGLE_GENERATIVE_AI_API_KEY` y descargan el fichero de S3 con una URL prefirmada que caduca a los **300 s** (`app/server/ai/ai.config.ts:9`). Revisa la clave de Gemini, el acceso a S3 (`AWS_*`, `S3_*`) y los logs del worker.
+  </Accordion>
+  <Accordion title="La app no conecta a la base de datos o a Redis">
+    Postgres se configura con `POSTGRES_*` y Redis con `REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD` (`app/server/queue/redis.config.ts:5`). Si Redis no está disponible, los workers no procesan jobs (pagos, OCR, webhook a Tools quedan encolados o fallan). En Railway, verifica que los servicios gestionados estén arriba.
+  </Accordion>
+</AccordionGroup>
+
+## Dónde mirar primero
+
+<Steps>
+  <Step title="Sentry">
+    Errores y rejections de producción, por release `propcos@<commit>` (org `vivla-lifestyle`, proyecto `propcos`).
+  </Step>
+  <Step title="Logs de Railway">
+    Logs en vivo del servicio; los workers escriben `[PaymentWorker]`, `[DriveIndex]`, etc.
+  </Step>
+  <Step title="Slack #deploy-notifications">
+    Último deploy, su commit y los PRs incluidos.
+  </Step>
+  <Step title="El proveedor externo">
+    Si el fallo es de build/infra del lado del proveedor (pipeline GitLab, Kubernetes de Digio), escala al equipo proveedor por el canal que usa Tech con ellos.
+  </Step>
+</Steps>
