@@ -193,6 +193,16 @@
               "sistemas/propcos/runbook",
               "sistemas/propcos/tareas-y-monitorizacion"
             ]
+          },
+          {
+            "group": "Status",
+            "pages": [
+              "sistemas/vivla-status/index",
+              "sistemas/vivla-status/despliegue",
+              "sistemas/vivla-status/monitorizacion",
+              "sistemas/vivla-status/runbook",
+              "sistemas/vivla-status/sondas"
+            ]
           }
         ]
       }

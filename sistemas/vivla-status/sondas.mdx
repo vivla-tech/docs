@@ -1,0 +1,126 @@
+---
+title: "Sondas y aserciones"
+description: "Las 18 sondas de vivla-status: componentes, severidades, qué asierta cada una y por qué el cuerpo de la respuesta importa más que el código HTTP."
+---
+
+La superficie vigilada vive en `src/targets.ts`, una entrada por comprobación. Cada una salió del mapeo de llamadas en `_projects/observabilidad-incidencias/mapping/`; no se añade una sin saber qué significa su fallo para una persona real, que es lo que recoge el campo `impact` (`src/targets.ts:3`).
+
+## Por qué el cuerpo importa
+
+`vivla-api` responde **HTTP 200 para sus propios errores**: el código real viaja en el cuerpo, p. ej. `GET /v2/homes/all` devuelve `200` con `{"code":41,"msg":"Token requerido"}`. Un monitor que lee solo el código HTTP reportaría esa API sana durante todos sus fallos de aplicación (`HANDOVER.md`, `src/targets.ts:88`).
+
+Por eso cada sonda de negocio de vivla-api asierta `"code":20`, que es el marcador de éxito de esa API. Las sondas de `/health` y `/health/ready` son la excepción: no llevan el envoltorio `ApiResponse` y devuelven el código HTTP verdadero (readiness responde `503` cuando la base de datos no contesta), pero aun así se asierta su cuerpo `"status":"ok"` (`src/targets.ts`, `HANDOVER.md`).
+
+El mismo problema aparece en la web: una ficha de casa puede renderizar `200` sin ninguna casa dentro cuando se rompe el puente CMS→base de datos. Por eso `web-house-detail` asierta sobre el nombre de la casa y no sobre el código (`HANDOVER.md`).
+
+<Info>
+  Un `200` prueba la entrega; el cuerpo prueba el dato. El campo `contains` es case-sensitive y es lo que separa una comprobación útil de una decorativa (`src/index.ts:99`, `src/targets.ts:33`).
+</Info>
+
+## Cómo funciona una sonda
+
+Para cada objetivo, el Worker (`src/index.ts:54`):
+
+<Steps>
+  <Step title="Lanza la petición">
+    `GET` por defecto (o el `method` del objetivo), con timeout de **12 s** y sin caché. Sigue redirecciones salvo que `manualRedirect` esté puesto (`src/index.ts:37`, `src/index.ts:78`).
+  </Step>
+  <Step title="Comprueba el código">
+    Debe estar en `expect` (por defecto `[200]`). Si no, falla con «Se esperaba … y respondió …» (`src/index.ts:88`).
+  </Step>
+  <Step title="Asierta el cuerpo">
+    Si hay `contains`, el cuerpo debe incluir esa cadena. Si no, falla con «Respondió … pero falta «…» en el contenido» (`src/index.ts:99`).
+  </Step>
+  <Step title="Mide y registra">
+    Guarda `ok`, código, milisegundos y, si falló, el detalle. Un timeout se registra como «Sin respuesta en 12 s» (`src/index.ts:115`).
+  </Step>
+</Steps>
+
+## Severidades
+
+El nivel es una propiedad de lo vigilado, no de la alerta; por eso vive junto a cada sonda en `sev` y no se renegocia caso a caso (`sentry/config.json`, `src/targets.ts:44`):
+
+| `sev` | Significado | Canal de Sentry |
+|---|---|---|
+| **1** | El propietario pierde algo. Llega a un teléfono, 24/7. | Crítico |
+| **2** | El trabajo del equipo se para. Canal, sin sonido. | Normal |
+| **3** | Comercial o cosmético. Mismo canal silencioso. | Normal |
+
+## Las 18 sondas
+
+Agrupadas por componente (`src/targets.ts`). Los componentes marcados **interno** son herramientas del equipo; el resto son de cara al propietario o al público.
+
+### App de propietarios
+
+| Sonda | `sev` | Correcto si |
+|---|---|---|
+| `api-health` — servidor de la app | 1 | `200` y cuerpo con `"status":"ok"` |
+| `api-health-ready` — base de datos de la app | 1 | `200` y `"status":"ok"` (responde `503` si la BD no contesta) |
+| `api-app-versions` — arranque de la app | 1 | `200` y `"code":20` |
+| `api-homes-locations` — listado de destinos | 1 | `200` y `"code":20` |
+| `api-bookings-to-rent` — casas disponibles para reservar | 1 | `200` y `"code":20` |
+| `api-v1-homes` — fichas de casa (sistema antiguo) | 2 | `200` y `"code":20` |
+
+Las sondas de salud prueban que el proceso está en pie y que Postgres responde `SELECT 1`; las de negocio ejecutan consultas reales, así que detectan un módulo que se rompe mientras proceso y BD siguen en pie. Cuando fallan las de salud, se leen primero: las de negocio fallan con ellas por la misma razón (`src/targets.ts:88`, `HANDOVER.md`).
+
+### Chat
+
+| Sonda | `sev` | Correcto si |
+|---|---|---|
+| `tools-backend-health` — servidor del chat y su BD | 1 | `200` y `"status":"healthy"` |
+| `stream-api` — Stream, el proveedor del chat | 1 | `200`, `401` o `403` (empresa externa) |
+
+### Herramientas del equipo (interno)
+
+| Sonda | `sev` | Correcto si |
+|---|---|---|
+| `tools-frontend` — Tools en el navegador | 1 | `200` |
+| `hx-frontend` — Home Excellence | 2 | `200` |
+| `cms` — gestor de contenidos de la web | 2 | `200`, `302` o `307` |
+| `panel` — panel de reservas | 1 | `200`, `302`, `307` o `401` |
+
+<Note>
+  `panel` se reclasificó de `sev 3` a `sev 1` el 12 de agosto: es donde el equipo gestiona las reservas de los propietarios, así que una caída para la operación de reservas y el propietario lo nota en una hora (`src/targets.ts`).
+</Note>
+
+### Web pública
+
+| Sonda | `sev` | Correcto si |
+|---|---|---|
+| `web-home` — portada de vivla.com | 2 | `200` y cuerpo con `casa-` |
+| `web-house-detail` — ficha de casa (Casa Alba) | 2 | `200` y cuerpo con `Casa Alba` |
+| `web-listings` — listado de casas | 2 | `200` y cuerpo con `casa-alba` |
+| `web-apex-redirect` — redirección de vivla.com a www | 3 | `301` o `308`, sin seguir la redirección |
+
+<Info>
+  La redirección del apex (`vivla.com` → `www.vivla.com`) no está en ningún repositorio. El registro DNS de `vivla.com` es un CNAME sin proxy hacia Vercel, y Vercel responde `308` hacia `https://www.vivla.com/`: es un ajuste de dominio del proyecto en Vercel. Por eso tiene sonda (verificado el 2026-10-20).
+</Info>
+
+### Procesos automáticos (interno)
+
+| Sonda | `sev` | Correcto si |
+|---|---|---|
+| `windmill` — Windmill | 2 | `200` |
+
+<Warning>
+  `windmill.vivla.com` **no resuelve** (NXDOMAIN): la zona `vivla.com` no tiene ningún registro con ese nombre (verificado el 2026-10-20), aunque los repos lo referencian ~90 veces. El punto de entrada real es el dominio de Railway que figura en `targets.ts`. Su hermano `proxy-production-7058` devuelve `502`; si ese proxy debería estar en uso es **PENDIENTE de confirmar** (`src/targets.ts`, `HANDOVER.md`).
+</Warning>
+
+### Socios externos — MyInvestor
+
+| Sonda | `sev` | Correcto si |
+|---|---|---|
+| `api-partner-myinvestor` — listado de casas para MyInvestor | 1 | `200` y cuerpo con `"fractionPrice"` |
+
+Es la sonda más especial del repo (`src/targets.ts`, `HANDOVER.md`):
+
+- **Es una cadena.** MyInvestor llama a vivla-api, vivla-api llama al feed web de tools, tools lee Supabase. Una rotura en cualquier eslabón vacía su página.
+- **Va firmada.** Con `auth: 'myinvestor'` el Worker envía la cabecera de socio más la firma que guarda el secreto `MYINVESTOR_SIGNATURE`. Sin ese secreto la sonda se reporta a sí misma en rojo (detalle: «Falta la firma del socio…»), que es correcto: no puede ver el endpoint (`src/index.ts:64`).
+- **Sentry no puede vigilarla.** Sus checks de uptime rechazan `*.railway.app`, que es el host que se dio al socio. Esta sonda es toda la alarma: trátala como carga crítica.
+- **Asierta `"fractionPrice"`, no `"code":20`.** Esa ruta escribe su respuesta con un `@Res()` crudo, saltándose el envoltorio del resto de vivla-api. Responde un `500` real solo cuando el feed de tools lanza; cuando tools devuelve vacío, vivla-api transmite `{"homes":[]}` con `200` y la página del socio renderiza sin casas. `fractionPrice` está presente en cada casa y desaparece en cuanto la lista vuelve vacía (`src/targets.ts`, `HANDOVER.md`).
+
+<Danger>
+  Hay un secreto commiteado en vivla-api, en la migración `1777537025700-AddWebflowConfigs.ts`.
+</Danger>
+
+Más sobre cómo se alerta de esta sonda en [Crons y monitorización](/sistemas/vivla-status/monitorizacion).
