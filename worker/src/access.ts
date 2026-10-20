@@ -28,12 +28,25 @@ export interface AccessIdentity {
 let jwks: ReturnType<typeof createRemoteJWKSet> | undefined;
 let jwksTeamDomain: string | undefined;
 
-function getJwks(teamDomain: string) {
-  if (!jwks || jwksTeamDomain !== teamDomain) {
+function getJwks(teamDomain: string, fresh = false) {
+  if (fresh || !jwks || jwksTeamDomain !== teamDomain) {
     jwks = createRemoteJWKSet(new URL(`${teamDomain}/cdn-cgi/access/certs`));
     jwksTeamDomain = teamDomain;
   }
   return jwks;
+}
+
+// Access mints a new JWT per request, so `nbf`/`iat` are "now" on the edge
+// machine that signed it. A Worker clock a few ms behind made jose reject
+// valid tokens with no tolerance (intermittent 403s right after deploys).
+const CLOCK_TOLERANCE_SECONDS = 60;
+
+// jose error codes that mean "could not get a usable key", not "bad token".
+// A fresh key set and one retry fixes a stale cache or a failed certs fetch.
+const KEY_ERRORS = new Set(["ERR_JWKS_NO_MATCHING_KEY", "ERR_JWKS_TIMEOUT", "ERR_JWKS_INVALID", "ERR_JOSE_GENERIC"]);
+
+function errorCode(err: unknown): string {
+  return typeof err === "object" && err !== null && "code" in err ? String((err as { code: unknown }).code) : "UNKNOWN";
 }
 
 function allowedAudiences(env: Env): string[] {
@@ -52,17 +65,28 @@ export async function verifyAccessToken(
   getKey: JWTVerifyGetKey,
   audience: string[],
 ): Promise<AccessIdentity | null> {
-  if (audience.length === 0) return null;
+  const result = await verifyAccessTokenDetailed(token, getKey, audience);
+  return result.identity;
+}
+
+async function verifyAccessTokenDetailed(
+  token: string,
+  getKey: JWTVerifyGetKey,
+  audience: string[],
+): Promise<{ identity: AccessIdentity | null; error?: string }> {
+  if (audience.length === 0) return { identity: null, error: "NO_AUDIENCE" };
   try {
-    const { payload } = await jwtVerify(token, getKey, { audience });
+    const { payload } = await jwtVerify(token, getKey, { audience, clockTolerance: CLOCK_TOLERANCE_SECONDS });
     const aud = Array.isArray(payload.aud) ? payload.aud.map(String) : payload.aud ? [String(payload.aud)] : [];
     return {
-      sub: typeof payload.sub === "string" ? payload.sub : "",
-      email: typeof payload.email === "string" ? payload.email : undefined,
-      aud,
+      identity: {
+        sub: typeof payload.sub === "string" ? payload.sub : "",
+        email: typeof payload.email === "string" ? payload.email : undefined,
+        aud,
+      },
     };
-  } catch {
-    return null;
+  } catch (err) {
+    return { identity: null, error: errorCode(err) };
   }
 }
 
@@ -70,7 +94,13 @@ export async function verifyAccessToken(
 export async function verifyAccess(request: Request, env: Env): Promise<AccessIdentity | null> {
   const token = request.headers.get(HEADER);
   if (!token) return null;
-  return verifyAccessToken(token, getJwks(env.ACCESS_TEAM_DOMAIN), allowedAudiences(env));
+  const audience = allowedAudiences(env);
+  let result = await verifyAccessTokenDetailed(token, getJwks(env.ACCESS_TEAM_DOMAIN), audience);
+  if (!result.identity && result.error && KEY_ERRORS.has(result.error)) {
+    result = await verifyAccessTokenDetailed(token, getJwks(env.ACCESS_TEAM_DOMAIN, true), audience);
+  }
+  if (!result.identity) console.warn(`[access] JWT rejected: ${result.error}`);
+  return result.identity;
 }
 
 export function accessDeniedResponse(): Response {
