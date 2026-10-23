@@ -59,6 +59,16 @@ repos:
     class: core
     mode: subrepo
 
+  # The VIVLA dev CLI. Its docs/wiki is generated from its docs/ (npm run wiki)
+  # and carries its own docs.json, so the aggregate adds the tab.
+  - repo: vivla-cli
+    title: vivla CLI
+    prod_branch: main
+    wiki_section: cli
+    owner_team: plataforma
+    class: service
+    mode: subrepo
+
   # The repo is the source (not Notion). Its docs/wiki holds .md pages and no
   # docs.json yet, so the aggregate does not copy it until that exists (phase 3).
   - repo: vivla-cms
