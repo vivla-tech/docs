@@ -1,0 +1,142 @@
+---
+title: "vivla release"
+description: "Corta una release como se hace en vivla-tools: una rama release/YYYY-MM-DD-x desde main con cherry-pick de los PRs elegidos de develop, y su PR contra main. Sin argumentos, dice qué hay en develop…"
+---
+
+Corta una release como se hace en vivla-tools: una rama `release/YYYY-MM-DD-x` desde `main` con cherry-pick de los PRs elegidos de `develop`, y su PR contra `main`. Sin argumentos, dice qué hay en `develop` que aún no ha salido.
+
+```bash
+vivla release                                  # qué hay en develop y no en main
+vivla release 1662 1680 --dry-run              # el PR que abriría, sin tocar nada
+vivla release 1662 1680 --title "dev packages" # corta y abre el PR (pide confirmación)
+vivla release '#1672' 3ebfc2d6d                # también con # o con commits
+vivla release 1680 --notes "Probado en develop" --yes
+```
+
+## Uso
+
+`vivla release [PRs o commits…] [--repo <repo>] [--title <resumen>] [--notes <markdown>]`
+
+| Opción               | Por defecto                 | Qué hace                                                        |
+| -------------------- | --------------------------- | --------------------------------------------------------------- |
+| `PRs o commits…`     | ninguno: lista lo pendiente | números de PR mergeados (`1662`, `#1662`) o commits             |
+| `--repo <repo>`      | el clon en el que estás     | el repo del catálogo                                            |
+| `--title <resumen>`  | los asuntos de los commits  | lo que va entre paréntesis en el título del PR                  |
+| `--notes <markdown>` |                             | texto extra al final del cuerpo (validación, cambios en Auth0…) |
+| `--dry-run` (global) | no                          | enseña la rama y el cuerpo del PR sin crear nada                |
+| `--yes` (global)     | no                          | confirma sin preguntar                                          |
+
+El repo necesita `flow.release` en el catálogo.
+
+## Cómo funciona
+
+**Sin argumentos.** Hace `git fetch` de la base (`flow.base`, o `develop`) y del destino (`flow.release.target`, o `main`) y lista los commits de la base cuyo cambio aún no está en el destino (`git cherry`, que compara el contenido y no el hash, así que un cherry-pick anterior cuenta como salido). Cada uno con su número de PR si el asunto acaba en `(#1234)`.
+
+**Con argumentos.**
+
+1. Cada número se convierte en el commit de merge de su PR (`gh pr view`); si el PR no está mergeado, error. Los commits pasan tal cual.
+2. Avisa de los que ya están en el destino (`⚠ Already on main: #1662`).
+3. **El nombre**: `release/` + la fecha de hoy (UTC) + una letra. La letra es la siguiente libre del día, mirando las ramas que siguen en `origin` y los merges de los últimos 3 días en el destino: `a`, `b`… `z`, después `za`, `zb`… El prefijo sale de `flow.release.prefix` (`release/`).
+4. **Migraciones**: los `.sql` que añaden esos commits dentro de `migrations.dir` van al cuerpo del PR.
+5. Con `--dry-run` termina aquí, enseñando la rama y el cuerpo del PR.
+6. Si el repo tiene registro y proyecto `prod`, lee el registro de producción y avisa de las migraciones de la release que aún no están: `⚠ Not applied in prod yet: 504_….sql → vivla migrate apply <file> --env prod`. Es solo un aviso: hay que aplicarlas antes de mergear la release.
+7. **Confirmación**: `Push release/2026-10-23-a with 2 commit(s) and open its PR? [y/N]`. Sin terminal o con `--json`, sin `--yes`: `exit 4` con el comando en `next_actions`.
+8. Crea la rama en un worktree temporal desde `origin/<destino>`, así que tu checkout no se toca. Hace cherry-pick de cada commit en el orden en que los pasaste. Si uno da conflicto, aborta: no se sube nada y se borra la rama local.
+9. Sube la rama y abre el PR contra el destino. Título: `release: 2026-10-23-a (<resumen>)`, donde el resumen es tu `--title` o los asuntos de los commits sin el tipo ni el `(#N)`, cortado a 120 caracteres.
+
+El cuerpo del PR:
+
+```markdown
+## Release 2026-10-23-a
+
+Cherry-picked from `develop` onto `main`. The rest of `develop` stays out.
+
+### Included
+
+- #1662 feat(identity): me and dev-profile endpoints
+- #1680 feat(identity): dev tool to edit the dev packages
+
+### Migrations (apply and register in prod before merging)
+
+- `504_secondary_market_fees.sql`
+
+Probado en develop
+```
+
+## Qué toca
+
+| Modo           | Toca                                                                                                                   |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| sin argumentos | lee: `git fetch`                                                                                                       |
+| `--dry-run`    | lee: `git fetch` y `gh pr view`                                                                                        |
+| con argumentos | lee el registro de migraciones de producción; después escribe: sube una rama y abre un PR. Pide confirmación o `--yes` |
+
+Mergear la release es lo que despliega a producción, y eso queda en manos de quien revisa el PR. `vivla release` no mergea.
+
+## Salida `--json`
+
+Sin argumentos:
+
+```json
+{
+  "type": "release",
+  "pending": [
+    {
+      "sha": "e14a208ab…",
+      "subject": "feat(identity): dev tool to edit the dev packages (#1680)",
+      "pr": 1680,
+      "files": ["apps/identity/src/dev-profile/dev-packages.controller.ts"]
+    }
+  ]
+}
+```
+
+`files` son los ficheros que añade el commit.
+
+Con `--dry-run`:
+
+```json
+{
+  "type": "release",
+  "plan": {
+    "branch": "release/2026-10-23-a",
+    "name": "2026-10-23-a",
+    "target": "main",
+    "from": "develop",
+    "items": [{ "sha": "e14a208ab…", "subject": "…", "pr": 1680, "files": [], "released": false }],
+    "migrations": []
+  },
+  "body": "## Release 2026-10-23-a\n…"
+}
+```
+
+Al cortarla:
+
+```json
+{
+  "type": "release",
+  "branch": "release/2026-10-23-a",
+  "url": "https://github.com/vivla-tech/vivla-tools/pull/1691"
+}
+```
+
+Sin `--yes` y sin terminal, el mismo `result` bloqueado que [`migrate apply`](/cli/commands/migrate#salida---json), con `"command": "vivla release 1662 1680 --yes"`.
+
+## Exit codes
+
+| Código | Cuándo                                                                          |
+| ------ | ------------------------------------------------------------------------------- |
+| `0`    | lista, plan o release cortada                                                   |
+| `1`    | conflicto en un cherry-pick, fallo de git o `gh`, o respondiste que no          |
+| `4`    | hay que confirmar y no hay nadie (sin `--yes`)                                  |
+| `64`   | el repo no hace releases (`flow.release`), PR sin mergear, commit que no existe |
+
+## Para agentes (MCP)
+
+No hay tool: cortar una release escribe fuera de la máquina. Un agente puede mirar lo pendiente (`vivla release --json`) y el plan (`--dry-run --json`), y solo lanza la release con `--yes` cuando una persona ha aprobado esa lista de PRs.
+
+## Relacionado
+
+- [`vivla migrate`](/cli/commands/migrate): aplicar en producción las migraciones de la release.
+- [`vivla pr`](/cli/commands/pr): el PR de cada cambio contra `develop`.
+- Catálogo: `flow` (`base`, `release.target`, `release.prefix`) y `migrations` en [manifest.md](/cli/manifest#día-a-día).

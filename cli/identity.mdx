@@ -1,0 +1,78 @@
+---
+title: "Vivla Identity"
+description: "La CLI se autentica con tu cuenta @vivla.com contra Auth0 (tenant vivlapro). Después pregunta a Vivla Identity (vivla-tools/apps/identity) quién eres y qué repos te tocan."
+---
+
+La CLI se autentica con tu cuenta `@vivla.com` contra Auth0 (tenant `vivlapro`). Después pregunta a **Vivla Identity** (`vivla-tools/apps/identity`) quién eres y qué repos te tocan.
+
+## Auth0
+
+|              |                                                                                                                                     |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Tenant       | `vivlapro.eu.auth0.com`                                                                                                             |
+| Aplicación   | **vivla-welcome** (Native), client ID `YF399c7iNQPDue2QGb2NGKGDLjPVPYxW`                                                            |
+| Grants       | Device Code, Authorization Code (PKCE, callback `http://localhost:9876/callback`), Refresh Token (rotating, 30 días / 15 días idle) |
+| Connections  | `google-oauth2`, `Username-Password-Authentication`                                                                                 |
+| Audience     | `https://backend-production-51ce.up.railway.app` (API `vivla-tools-backend`; es el `AUTH0_API_AUDIENCE` con el que Identity valida) |
+| Client grant | `subject_type: user` sobre esa API (la API exige `require_client_grant`)                                                            |
+| Scopes       | `openid profile email offline_access`                                                                                               |
+
+Se puede sobrescribir con variables de entorno: `VIVLA_AUTH0_DOMAIN`, `VIVLA_AUTH0_CLIENT_ID`, `VIVLA_IDENTITY_AUDIENCE` y `VIVLA_AUTH0_ORGANIZATION`.
+
+### Flujos
+
+- **Device code** (por defecto, `vivla login`): muestra un código y una URL, y abre el navegador si hay TTY. Funciona en SSH y con agentes: el humano confirma y la CLI hace polling.
+- **Navegador + PKCE** (`login --browser`): callback en `localhost:9876`.
+- **Token directo** (`VIVLA_TOKEN`): para CI.
+
+### Dónde se guardan los tokens
+
+En macOS, el Keychain guarda **solo una clave AES-256 aleatoria** (servicio `vivla-welcome`). Los tokens van cifrados con AES-GCM en `~/.vivla/cli/credentials.enc` (0600). Se hace así porque `security -w` trunca los valores a 128 caracteres y los tokens son más largos.
+
+Fuera de macOS, o con `VIVLA_CLI_PLAIN_CREDENTIALS=1`, van en `~/.vivla/cli/credentials.json` (0600).
+
+El access token se renueva solo con el refresh token. La CLI nunca abre un login por su cuenta.
+
+## API de Identity
+
+Base: `https://identity-production-6e44.up.railway.app` (se cambia con `VIVLA_IDENTITY_URL` o `--identity-url`).
+
+| Endpoint               | Uso                                                                                       |
+| ---------------------- | ----------------------------------------------------------------------------------------- |
+| `GET /api/me`          | persona, equipo (`team.key`), rol y perfil de Equipos                                     |
+| `GET /api/dev-profile` | `{ repos, tools, matched }`: unión de los `identity_dev_packages` de tus equipos y tu rol |
+
+Los dos solo devuelven datos de quien llama (se resuelve por el `sub` del token). Se añaden en [vivla-tools#1662](https://github.com/vivla-tech/vivla-tools/pull/1662), con la migración `501_identity_dev_packages.sql` y la sección §21b de `docs/internal/identity/api-contract.md`.
+
+### Fallback
+
+Si Identity no responde, o devuelve 404 porque tu login aún no está enlazado a una persona, la CLI sigue funcionando con los claims del token:
+
+- `email` y `name` salen del id token.
+- `https://auth.vivla.com/tools` se usa para los roles.
+
+Con eso aplica `manifest/profiles.yaml` (equipo/rol → repos), que replica el seed de la migración. `vivla whoami` indica qué fuente se ha usado.
+
+## De dónde sale tu perfil
+
+`vivla profile` junta tres fuentes y dice por qué está cada repo:
+
+```
+• docs           base
+• vivla-tools    team:tech, active (59 PRs)
+• vivla-cms      lead, active (21 PRs)
+• propcos        active (10 PRs)
+```
+
+1. **Equipo y rol**: lo que responde Identity (`/api/dev-profile`) o, si no responde, `manifest/profiles.yaml`. `docs` va siempre (`base`).
+2. **Repos que lideras** (`lead`): los que tienen tu usuario de GitHub en `leads:` de su fichero del catálogo. Sirve para lo que no encaja en equipo + rol, como llevar un proyecto de otro equipo.
+3. **Dónde trabajas** (`active`): repos de `vivla-tech` en los que has abierto 2 PRs o más en los últimos 45 días, según `gh`. No hay que mantenerlo y sigue a quien cambia de proyecto. Se cachea 6 h en `~/.vivla/cli/github.json`, y si `gh` aún no tiene sesión (primer arranque) se omite.
+
+Las tres se suman; ninguna quita repos. El orden y las ★ de la TUI salen de aquí.
+
+## Cómo cambiar qué repos recibe cada equipo
+
+- **Fuente de verdad**: filas en `identity_dev_packages` (`team_id` y/o `role_id`, `repos[]`, `tools[]`). Se editan en tools, en la herramienta **Dev** ([https://tools.vivla.com/app/dev-packages](https://tools.vivla.com/app/dev-packages)): una fila por equipo, rol o los dos, con sus repos. Entra quien tenga el rol admin de Dev (`tool-dev`) o admin de Equipos; el rol lo da un hr o admin de Equipos en la ficha de la persona, en Roles en Tools. Por debajo son `GET/POST/PATCH/DELETE /api/dev-packages` de Identity.
+- **Fallback**: `manifest/profiles.yaml`. Mantenlo alineado.
+- Un repo nuevo tiene que tener también su fichero en `manifest/repos/`; si no, la CLI lo ignora.
+- Para una persona concreta que lleva un repo: `leads: [su-usuario-de-github]` en ese fichero, no un equipo nuevo.

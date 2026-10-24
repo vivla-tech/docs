@@ -1,0 +1,153 @@
+---
+title: "vivla migrate"
+description: "Migraciones SQL al estilo de vivla-tools: ficheros numerados (503nombre.sql) que se aplican a mano y quedan apuntados en una tabla de registro (public.appmigrations). migrate crea el siguiente…"
+---
+
+Migraciones SQL al estilo de vivla-tools: ficheros numerados (`503_nombre.sql`) que se aplican a mano y quedan apuntados en una tabla de registro (`public.app_migrations`). `migrate` crea el siguiente fichero, dice cuáles faltan en un entorno y aplica uno, pidiendo confirmación en producción.
+
+```bash
+vivla migrate new "secondary market fees"        # crea 504_secondary_market_fees.sql
+vivla migrate status                             # qué falta en dev
+vivla migrate status --env prod                  # y en producción (solo lee)
+vivla migrate apply 504                          # aplica en dev y la registra
+vivla migrate apply 504 --env prod --notes "#1690"   # en producción: pide confirmación
+```
+
+Los tres subcomandos trabajan sobre el repo en el que estás, o el de `--repo`. El repo necesita `migrations` en el catálogo.
+
+## `vivla migrate new`
+
+`vivla migrate new <nombre> [--repo <repo>]`
+
+| Opción          | Por defecto             | Qué hace                              |
+| --------------- | ----------------------- | ------------------------------------- |
+| `nombre`        |                         | lo que hace la migración, en palabras |
+| `--repo <repo>` | el clon en el que estás | el repo del catálogo                  |
+
+Crea `<N+1>_<nombre>.sql` en `migrations.dir`, donde `N` es el número más alto de la carpeta. El número se rellena con ceros al ancho del primer fichero (3 si no hay ninguno) y el nombre pasa a minúsculas, sin acentos y con `_`. El fichero trae una plantilla con `BEGIN;` y `COMMIT;`. Nunca sobrescribe: si ya existe un fichero con ese nombre, falla. No toca ninguna base de datos.
+
+## `vivla migrate status`
+
+`vivla migrate status [--repo <repo>] [--env <env>]`
+
+| Opción          | Por defecto             | Qué hace                                            |
+| --------------- | ----------------------- | --------------------------------------------------- |
+| `--repo <repo>` | el clon en el que estás | el repo del catálogo                                |
+| `--env <env>`   | `dev`                   | el entorno: una clave de `supabase` (`dev`, `prod`) |
+
+Lee la tabla de registro del entorno (`select filename, applied_by, applied_at … order by applied_at desc`) y la compara con la carpeta:
+
+- Enseña las 5 últimas registradas, con quién y cuándo.
+- Lista como pendientes (`○`) los ficheros que no están en el registro, pero solo desde el número más bajo que sí está: lo anterior es de antes de que existiera el registro y no se juzga. Si el registro está vacío, no marca ninguno.
+- En pantalla salen como mucho los 10 últimos pendientes; `--json` los da todos.
+
+Necesita `migrations.registry`. Solo lee, también en producción.
+
+## `vivla migrate apply`
+
+`vivla migrate apply <fichero> [--repo <repo>] [--env <env>] [--notes <texto>] [--force]`
+
+| Opción            | Por defecto             | Qué hace                                               |
+| ----------------- | ----------------------- | ------------------------------------------------------ |
+| `fichero`         |                         | `504`, `504_nombre` o `504_nombre.sql`                 |
+| `--repo <repo>`   | el clon en el que estás | el repo del catálogo                                   |
+| `--env <env>`     | `dev`                   | el entorno: una clave de `supabase`                    |
+| `--notes <texto>` | vacío                   | nota que se guarda en el registro (el PR, por ejemplo) |
+| `--force`         | no                      | la aplica aunque el registro diga que ya está          |
+| `--yes` (global)  | no                      | confirma en producción sin preguntar                   |
+
+1. Busca el fichero en `migrations.dir`.
+2. Si hay registro y no pasas `--force`, mira si ya está aplicado. Si lo está, lo dice y termina sin hacer nada.
+3. En producción (`prod` o `production`) pide confirmación: `Apply 504_… to vivla-tools PRODUCTION (<ref>)? [y/N]` (vale `y`, `yes`, `s`, `si`, `sí`). Sin terminal, o con `--json`, no pregunta: termina con `exit 4` y el comando con `--yes` en `next_actions`.
+4. Ejecuta el fichero entero en Supabase (`supabase db query --linked -f`).
+5. Lo apunta en el registro: `filename`, `applied_by` (tu `git config user.name` seguido de ` (vivla)`) y `notes`.
+
+En dev aplica sin preguntar.
+
+## Cómo funciona
+
+Las consultas van por la Management API de Supabase con `supabase db query --linked`: no hace falta la contraseña de la base de datos, solo `supabase login`. El `supabase link` de cada proyecto se hace en `~/.vivla/cli/supabase/<ref>`, nunca dentro de tu repo. La carpeta de migraciones se lee del clon en el que estás o de `~/dev/<repo>`.
+
+## Qué toca
+
+| Subcomando | Toca                                                                                    |
+| ---------- | --------------------------------------------------------------------------------------- |
+| `new`      | local: crea un fichero en tu clon                                                       |
+| `status`   | lee la tabla de registro del entorno                                                    |
+| `apply`    | escribe en la base de datos del entorno. En producción, solo con confirmación o `--yes` |
+
+`--yes` en producción solo después de que una persona haya aprobado esa migración en concreto.
+
+## Salida `--json`
+
+`new`:
+
+```json
+{
+  "type": "migration",
+  "file": "apps/backend/src/database/migrations/504_secondary_market_fees.sql"
+}
+```
+
+`status`:
+
+```json
+{
+  "type": "migrations",
+  "env": "dev",
+  "registry": "public.app_migrations",
+  "unrecorded": ["504_secondary_market_fees.sql"],
+  "latest": [
+    {
+      "filename": "503_secondary_market_transactions.sql",
+      "applied_by": "Ana Pérez (vivla)",
+      "applied_at": "2026-10-22T09:12:03.000Z"
+    }
+  ]
+}
+```
+
+`apply`:
+
+```json
+{ "type": "migration", "file": "504_secondary_market_fees.sql", "env": "dev", "applied": true }
+{ "type": "migration", "file": "504_secondary_market_fees.sql", "env": "dev", "applied": false, "message": "already applied" }
+```
+
+En producción sin `--yes`:
+
+```json
+{
+  "type": "result",
+  "ok": false,
+  "status": "blocked",
+  "exitCode": 4,
+  "message": "Apply 504_secondary_market_fees.sql to vivla-tools PRODUCTION (<ref>)? Needs confirmation.",
+  "next_actions": [
+    {
+      "kind": "human",
+      "message": "Apply 504_secondary_market_fees.sql to vivla-tools PRODUCTION (<ref>)?",
+      "command": "vivla migrate apply 504_secondary_market_fees.sql --env prod --yes"
+    }
+  ]
+}
+```
+
+## Exit codes
+
+| Código | Cuándo                                                                                                |
+| ------ | ----------------------------------------------------------------------------------------------------- |
+| `0`    | creada, consultada, aplicada o ya estaba aplicada                                                     |
+| `1`    | falló el SQL o Supabase, o respondiste que no a la confirmación                                       |
+| `4`    | producción sin `--yes` y sin nadie que confirme                                                       |
+| `64`   | repo sin `migrations` (o sin `registry` para `status`), entorno sin `supabase`, fichero que no existe |
+
+## Para agentes (MCP)
+
+La tool `migrations` es el `status` resumido: entradas `repo` (por defecto `vivla-tools`) y `env` (`dev`); devuelve `{ env, latest }` con las 10 últimas registradas. `new` y `apply` no son tools: un agente aplica por la CLI (`vivla migrate apply <fichero> --env <env> --json`), y en producción solo con `--yes` después de que una persona lo apruebe.
+
+## Relacionado
+
+- [`vivla db`](/cli/commands/db): SQL y logs de la misma base de datos.
+- [`vivla release`](/cli/commands/release): avisa si una release lleva migraciones que aún no están en producción.
+- Catálogo: `migrations` (`dir`, `registry`) y `supabase` en [manifest.md](/cli/manifest#día-a-día).

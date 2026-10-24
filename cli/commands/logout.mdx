@@ -1,0 +1,43 @@
+---
+title: "vivla logout"
+description: "Borra la sesión de Vivla Identity de esta máquina. Úsalo para cambiar de cuenta o antes de devolver un equipo."
+---
+
+Borra la sesión de Vivla Identity de esta máquina. Úsalo para cambiar de cuenta o antes de devolver un equipo.
+
+```bash
+vivla logout
+vivla logout --json
+```
+
+## Cómo funciona
+
+Borra `~/.vivla/cli/credentials.enc` (macOS), `~/.vivla/cli/credentials.json` (Linux o `VIVLA_CLI_PLAIN_CREDENTIALS=1`) y el login a medias, si lo había (`pending-login.json`).
+
+No llama a Auth0. Los tokens no se revocan: simplemente dejan de estar en tu disco. La clave del llavero de macOS (servicio `vivla-welcome`) se queda y se reutiliza en el siguiente login. Los logins de las plataformas (gh, Vercel, Railway…) no se tocan.
+
+Si usas `VIVLA_TOKEN`, `logout` no lo afecta: la variable sigue mandando.
+
+## Qué toca
+
+Local: solo esos ficheros.
+
+## Salida `--json`
+
+```json
+{ "type": "logout", "status": "done" }
+```
+
+## Exit codes
+
+| Código | Cuándo                                   |
+| ------ | ---------------------------------------- |
+| `0`    | siempre (no tener sesión no es un error) |
+
+## Para agentes (MCP)
+
+No hay tool. Cerrar la sesión de una persona es cosa suya: que lance `vivla logout`.
+
+## Relacionado
+
+[`login`](/cli/commands/login) · [`whoami`](/cli/commands/whoami) · [Identity](/cli/identity)

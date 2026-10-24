@@ -1,0 +1,30 @@
+---
+title: "vivla CLI"
+description: "La CLI de desarrollo de VIVLA: monta tu máquina y tus repos, y te ayuda en el día a día"
+---
+
+`vivla` deja lista tu máquina y los repos de `vivla-tech` que te tocan: clona, instala la versión de Node de cada uno, baja los `.env` de Vercel o Railway (nunca de producción) y configura las skills y los MCP de Claude Code, Cursor y Codex. Después sirve para el día a día: qué hay desplegado, logs, Supabase, migraciones, PRs y releases. Lo usan igual las personas (con un asistente en la terminal) y los agentes (con `--json` o por MCP).
+
+## Instalar
+
+```bash
+npm i -g github:vivla-tech/vivla-cli   # deja el comando vivla
+vivla                                  # asistente: login, tus repos, plan e instalación
+```
+
+O sin instalar nada: `npx --yes github:vivla-tech/vivla-cli`.
+
+## Guías
+
+- [Montar el entorno](/cli/setup): cada paso del setup, los `.env`, `--connect` y los worktrees.
+- [El día a día](/cli/devtools): deploys, logs, llamadas a servicios, Supabase, migraciones, PRs y releases.
+- [Uso desde agentes](/cli/agents): `--json`, exit codes y el servidor MCP.
+- [Vivla Identity](/cli/identity): el login y de dónde salen los repos de cada uno.
+- [Manifest](/cli/manifest): cómo se añade o cambia un repo del catálogo.
+- [Estar al día](/cli/updates) y [Linux, Coder y Ona](/cli/linux).
+
+## Comandos
+
+Cada comando tiene su página: [todos los comandos](/cli/commands/index).
+
+El código y estos docs viven en [vivla-tech/vivla-cli](https://github.com/vivla-tech/vivla-cli); esta sección se genera desde su carpeta `docs/`.

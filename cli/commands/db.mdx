@@ -1,0 +1,143 @@
+---
+title: "vivla db"
+description: "La base de datos Supabase de un repo, sin contraseña: SQL (en producción, solo lecturas), sus logs y el editor del dashboard. Funciona con tu sesión de supabase login."
+---
+
+La base de datos Supabase de un repo, sin contraseña: SQL (en producción, solo lecturas), sus logs y el editor del dashboard. Funciona con tu sesión de `supabase login`.
+
+```bash
+vivla db query "select count(*) from public.homes"                 # dev
+vivla db query "select filename from public.app_migrations order by applied_at desc limit 5" --env prod
+vivla db logs --source postgres --errors --since 2h                # errores de Postgres en dev
+vivla db logs --env prod --source api --errors --grep /rest/v1/users
+vivla db open --env prod                                           # el editor SQL en el navegador
+```
+
+Los tres trabajan sobre el repo en el que estás, o el de `--repo`, y el entorno es una clave de `supabase` en el catálogo (`dev`, `prod`).
+
+## `vivla db query`
+
+`vivla db query <sql> [--repo <repo>] [--env <env>]`
+
+| Opción          | Por defecto             | Qué hace                    |
+| --------------- | ----------------------- | --------------------------- |
+| `sql`           |                         | la consulta, entre comillas |
+| `--repo <repo>` | el clon en el que estás | el repo del catálogo        |
+| `--env <env>`   | `dev`                   | el entorno                  |
+
+En producción (`prod` o `production`) solo pasa **una lectura**. La comprobación es léxica, no un parser:
+
+- Se quitan los comentarios (`--` y `/* */`) y un `;` final. Si queda otro `;`, se rechaza: una sola sentencia.
+- Tiene que empezar por `select`, `with`, `explain`, `show`, `table` o `values`.
+- No puede aparecer `insert`, `update`, `delete`, `drop`, `alter`, `create`, `truncate`, `grant` ni `revoke`, ni siquiera dentro de un texto (`where name = 'update'` también se rechaza).
+
+Para cambiar datos o esquema en producción, una migración ([`vivla migrate`](/cli/commands/migrate)). En dev no hay límite.
+
+En pantalla, las filas salen como tabla (`(no rows)` si no hay).
+
+## `vivla db logs`
+
+`vivla db logs [--repo <repo>] [--env <env>] [--source <fuente>] [--since <t>] [--grep <texto>] [--errors] [-n <n>]`
+
+| Opción              | Por defecto             | Qué hace                                                                    |
+| ------------------- | ----------------------- | --------------------------------------------------------------------------- |
+| `--repo <repo>`     | el clon en el que estás | el repo del catálogo                                                        |
+| `--env <env>`       | `dev`                   | el entorno                                                                  |
+| `--source <fuente>` | `api`                   | `api`, `postgres`, `auth` o `functions` (ver abajo)                         |
+| `--since <t>`       | `1h`                    | desde cuándo: `30s`, `30m`, `2h`, `1d` o una fecha ISO. Como mucho 24 horas |
+| `--grep <texto>`    |                         | solo líneas cuyo mensaje contiene ese texto, sin distinguir mayúsculas      |
+| `--errors`          | no                      | solo errores (ver abajo)                                                    |
+| `-n`, `--lines`     | `100`                   | cuántas líneas, de 1 a 1000                                                 |
+
+| Fuente      | Qué es                                                               | Columnas                   | `--errors`                 |
+| ----------- | -------------------------------------------------------------------- | -------------------------- | -------------------------- |
+| `api`       | peticiones a la API de Supabase (REST, storage, auth…) en su gateway | `method`, `path`, `status` | `status` 400 o más         |
+| `postgres`  | el log de Postgres                                                   | `level` (`LOG`, `ERROR`…)  | `ERROR`, `FATAL` y `PANIC` |
+| `auth`      | Supabase Auth                                                        | `level`                    | `error` y `fatal`          |
+| `functions` | Edge Functions                                                       | `level`                    | `error` y `fatal`          |
+
+Salen las más recientes, en orden cronológico: `2026-10-23T08:49:42.715000  ERROR  column fo.property_id does not exist`. En `api` se enseña método, código y ruta en vez del mensaje.
+
+## `vivla db open`
+
+`vivla db open [--repo <repo>] [--env <env>]`
+
+| Opción          | Por defecto             | Qué hace             |
+| --------------- | ----------------------- | -------------------- |
+| `--repo <repo>` | el clon en el que estás | el repo del catálogo |
+| `--env <env>`   | `dev`                   | el entorno           |
+
+Abre `https://supabase.com/dashboard/project/<ref>/sql/new` en el navegador. Con `--json` solo devuelve la URL.
+
+## Cómo funciona
+
+- **`query`** usa `supabase db query --linked -o json`, que va por la Management API: basta con `supabase login`, sin contraseña de base de datos. Antes hace `supabase link --project-ref <ref>` en `~/.vivla/cli/supabase/<ref>`, un directorio privado por proyecto, así que nunca escribe nada en tu repo. Una consulta puede tardar hasta 5 minutos.
+- **`logs`** llama a la Management API (`GET /v1/projects/<ref>/analytics/endpoints/logs`) con SQL de ClickHouse sobre la tabla `logs`, filtrada por `source` (`edge_logs`, `postgres_logs`, `auth_logs`, `function_logs`), con los detalles en el mapa `log_attributes` (`request.method`, `response.status_code`, `parsed.error_severity`…). Supabase no deja pedir más de 24 horas de golpe.
+- **El token de `logs`**, por este orden: `SUPABASE_ACCESS_TOKEN`; en macOS, el que `supabase login` guardó en el llavero (servicio `Supabase CLI`), leído sin pasar por el log de la CLI y solo si es un token `sbp_` (en ese servicio también están las contraseñas de los proyectos enlazados); y si no, `~/.supabase/access-token`. Sin ninguno: `supabase login`.
+
+## Qué toca
+
+| Subcomando | Toca                                             |
+| ---------- | ------------------------------------------------ |
+| `query`    | lee siempre en producción; en dev puede escribir |
+| `logs`     | lee                                              |
+| `open`     | local: abre el navegador                         |
+
+## Salida `--json`
+
+`query`:
+
+```json
+{
+  "type": "query",
+  "env": "prod",
+  "rows": [{ "filename": "503_secondary_market_transactions.sql" }]
+}
+```
+
+`logs`:
+
+```json
+{
+  "type": "logs",
+  "source": "api",
+  "env": "dev",
+  "rows": [
+    {
+      "timestamp": "2026-10-23T03:03:04.288000",
+      "method": "POST",
+      "path": "/rest/v1/users",
+      "status": "409",
+      "event_message": "POST | 409 | …"
+    }
+  ]
+}
+```
+
+`open`:
+
+```json
+{ "type": "open", "url": "https://supabase.com/dashboard/project/<ref>/sql/new" }
+```
+
+## Exit codes
+
+| Código | Cuándo                                                                                                                                                |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`    | consulta hecha, logs leídos (aunque no haya ninguno), URL abierta                                                                                     |
+| `1`    | falló Supabase: SQL inválido, sin `supabase login` para `query`, error de la API de logs                                                              |
+| `64`   | escritura en producción, entorno sin `supabase` en el catálogo, `--source` o `--lines` inválidos, `--since` de más de 24 horas, sin token para `logs` |
+
+## Para agentes (MCP)
+
+| Tool       | Entradas                                                                                                            | Devuelve                                                     |
+| ---------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `db_query` | `repo` (`vivla-tools`), `env` (`dev`), `sql`                                                                        | `{ env, rows }`; en producción, una escritura da `{ error }` |
+| `db_logs`  | `repo` (`vivla-tools`), `env` (`dev`), `source` (`api`), `since` (`1h`), `grep`, `errors`, `lines` (100, máx. 1000) | `{ env, source, rows }` o `{ error }`                        |
+
+`db open` no es tool: un agente usa `vivla db open --json` y le pasa la URL a una persona.
+
+## Relacionado
+
+- [`vivla migrate`](/cli/commands/migrate): para escribir en producción.
+- Catálogo: `supabase` (proyecto por entorno) en [manifest.md](/cli/manifest#día-a-día).

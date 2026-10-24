@@ -1,0 +1,50 @@
+---
+title: "Estar al día"
+description: "Hay tres cosas que pueden cambiar, y cada una avisa por su lado:"
+---
+
+Hay tres cosas que pueden cambiar, y cada una avisa por su lado:
+
+| Qué cambia                                       | Cómo te enteras                                                                                                                | Qué haces                                      |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| **Un repo nuevo en el catálogo**                 | Aviso ✨ al abrir la TUI, al ejecutar cualquier comando en una terminal y en el JSON de `doctor`/`repos` (`updates.new_repos`) | `vivla setup repo <repo>`                      |
+| **Una versión nueva de la CLI**                  | Aviso ⬆ en los mismos sitios (`updates.cli.available`)                                                                         | `vivla update`                                 |
+| **Un repo en `vivla-tech` que nadie ha añadido** | Un PR semanal con el borrador de su fichero                                                                                    | revisar y mergear, o mandarlo a `ignored.yaml` |
+
+## El catálogo sale de `main`
+
+No hace falta reinstalar para ver repos nuevos. La CLI lee el catálogo en este orden:
+
+1. `--manifest <dir>` o `VIVLA_CLI_MANIFEST`.
+2. Si estás en un checkout del repo (`npm link`), su propio `manifest/`: tus cambios locales mandan.
+3. `manifest/` del último commit de `main`, descargado con `gh` (un tarball) y cacheado en `~/.vivla/cli/manifest/<sha>`.
+4. La copia que vino con tu instalación, si no hay red o `gh`.
+
+Antes de usar el catálogo de `main` se valida. Si alguien rompe un yaml, nadie se queda tirado: se usa la copia de la instalación.
+
+## "Nuevo desde la última vez"
+
+La CLI guarda qué repos has visto (`seen:repos` en `~/.vivla/cli/state.json`). La primera vez solo apunta la lista: si acabas de llegar, todo es nuevo, así que no te avisa de nada. A partir de ahí, cada repo que aparezca en el catálogo te sale **una vez**, con ★ si es de tu equipo.
+
+## Versión de la CLI
+
+`vivla update --check` compara el commit que estás ejecutando con el último de `main`. Lo consulta como mucho cada 6 h, y se puede desactivar con `VIVLA_CLI_NO_UPDATE_CHECK=1`.
+
+| Instalado con                          | El commit sale de                            | `vivla update` hace                                                           |
+| -------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------- |
+| `npm link` (checkout)                  | `git rev-parse HEAD`                         | `git pull --ff-only` + `npm install` (si vas por delante de `main`, no avisa) |
+| `npm i -g github:vivla-tech/vivla-cli` | `resolved` en el lockfile global             | `npm i -g github:vivla-tech/vivla-cli`                                        |
+| `npx github:vivla-tech/vivla-cli`      | `resolved` en el lockfile de la caché de npx | borra esa caché: el siguiente `npx` se baja `main`                            |
+
+## Repos nuevos en la org
+
+[`scripts/new-repos.ts`](https://github.com/vivla-tech/vivla-cli/blob/main/scripts/new-repos.ts) busca los repos de `vivla-tech` con actividad en los últimos 90 días que no están en `manifest/repos/` ni en [`manifest/ignored.yaml`](https://github.com/vivla-tech/vivla-cli/blob/main/manifest/ignored.yaml). Para cada uno genera un borrador: package manager, `.env.example`, Vercel/Railway/Wrangler/Firebase/EAS y su script de `dev`.
+
+```bash
+npm run new-repos              # informe
+npm run new-repos -- --write   # escribe los borradores en manifest/repos/
+```
+
+La Action [`new-repos.yml`](https://github.com/vivla-tech/vivla-cli/blob/main/.github/workflows/new-repos.yml) lo ejecuta **cada lunes** y abre un PR con los borradores. Necesita el secret `ORG_READ_TOKEN`: un token fine-grained con lectura (Metadata + Contents) de los repos de la org, porque el `GITHUB_TOKEN` de la Action solo ve este repo. Sin ese secret, se salta sin fallar.
+
+Para que un repo deje de proponerse, añádelo a `ignored.yaml` con el motivo.

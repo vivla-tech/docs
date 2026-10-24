@@ -1,0 +1,174 @@
+---
+title: "vivla setup"
+description: "Deja la máquina y tus repos listos para trabajar: herramientas, login en GitHub y en las plataformas, clon, toolchain, dependencias, .env, servicios conectados y verificación. Cada paso comprueba…"
+---
+
+Deja la máquina y tus repos listos para trabajar: herramientas, login en GitHub y en las plataformas, clon, toolchain, dependencias, `.env`, servicios conectados y verificación. Cada paso comprueba antes y se salta si ya está hecho, así que repetirlo es seguro y solo hace lo que falta.
+
+```bash
+vivla setup                              # la máquina; en una terminal, el asistente
+vivla setup machine                      # solo la máquina, entera
+vivla setup repo vivla-tools             # un repo y lo mínimo de máquina que necesita
+vivla setup repo vivla-cms vivla-api     # varios repos
+vivla setup --profile                    # la máquina + tus repos recomendados
+vivla setup repo vivla-mobile-app --connect local      # y monta en local la API que usa
+vivla setup repo vivla-tools --only 'repo:vivla-tools:env'   # solo una tarea
+vivla setup repo vivla-tools --worktree ~/dev/vivla-tools-feat
+vivla setup repo vivla-tools --json --git-name "Ana Pérez" --git-email ana@vivla.com
+```
+
+## Opciones
+
+| Opción                                        | Por defecto | Qué hace                                                                                      |
+| --------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------- |
+| `--profile`                                   |             | añade los repos recomendados para ti. Necesita sesión (`vivla login`)                         |
+| `--only <tarea>`                              |             | solo esas tareas y las que necesitan. Admite `*` y comas, y se repite                         |
+| `--skip <tarea>`                              |             | se salta esas tareas. Admite `*` y comas, y se repite                                         |
+| `--worktree <ruta>`                           |             | prepara también ese worktree del repo: `.env`, skills y dependencias                          |
+| `--root <dir>`                                | `~/dev`     | dónde van los clones (también `VIVLA_CLI_ROOT`)                                               |
+| `--connect <modo>`                            | `remote`    | los servicios que usa cada repo: el despliegue compartido (`remote`) o un clon tuyo (`local`) |
+| `--force-env`                                 |             | lo que llega de Vercel o Railway sobrescribe los valores que ya tienes en los `.env`          |
+| `--dry-run`                                   |             | solo comprueba; es lo mismo que [`vivla plan`](/cli/commands/plan)                                       |
+| `--set <clave=valor>` · `--answers <fichero>` |             | responde preguntas por su clave: `git.name`, `git.email`, `connect.<repo>`                    |
+| `--git-name` · `--git-email`                  |             | atajos de `--set git.name=…` y `--set git.email=…`                                            |
+| `--json`                                      |             | NDJSON en stdout y nunca pregunta (ver [Salida `--json`](#salida---json))                     |
+| `--no-interactive`                            |             | headless aunque haya terminal                                                                 |
+
+El resto de opciones globales, en [commands.md](/cli/commands/index#opciones-globales).
+
+## Cómo funciona
+
+### Qué se monta
+
+Los argumentos son repos del catálogo; `machine` y `repo` son palabras clave. `vivla setup vivla-tools` es lo mismo que `vivla setup repo vivla-tools`.
+
+| Llamada                                | Máquina                 | Repos                             |
+| -------------------------------------- | ----------------------- | --------------------------------- |
+| `vivla setup`                          | entera                  | ninguno (en la TUI los eliges tú) |
+| `vivla setup machine`                  | entera                  | ninguno                           |
+| `vivla setup repo vivla-tools`         | lo mínimo para ese repo | vivla-tools                       |
+| `vivla setup machine repo vivla-tools` | entera                  | vivla-tools                       |
+| `vivla setup --profile`                | entera                  | tus recomendados                  |
+| `vivla setup repo vivla-cms --profile` | lo mínimo               | vivla-cms + tus recomendados      |
+
+Un repo que no está en el catálogo termina con `exit 64` y la lista de los que sí. Con `--connect local` (o `--set connect.<repo>=local`) se añaden también los repos a los que se conecta, y los de esos, en cadena.
+
+**Máquina entera** quiere decir todas las herramientas y paquetes de `manifest/machine.yaml` y la tarea `agents:tooling`. **Lo mínimo para un repo** son las mismas tareas de máquina pero con menos dentro: en Linux solo git, curl y `ca-certificates`; con mise solo `gh`, `direnv`, los `tools` del repo y los CLIs de sus plataformas; y sin `agents:tooling`. Si ya está todo, esas tareas se saltan en segundos.
+
+### Asistente o headless
+
+En una terminal (stdin y stdout son TTY, sin `--json`, sin `--no-interactive` y sin la variable `CI`), `setup` abre la TUI. Si le has dicho qué montar, va directa a la pantalla de revisión y se salta el login, salvo con `--profile`. Si no, empieza por el principio, como `vivla` a secas. Cuando algo necesita una persona (`gh auth login`, `railway login`…), al final la TUI te ofrece ejecutarlo ahí mismo y vuelve a la instalación, que pasa rápido por lo ya hecho.
+
+En cualquier otro caso corre headless: en texto, una línea por tarea en stderr y un resumen con los siguientes pasos; con `--json`, NDJSON en stdout.
+
+### El grafo de tareas
+
+Cada tarea tiene dependencias. El motor arranca a la vez todo lo que tiene sus dependencias hechas, hasta 6 tareas en paralelo; las que comparten candado (apt y mise) van de una en una. Si una tarea falla o se bloquea, las que dependen de ella acaban igual (`Dependency "gh:auth" blocked`) sin llegar a ejecutarse. El resto sigue.
+
+### Tareas de la máquina
+
+| Tarea             | Depende de              | Qué hace                                                                                                                                                                                                                                                                                                        | Se salta si                                                    |
+| ----------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `system:packages` |                         | **macOS**: comprueba git y curl; si faltan, se bloquea con `xcode-select --install`. **Linux**: los paquetes que faltan, por apt con `sudo -n` (si no hay sudo sin contraseña, se bloquea con el comando). Si apt no tiene `gh`, añade el repo de GitHub y reintenta. Sin apt, se bloquea diciendo qué instalar | git y curl están (macOS) o todos los paquetes están (Linux)    |
+| `mise:install`    | `system:packages`       | `curl -fsSL https://mise.run \| sh`                                                                                                                                                                                                                                                                             | hay un `mise` en el PATH (vale el de Homebrew)                 |
+| `mise:tools`      | `mise:install`          | Node de `machine.yaml` (22) con `mise use -g`, cada herramienta que falta una a una, `corepack enable` y que mise respete `.nvmrc` / `.node-version`. Si falla `gh` o `direnv`, falla; si falla otra, avisa con el comando                                                                                      | Node es esa versión y cada binario ya está en el PATH          |
+| `shell:hooks`     | `mise:tools`            | añade `eval "$(mise activate …)"` y `eval "$(direnv hook …)"` a tu rc (`~/.zshrc`…) y avisa de abrir otra terminal                                                                                                                                                                                              | las dos líneas ya están                                        |
+| `git:identity`    | `system:packages`       | `git config --global user.name` y `user.email`: de `--set`, si no de Identity, si no pregunta (`git.name`, `git.email`)                                                                                                                                                                                         | los dos ya tienen valor                                        |
+| `gh:auth`         | `mise:tools`            | login en GitHub (con `GH_TOKEN` / `GITHUB_TOKEN` si los hay; si no, se bloquea con `gh auth login … --web`) y `gh auth setup-git`. En Linux y workspaces, además, las URLs SSH de GitHub pasan a HTTPS. Avisa si no eres miembro activo de vivla-tech                                                           | `gh auth status` está bien y git usa gh como credential helper |
+| `login:<cli>`     | `mise:tools`            | se bloquea con el comando de login de esa plataforma. Solo aparece si un repo de la ejecución la usa (`logins:` o una fuente de `.env`)                                                                                                                                                                         | el CLI dice que hay sesión                                     |
+| `agents:tooling`  | `mise:tools`, `gh:auth` | configura los servidores MCP de `machine.yaml` en Claude Code, Cursor y Codex (los que tengas), instala las skills globales y quita lo retirado. Solo con la máquina entera                                                                                                                                     | ya se hizo con este mismo catálogo y los mismos clientes       |
+
+Los logins, con la variable que sirve en lugar de un login interactivo (en un workspace remoto, el aviso te la sugiere):
+
+| Tarea            | Comprueba con                                        | Login                            | Variable                         |
+| ---------------- | ---------------------------------------------------- | -------------------------------- | -------------------------------- |
+| `login:vercel`   | `vercel whoami`                                      | `vercel login`                   | `VERCEL_TOKEN`                   |
+| `login:railway`  | `railway whoami`                                     | `railway login`                  | `RAILWAY_API_TOKEN`              |
+| `login:wrangler` | `npx wrangler whoami`                                | `npx -y wrangler login`          | `CLOUDFLARE_API_TOKEN`           |
+| `login:gcloud`   | `gcloud auth application-default print-access-token` | `gcloud auth login --update-adc` | `GOOGLE_APPLICATION_CREDENTIALS` |
+| `login:firebase` | `npx firebase-tools login:list`                      | `npx -y firebase-tools login`    | `FIREBASE_TOKEN`                 |
+| `login:eas`      | `npx eas-cli whoami`                                 | `npx -y eas-cli login`           | `EXPO_TOKEN`                     |
+
+### Tareas de cada repo
+
+Ids `repo:<repo>:<tarea>`. Solo existen las que el repo necesita según su fichero de [`manifest/repos/`](https://github.com/vivla-tech/vivla-cli/tree/main/manifest/repos). Todo lo que se ejecuta dentro del repo va con `mise exec`, con su toolchain.
+
+| Tarea      | Depende de                                                    | Qué hace                                                                                                                                                                | Se salta si                                                                                                                            |
+| ---------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `clone`    | `gh:auth`                                                     | `gh repo clone` en `<root>/<repo>`, en su `branch` si el catálogo la fija                                                                                               | hay un `.git`                                                                                                                          |
+| `runtime`  | `clone`, `mise:tools`                                         | `mise trust` y `mise install` con el `.tool-versions`, `.nvmrc` o `mise.toml` del repo                                                                                  | `mise ls --current --missing` no devuelve nada                                                                                         |
+| `deps`     | `runtime`                                                     | `npm ci` (o `npm install` sin lockfile), `pnpm install` o `yarn install` en cada `installDirs`. Si `npm ci` falla porque el lockfile no cuadra, `npm install` con aviso | en cada directorio, la marca de instalación de `node_modules` es más nueva que el lockfile                                             |
+| `env`      | `clone` y los `login:*` de sus fuentes                        | baja y mezcla los `.env` ([`env pull`](/cli/commands/env#cómo-funciona)) y avisa de las claves del ejemplo que siguen vacías                                                       | existen todos los ficheros, las fuentes remotas ya se bajaron alguna vez y no falta ninguna clave del ejemplo. Nunca con `--force-env` |
+| `connect`  | `env` (o `clone`) y, en local, los repos a los que se conecta | escribe en el `.env` la URL de cada servicio: la de staging o la de tu clon. En local, al acabar te dice que arranques ese repo primero (`vivla dev <repo>`)            | cada variable ya tiene ese valor                                                                                                       |
+| `skills`   | `clone`, `mise:tools`                                         | `npx skills add` dentro del clon y las añade a `.git/info/exclude` para que no salgan en `git status`                                                                   | todas están instaladas                                                                                                                 |
+| `post`     | `deps`, `env` y `connect` (las que haya)                      | los comandos `post:` (migraciones locales, codegen…)                                                                                                                    | ya corrieron exactamente esos comandos                                                                                                 |
+| `verify`   | `post` (o lo anterior)                                        | los comandos `verify:` (build, typecheck)                                                                                                                               | ya pasaron en el commit actual                                                                                                         |
+| `worktree` | lo anterior y `skills`                                        | con `--worktree`: copia los `.env` que le falten desde el clon principal, instala las skills y las dependencias                                                         | nunca, se repite cada vez                                                                                                              |
+
+### Elegir tareas: `--only` y `--skip`
+
+`*` vale cualquier cosa en cualquier parte: `login:*`, `repo:*:env`, `repo:vivla-tools:*`. Las comas separan patrones y la opción se puede repetir.
+
+- `--only` se queda con lo que encaja **y todo lo que eso necesita**: `--only 'repo:vivla-tools:env'` incluye también el clon, `gh:auth`, mise y el login de Railway, que se saltan en un momento si ya están.
+- `--skip` quita lo que encaja después. Lo que dependía de una tarea saltada corre igual, como si esa dependencia no existiera.
+
+Los ids de una ejecución concreta: `vivla plan repo vivla-tools --json | jq -r 'select(.type=="result") | .tasks[].id'`.
+
+### Preguntas, bloqueos y respuestas
+
+Solo `git:identity` pregunta algo (`git.name` y `git.email`), y solo si no lo dan `--set` ni Identity. La TUI lo pregunta en pantalla. Headless usa `--set`, `--answers` o el valor por defecto; si no hay, la tarea acaba `blocked` con la clave que falta y la ejecución termina con `exit 3`.
+
+Lo que solo puede hacer una persona (instalar las Xcode CLT, `sudo`, un login en el navegador) también deja la tarea `blocked`, con el comando en `next_actions`, y termina con `exit 4`. Nunca se queda esperando.
+
+### Worktrees
+
+`--worktree <ruta>` añade la tarea `repo:<repo>:worktree` a cada repo de la ejecución. La ruta tiene que ser un worktree de git de ese repo (`git worktree add`); si no, la tarea falla. No toca el clon principal.
+
+## Qué toca
+
+Tu máquina: instala herramientas en tu usuario (con apt, en el sistema) y escribe en tu rc, en `~/.gitconfig`, en `<root>`, en `~/.vivla/cli/`, en la configuración de gh y de los CLIs de plataforma (`railway link` va a `~/.railway/config.json`) y en la de tus agentes (`~/.cursor/mcp.json`, `~/.codex/config.toml`, `claude mcp`). Fuera, solo **lee**: clona de GitHub y baja variables de Vercel y Railway, siempre de entornos de desarrollo o staging, nunca de producción. Las marcas de lo hecho (`post`, `verify`, `.env` remotos, `agents:tooling`) y la última ejecución quedan en `~/.vivla/cli/state.json`, y la salida de cada comando en `~/.vivla/cli/vivla.log`.
+
+## Salida `--json`
+
+Un objeto por línea en stdout. Primero `start` con el grafo, luego un `task` cada vez que una tarea cambia (estado, progreso o un aviso nuevo) y al final un `result`:
+
+```json
+{"type":"start","ts":1792753152867,"tasks":[{"id":"system:packages","title":"git + curl (Xcode Command Line Tools)","deps":[]},{"id":"repo:vivla-tools:clone","title":"vivla-tools: clone","repo":"vivla-tools","deps":["gh:auth"]}]}
+{"type":"task","ts":1792753152872,"id":"system:packages","title":"git + curl (Xcode Command Line Tools)","status":"skipped","detail":"Already set up","duration":4}
+{"type":"task","ts":1792753153010,"id":"repo:vivla-tools:clone","title":"vivla-tools: clone","repo":"vivla-tools","status":"running","detail":"gh repo clone vivla-tech/vivla-tools"}
+{"type":"task","ts":1792753162100,"id":"login:railway","title":"Railway login","status":"blocked","error":"Log in to Railway (run the command below).","block":{"kind":"auth","message":"Log in to Railway (run the command below).","command":"railway login"},"duration":310}
+{"type":"result","ok":false,"status":"blocked","exitCode":4,"counts":{"pending":0,"running":0,"done":3,"skipped":7,"failed":0,"blocked":2},"duration":41230,"tasks":[…],"next_actions":[{"task":"login:railway","kind":"auth","message":"Log in to Railway (run the command below).","command":"railway login"}]}
+```
+
+- `status` de una tarea: `pending`, `running`, `done`, `skipped` (ya estaba), `failed` o `blocked`. Además puede llevar `detail`, `error`, `block`, `notes` (avisos) y `duration` en ms.
+- `next_actions` junta el bloqueo de cada tarea que lo causó (no las que cayeron en cascada) y los avisos e info de todas: `kind` es `input` (trae `key`: responde con `--set <key>=…`), `auth`, `human` o `sudo` (traen `command`), `warning` o `info`.
+
+## Exit codes
+
+| Código | Cuándo                                                                                                         |
+| ------ | -------------------------------------------------------------------------------------------------------------- |
+| `0`    | todo hecho o ya estaba                                                                                         |
+| `1`    | alguna tarea falló, o un error inesperado (el detalle en `result.tasks[].error` y en `~/.vivla/cli/vivla.log`) |
+| `2`    | `--profile` sin sesión (headless; la TUI te lleva al login)                                                    |
+| `3`    | bloqueado solo por respuestas que faltan: pásalas con `--set`                                                  |
+| `4`    | bloqueado por algo que tiene que hacer una persona: `next_actions[].command`                                   |
+| `64`   | argumentos inválidos: un repo que no existe, un `--set` sin `=`                                                |
+
+## Para agentes (MCP)
+
+`setup` devuelve al momento un `run_id`; el trabajo sigue en segundo plano y `get_run` lo consulta.
+
+| Tool      | Entradas                                                                                                                                                                                                              |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `setup`   | `machine` (bool), `repos` (keys), `profile` (bool), `only`, `skip`, `answers` (`{"git.email": "…"}`), `root`, `force_env`, `worktree`, `connect` (`remote` / `local`)                                                 |
+| `get_run` | `run_id`, `wait_seconds` (long-poll, 0 a 120, 30 por defecto). Devuelve `state` (`running`, `finished`, `error`), `progress`, lo que está corriendo, `result` (la misma forma que el `result` de arriba) y `exitCode` |
+
+Con `profile: true` y sin sesión, `setup` y `plan` no montan nada y contestan `{ "authenticated": false, "message": "Call login_start first" }`, como `get_profile` (la CLI sale con `exit 2`). Si `result.next_actions` trae `kind: input`, vuelve a llamar a `setup` con `answers`; si trae `auth`, `human` o `sudo`, enséñale el comando a la persona y repite cuando lo haya hecho.
+
+## Relacionado
+
+- [`vivla plan`](/cli/commands/plan): lo mismo sin tocar nada.
+- [`vivla env`](/cli/commands/env): solo los `.env`.
+- [`vivla doctor`](/cli/commands/doctor): qué falta, sin cambiar nada.
+- [`vivla dev`](/cli/commands/dev): arrancar lo que acabas de montar.
+- [Montar el entorno](/cli/setup) y [manifest.md](/cli/manifest): la guía y qué declara cada repo.

@@ -1,0 +1,75 @@
+---
+title: "vivla plan"
+description: "Lo que haría vivla setup con los mismos argumentos, sin tocar nada: ejecuta solo las comprobaciones de cada tarea y dice cuáles ya están hechas y cuáles correrían. Úsalo antes de un setup que no…"
+---
+
+Lo que haría [`vivla setup`](/cli/commands/setup) con los mismos argumentos, sin tocar nada: ejecuta solo las comprobaciones de cada tarea y dice cuáles ya están hechas y cuáles correrían. Úsalo antes de un setup que no conoces, o para saber los ids de tareas de `--only` y `--skip`.
+
+```bash
+vivla plan repo vivla-tools                 # qué falta para dejar vivla-tools listo
+vivla plan --profile                        # la máquina + tus recomendados
+vivla plan repo vivla-mobile-app --connect local
+vivla plan repo vivla-tools --json | jq -r 'select(.type=="result") | .tasks[] | select(.status=="pending") | .id'
+```
+
+## Opciones
+
+Las mismas que [`vivla setup`](/cli/commands/setup#opciones): `--profile`, `--only`, `--skip`, `--worktree` y las globales (`--root`, `--connect`, `--force-env`, `--set`, `--answers`, `--json`…). `vivla setup --dry-run` es exactamente lo mismo que `vivla plan`. Más opciones globales en [commands.md](/cli/commands/index#opciones-globales).
+
+## Cómo funciona
+
+- **Mismo grafo que `setup`.** Los argumentos se interpretan igual ([qué se monta](/cli/commands/setup#qué-se-monta)), incluidos `--connect local` y los filtros `--only` / `--skip`.
+- **Solo comprobaciones.** Recorre las tareas en orden, una a una, y ejecuta su comprobación. Si pasa, la tarea sale `skipped` (`Already set up`); si no, o si la comprobación falla, sale `pending` (`Would run`). Una tarea sin comprobación, como `repo:<repo>:worktree`, siempre sale `pending`.
+- **Nunca abre la TUI** y nunca pregunta, aunque estés en una terminal.
+- **No apunta nada.** No guarda marcas ni la última ejecución en `~/.vivla/cli/state.json`.
+
+En la terminal, `plan` enumera lo que ya está hecho (`○ … (already set up)`), lo que correría (`· … (would run)`) y el recuento final, con `N to run` si queda algo.
+
+## Qué toca
+
+Nada en tu máquina. Algunas comprobaciones **leen** fuera: `gh auth status`, el `whoami` de cada plataforma o `git rev-parse HEAD` en tus clones. Ninguna baja `.env` ni escribe en ningún sitio.
+
+## Salida `--json`
+
+La misma secuencia que [`setup`](/cli/commands/setup#salida---json): `start`, un `task` por tarea con su resultado y un `result`. En un plan, `result.ok` es `true` y `status` es `ok` aunque haya tareas pendientes; lo que correría se cuenta en `counts.pending`:
+
+```json
+{"type":"start","ts":1792753152867,"tasks":[{"id":"system:packages","title":"git + curl (Xcode Command Line Tools)","deps":[]},{"id":"repo:docs:clone","title":"docs: clone","repo":"docs","deps":["gh:auth"]}]}
+{"type":"task","ts":1792753152872,"id":"system:packages","title":"git + curl (Xcode Command Line Tools)","status":"skipped","detail":"Already set up"}
+{"type":"task","ts":1792753156700,"id":"repo:docs:clone","title":"docs: clone","repo":"docs","status":"pending","detail":"Would run"}
+{"type":"result","ok":true,"status":"ok","exitCode":0,"counts":{"pending":3,"running":0,"done":0,"skipped":7,"failed":0,"blocked":0},"duration":3921,"tasks":[…],"next_actions":[]}
+```
+
+## Exit codes
+
+| Código | Cuándo                                                          |
+| ------ | --------------------------------------------------------------- |
+| `0`    | el plan salió, haya o no tareas pendientes                      |
+| `1`    | un error inesperado (detalle en `~/.vivla/cli/vivla.log`)       |
+| `2`    | `--profile` sin sesión                                          |
+| `64`   | argumentos inválidos: un repo que no existe, un `--set` sin `=` |
+
+Para un sí o un no de "¿está todo listo?", mejor [`vivla doctor`](/cli/commands/doctor), que termina con `exit 1` si queda algo pendiente.
+
+## Para agentes (MCP)
+
+Tool `plan`, con las mismas entradas que `setup`: `machine`, `repos`, `profile`, `only`, `skip`, `answers`, `root`, `force_env`, `worktree`, `connect`. Con `profile: true` y sin sesión contesta `{ "authenticated": false, "message": "Call login_start first" }`. Si no, contesta directamente, sin `run_id`:
+
+```json
+{
+  "tasks": [
+    {
+      "id": "system:packages",
+      "title": "git + curl (Xcode Command Line Tools)",
+      "would_run": false
+    },
+    { "id": "repo:docs:clone", "title": "docs: clone", "would_run": true }
+  ]
+}
+```
+
+## Relacionado
+
+- [`vivla setup`](/cli/commands/setup): hacerlo de verdad, con la lista completa de tareas.
+- [`vivla doctor`](/cli/commands/doctor): el estado de la máquina más los chequeos que no son tareas (disco, red, MCP).
+- [Montar el entorno](/cli/setup).

@@ -1,0 +1,68 @@
+---
+title: "vivla update"
+description: "Actualiza la CLI a lo último de main. Cuando hay una versión nueva, cualquier comando te lo avisa con ⬆ New version of vivla → vivla update."
+---
+
+Actualiza la CLI a lo último de `main`. Cuando hay una versión nueva, cualquier comando te lo avisa con `⬆ New version of vivla → vivla update`.
+
+```bash
+vivla update            # actualizar
+vivla update --check    # solo mirar
+vivla update --check --json | jq .available
+```
+
+## Opciones
+
+| Opción    | Por defecto | Qué hace                                     |
+| --------- | ----------- | -------------------------------------------- |
+| `--check` |             | dice si hay versión nueva, sin instalar nada |
+
+## Cómo funciona
+
+Compara el commit que estás ejecutando con el último de `main` de `vivla-tech/vivla-cli`, que pide a GitHub con `gh api repos/vivla-tech/vivla-cli/commits/main`. `update` siempre pregunta en el momento; el aviso de los demás comandos usa una caché de 6 h (en `~/.vivla/cli/state.json`). `VIVLA_CLI_NO_UPDATE_CHECK=1` lo apaga todo, también `update`.
+
+Cómo sabe tu commit y cómo se actualiza depende de cómo lo instalaste:
+
+| Instalado con                          | Tu commit sale de                             | `vivla update` hace                                 |
+| -------------------------------------- | --------------------------------------------- | --------------------------------------------------- |
+| `npm link` (un checkout del repo)      | `git rev-parse HEAD`                          | `git pull --ff-only` y `npm install` en el checkout |
+| `npm i -g github:vivla-tech/vivla-cli` | el `resolved` del lockfile global de npm      | `npm i -g github:vivla-tech/vivla-cli`              |
+| `npx github:vivla-tech/vivla-cli`      | el `resolved` del lockfile de la caché de npx | borra esa caché: el siguiente `npx` se baja `main`  |
+
+Si no reconoce cómo se instaló (`kind: unknown`), no sabe qué versión es: `--check` lo dice (nunca "up to date") y `vivla update` no ejecuta nada, termina con `exit 1` y te dice cómo instalarla como comando (`npm i -g github:vivla-tech/vivla-cli`).
+
+Un checkout que va por delante de `main` (trabajo sin subir) no cuenta como desactualizado. El catálogo de repos no depende de esto: sale de `main` aunque no actualices ([updates.md](/cli/updates)).
+
+## Qué toca
+
+Local: reinstala la CLI. Lee el último commit de `main` con `gh`.
+
+## Salida `--json`
+
+```json
+{
+  "type": "update",
+  "kind": "global",
+  "current": "c152d29…",
+  "latest": "63cd4d8…",
+  "available": true,
+  "command": "npm i -g github:vivla-tech/vivla-cli"
+}
+```
+
+Sin `--check` y con versión nueva, la misma línea lleva además `"updated": true` y `"message": "Updated"` (o el error). `kind` es `git`, `global`, `npx` o `unknown`. Si GitHub no contesta, usa el último commit que tenía en caché; sin caché, `latest` no viene, `available` es `false` y en la terminal dice `Couldn't reach GitHub (is gh logged in?)`.
+
+## Exit codes
+
+| Código | Cuándo                                                                                                |
+| ------ | ----------------------------------------------------------------------------------------------------- |
+| `0`    | actualizado, ya estabas al día, o `--check`                                                           |
+| `1`    | la actualización falló (el mensaje trae el final del error), o no reconoce la instalación (`unknown`) |
+
+## Para agentes (MCP)
+
+No hay tool. `doctor` y `list_repos` traen `cli.available` y el `command` que hay que lanzar: que lo lance la persona, o un agente con su permiso.
+
+## Relacionado
+
+[Estar al día](/cli/updates) · [Instalar](https://github.com/vivla-tech/vivla-cli/blob/main/README.md#instalar) · [`describe`](/cli/commands/describe)

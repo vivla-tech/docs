@@ -1,0 +1,80 @@
+---
+title: "vivla pr"
+description: "Sube tu rama y abre el PR contra la base que toca en ese repo (develop en vivla-tools, la rama principal en el resto), después de comprobar que los mensajes de commit siguen la convención. Evita el…"
+---
+
+Sube tu rama y abre el PR contra la base que toca en ese repo (`develop` en vivla-tools, la rama principal en el resto), después de comprobar que los mensajes de commit siguen la convención. Evita el PR contra `main` por error y el CI que falla por un commit mal escrito.
+
+```bash
+vivla pr                                   # título y cuerpo desde los commits
+vivla pr --draft
+vivla pr --title "feat(identity): dev packages admin"
+vivla pr --base main                       # otra base, a propósito
+vivla pr --force                           # aunque algún commit rompa la convención
+```
+
+## Uso
+
+`vivla pr [--base <rama>] [--draft] [--title <título>] [--force]`
+
+| Opción             | Por defecto                  | Qué hace                                                |
+| ------------------ | ---------------------------- | ------------------------------------------------------- |
+| `--base <rama>`    | la base del repo (ver abajo) | rama contra la que se abre el PR                        |
+| `--draft`          | no                           | lo abre como borrador                                   |
+| `--title <título>` | desde los commits (`--fill`) | título del PR; el cuerpo queda vacío                    |
+| `--force`          | no                           | lo abre aunque haya commits que no siguen la convención |
+
+Siempre sobre el repo en el que estás: no tiene `--repo`.
+
+## Cómo funciona
+
+1. **La base**: `--base`, si no `flow.base` del catálogo, si no la `branch` fija del repo, y si no la rama por defecto de `origin` (`main` si no se puede saber).
+2. **La rama**: la actual. Falla si estás en un HEAD suelto o en la propia base.
+3. Hace `git fetch origin <base>` y mira los commits de `origin/<base>..HEAD`. Si no hay ninguno, no hay PR que abrir.
+4. **La convención** (la misma que commitlint en vivla-tools): `tipo(scope)!: asunto`, con tipo `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore` o `revert`, el scope y el `!` opcionales, y el asunto empezando en minúscula. Si alguno no cumple, lista los que fallan y para, salvo con `--force`. Para arreglarlos: `git commit --amend` o `git rebase -i`.
+5. `git push -u origin <rama>` y `gh pr create --base <base> --head <rama>`, con `--fill` (título y cuerpo desde los commits) o con tu `--title`.
+
+## Qué toca
+
+Escribe fuera de tu máquina: sube la rama a GitHub y abre un PR. No pide confirmación, porque lanzarlo ya es la decisión. Un agente solo debería lanzarlo cuando una persona se lo haya pedido.
+
+## Salida `--json`
+
+```json
+{
+  "type": "pr",
+  "url": "https://github.com/vivla-tech/vivla-tools/pull/1690",
+  "base": "develop",
+  "branch": "feat/dev-packages-admin",
+  "commits": 2
+}
+```
+
+Si algún commit no cumple la convención:
+
+```json
+{
+  "type": "result",
+  "ok": false,
+  "exitCode": 1,
+  "message": "commit messages break the convention",
+  "commits": [{ "sha": "3ebfc2d6d…", "subject": "Added the dev tool", "conventional": false }]
+}
+```
+
+## Exit codes
+
+| Código | Cuándo                                                                            |
+| ------ | --------------------------------------------------------------------------------- |
+| `0`    | PR abierto                                                                        |
+| `1`    | commits fuera de la convención (sin `--force`), o falló el push o `gh pr create`  |
+| `64`   | fuera de un repo del catálogo, HEAD suelto, en la base, o sin commits por delante |
+
+## Para agentes (MCP)
+
+No hay tool: abrir un PR escribe fuera de la máquina. Un agente lo lanza por la CLI (`vivla pr --json`) cuando una persona lo ha pedido.
+
+## Relacionado
+
+- [`vivla release`](/cli/commands/release): de `develop` a `main` en los repos con releases.
+- Catálogo: `flow.base` y `branch` en [manifest.md](/cli/manifest#día-a-día).

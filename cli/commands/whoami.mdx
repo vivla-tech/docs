@@ -1,0 +1,76 @@
+---
+title: "vivla whoami"
+description: "Quién eres para la CLI: nombre, email, equipo y rol, y de dónde sale esa información. Sirve para comprobar que tienes sesión y que Identity te reconoce."
+---
+
+Quién eres para la CLI: nombre, email, equipo y rol, y de dónde sale esa información. Sirve para comprobar que tienes sesión y que Identity te reconoce.
+
+```bash
+vivla whoami
+vivla whoami --json | jq .identity.team
+```
+
+```
+Ana Pérez <ana@vivla.com>
+team:   tech · Developer
+source: https://identity-production-6e44.up.railway.app
+```
+
+## Cómo funciona
+
+1. Toma tu access token (lo renueva si está a punto de caducar) o `VIVLA_TOKEN`.
+2. Lee los claims del token: `sub`, email, nombre y tus roles en tools (`https://auth.vivla.com/tools`).
+3. Pregunta a la vez, con 8 segundos de margen:
+   - a Identity por `GET /api/me` (persona, equipo, rol);
+   - a Identity por `GET /api/dev-profile` (tus repos);
+   - a GitHub por tu usuario y los PRs que has abierto en `vivla-tech` en los últimos 45 días. Esto último se cachea 6 h en `~/.vivla/cli/github.json` y se omite si `gh` no tiene sesión.
+4. Si `/api/me` contesta, `source` es `identity-api`. Si no (Identity caída, endpoint sin desplegar, o tu login no está vinculado a una persona y da 404), se queda con los claims del token: `source` es `token` y `fallbackReason` dice por qué.
+
+Identity se puede cambiar con `--identity-url` o `VIVLA_IDENTITY_URL`.
+
+## Qué toca
+
+Lee: Identity y GitHub. Escribe solo la caché de GitHub y, si renueva el token, el fichero de credenciales.
+
+## Salida `--json`
+
+```json
+{
+  "type": "whoami",
+  "authenticated": true,
+  "identity": {
+    "sub": "auth0|…",
+    "email": "ana@vivla.com",
+    "name": "Ana Pérez",
+    "team": "tech",
+    "role": "Developer",
+    "repos": ["vivla-tools", "vivla-cms"],
+    "tools": { "tool-propcos": { "role": "admin" }, "tool-web": { "role": "editor" } },
+    "source": "identity-api",
+    "github": { "login": "ana-vivla", "active": { "vivla-tools": 12, "vivla-cms": 3 } }
+  },
+  "identityUrl": "https://identity-production-6e44.up.railway.app",
+  "auth0": "vivlapro.eu.auth0.com"
+}
+```
+
+Si Identity no contesta: `"source": "token"` y `"fallbackReason": "/api/me → HTTP 404"` (o `"unreachable"`), sin `team`, `role` ni `repos`. Sin sesión:
+
+```json
+{ "type": "whoami", "authenticated": false, "message": "Not logged in. Run `vivla login`." }
+```
+
+## Exit codes
+
+| Código | Cuándo           |
+| ------ | ---------------- |
+| `0`    | tienes sesión    |
+| `2`    | no tienes sesión |
+
+## Para agentes (MCP)
+
+`whoami` (sin argumentos) devuelve `{ "authenticated": true, "identity": {…} }` o `{ "authenticated": false }`. Si es `false`, `login_start`.
+
+## Relacionado
+
+[`login`](/cli/commands/login) · [`profile`](/cli/commands/profile) · [Identity](/cli/identity#api-de-identity)

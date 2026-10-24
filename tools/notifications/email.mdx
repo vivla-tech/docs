@@ -1,0 +1,240 @@
+---
+title: "Email"
+description: "Servicio de envío de emails transaccionales con templates HTML vía SMTP2GO"
+---
+
+# Email
+
+El módulo de Email gestiona el envío de correos electrónicos transaccionales. Incluye 8 templates HTML profesionales con soporte para variables dinámicas.
+
+Email también está disponible como **canal del builder de automaciones** — al definir un step de tipo `action` se puede activar `email` junto a push, in_app, tools_inbox y chat. La acción usa la misma `EmailService` y soporta `{{variable}}` interpolation desde el payload del evento.
+
+## Proveedor
+
+**SMTP2GO** — servicio transaccional con tracking de delivery, opens y clicks. Configurado vía `SMTP2GO_USER` + `SMTP2GO_API_KEY`. Sender por defecto: `EMAIL_FROM_DEFAULT` + `EMAIL_FROM_NAME_DEFAULT`. La integración Resend anterior se deprecó en la migración del epic notification-automation-system; el alias `FROM_EMAIL` se mantiene transitoriamente para entornos que aún no completaron la actualización de variables.
+
+## Templates disponibles
+
+| Template | Uso | Variables |
+|----------|-----|-----------|
+| `welcome` | Onboarding de usuario | `firstName`, `lastName`, `loginUrl` |
+| `password-reset` | Recuperacion de password | `firstName`, `resetUrl`, `expiresIn` |
+| `subscription-confirmation` | Suscripcion completada | `firstName`, `planName`, `amount`, `currency`, `nextBillingDate`, `billingPortalUrl` |
+| `subscription-cancelled` | Cancelacion de suscripcion | `firstName`, `planName`, `cancellationDate`, `accessUntil` |
+| `payment-failed` | Fallo de pago | `firstName`, `planName`, `amount`, `currency`, `retryDate`, `updatePaymentUrl` |
+| `invoice` | Envio de factura | `firstName`, `invoiceNumber`, `amount`, `currency`, `dueDate`, `downloadUrl` |
+| `trial-ending` | Aviso fin de trial | `firstName`, `trialEndDate`, `upgradeUrl` |
+| `subscription-renewal` | Renovacion confirmada | `firstName`, `planName`, `renewalDate`, `amount`, `currency` |
+
+Cada template incluye version HTML (responsive con CSS inline) y version texto plano.
+
+## Builder de plantillas de email
+
+Las plantillas de email se crean y editan visualmente en `/app/notifications/email` (editor basado en `@react-email/editor` / TipTap). El editor compila el contenido a HTML email-safe (`<table role="presentation">`, secciones, botones) y guarda tanto el `html_body` como el `editor_state` (JSON de TipTap) para reabrir la plantilla sin pérdida.
+
+### Borrador vs publicado
+
+Cada plantilla tiene un campo `status` (`draft` | `published`, migración 142). El builder ofrece dos acciones de guardado en la barra superior:
+
+- **Guardar borrador** (`status='draft'`) — guarda trabajo en curso sin exigir asunto ni cuerpo (solo nombre). El borrador se queda en el editor para seguir trabajando. La validación del payload de email se relaja server-side (`emailDraftPayloadSchema`).
+- **Publicar** (`status='published'`) — aplica la validación completa (nombre + asunto + cuerpo) y vuelve al listado.
+
+Los borradores se marcan con un badge **«Borrador»** en el header del editor y en las tarjetas del listado. Quedan **ocultos a quien envía**: los selectores de envío piden solo plantillas `published`, y los paths de envío en producción (`sending.service`, `engine.service`) fuerzan `status='published'`. El **test-send sí** permite borradores para que el autor pruebe antes de publicar. Al duplicar una plantilla, la copia siempre nace como `draft`.
+
+La API expone el filtro vía query param: `GET /v1/notifications/templates?status=published`.
+
+### Librería de bloques
+
+El panel izquierdo del editor incluye una librería de bloques reutilizables (`notification_email_blocks`):
+
+- **Estructura** — inserts nativos del editor (columnas, secciones, botón, separador, títulos, listas, imagen).
+- **Sistema** — 9 bloques `is_system` listos para usar (header navy, hero, sección, CTA, separador, firma, pasos, footer básico, footer legal), regenerados con HTML table-based (migración 143).
+- **Míos** — bloques que el usuario guarda desde el editor (selección activa o documento completo). Cada bloque guarda su `json_content` (TipTap) y un `html_preview` para el thumbnail.
+
+Al insertar un bloque se desempaqueta su nodo raíz y se inserta como array de nodos, de modo que la estructura del email no se corrompe.
+
+## API Endpoints
+
+Todos los endpoints requieren rol `admin`.
+
+| Metodo | Endpoint | Descripcion |
+|--------|----------|-------------|
+| GET | `/email/templates` | Listar templates disponibles |
+| GET | `/email/templates/:name` | Detalle de un template |
+| POST | `/email/test` | Enviar email de prueba con variables custom |
+| POST | `/email/welcome` | Enviar email de bienvenida a usuario |
+
+## Opciones de envio
+
+```typescript
+{
+  to: string          // destinatario
+  subject: string     // asunto
+  html: string        // contenido HTML
+  text?: string       // texto plano (fallback)
+  from?: string       // remitente
+  replyTo?: string    // reply-to
+  cc?: string[]       // copia
+  bcc?: string[]      // copia oculta
+  attachments?: []    // adjuntos
+  tags?: string[]     // categorizacion
+}
+```
+
+## Estructura de modulo
+
+```
+apps/backend/src/email/
+  email.module.ts
+  email.controller.ts
+  email.service.ts
+  templates/           # Templates HTML
+```
+
+## Best practices transaccionales (Ronda D)
+
+El motor aplica una serie de transformaciones al `html_body` antes de mandarlo a SMTP2GO. Cada una es opcional y idempotente; viven en `apps/backend/src/notifications/engine/transactional-email.util.ts`.
+
+### Preview text (preheader)
+
+Campo opcional `preheader` en `channel_payload`. El motor inyecta un `<div>` oculto justo después de `<body>` con el texto preheader interpolado y ~30 pares `&zwnj;&nbsp;` de padding para empujar fuera del preview cualquier texto del cuerpo. Sweet spot 80–120 chars; cap duro 200.
+
+Lo edita el creador de la plantilla en el editor (`/app/notifications/email/{id}` → Configuración → Preview text).
+
+### Locale en `<html lang>`
+
+Sustituido en runtime: `'en'` cuando `recipient.locale === 'en'`, `'es'` en cualquier otro caso. La plantilla siempre se guarda con `lang="en"` (el editor no lo customiza), pero el destinatario recibe la suya.
+
+### Color scheme (force light)
+
+Inyecta `<meta name="color-scheme" content="light">` y `supported-color-schemes` para evitar que Gmail/Apple Mail apliquen su algoritmo de inversión a los colores Vivla (cream/navy → café/gris). Forzar light es más predecible que diseñar dark mode bien; revisar como mejora futura si CX/Marketing lo pide.
+
+### Title
+
+`<title>{{subject}}</title>` en `<head>`. Algunos webmail clients lo muestran en print/forward; lectura cero coste.
+
+### List-Unsubscribe (RFC 8058 one-click)
+
+Cuando `UNSUBSCRIBE_TOKEN_SECRET` está configurado y el target es un userId, el motor añade dos headers:
+
+```
+List-Unsubscribe: <https://api.vivla.com/v1/notifications/unsubscribe?token=...>, <mailto:abuse@vivla.com?subject=unsubscribe>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+```
+
+Gmail/Yahoo lo exigen para bulk desde feb-2024; transaccional también se beneficia. Click → POST al endpoint `/v1/notifications/unsubscribe` (Public, token-auth) → upsert idempotente en `notification_suppressions`. El motor consulta esta tabla antes de cada send y skipea si hay match. Ver [Suppressions / preferences](#suppressions) abajo.
+
+Default scope = `category` (template.category). Coherente con la percepción del usuario ("no quiero más recordatorios"). Granularidad por template requiere editar el row manualmente.
+
+<Warning>
+**SMTP2GO reserva estos dos headers.** SMTP2GO gestiona el unsubscribe de forma nativa y **rechaza la petición entera** si `List-Unsubscribe` / `List-Unsubscribe-Post` llegan como `custom_headers` (responde con el genérico *"An error occurred processing the json data you sent with the request"*). El `Smtp2goProvider` por eso **filtra los headers reservados antes de enviar** (`sanitizeCustomHeaders`, `smtp2go.provider.ts`) y loguea un `warn` con lo que descartó — el email sale igualmente en vez de fallar entero. Consecuencia: el botón de un-clic de Gmail **no se emite hoy** por este canal. Para recuperarlo sin que SMTP2GO rechace, la vía correcta es activar el unsubscribe nativo de SMTP2GO a nivel de cuenta (Settings → Unsubscribe), no reinyectar el header.
+
+Esto fue la causa raíz del corte de emails de ticket (28-jul → 24-ago-2026): todo email a un `userId` (todos los de ticket) llevaba el par y SMTP2GO lo rechazaba; los emails a dirección cruda (confirmaciones de reserva) nunca lo llevan y seguían enviándose.
+</Warning>
+
+### UTM injection
+
+Si `EMAIL_UTM_DOMAINS=app.vivla.com,vivla.com` está configurada, todo `<a href="...">` cuyo hostname matchee se enriquece con:
+
+```
+utm_source=email
+utm_medium={template.category}     # reminder | announcement | feedback | promotional | transactional
+utm_campaign=tpl_{template_id_short}
+utm_content=evt_{event_id_short}
+```
+
+Skipea `mailto:`, `tel:`, anchors `#`, URLs ya con `utm_*` (el editor pudo elegir tracking explícito), y URLs con `{{...}}` sin interpolar.
+
+### Open / click tracking (SMTP2GO native)
+
+Cada send lleva `track_opens: true, track_clicks: true` (overridable con `SMTP2GO_TRACK_OPENS=false` / `SMTP2GO_TRACK_CLICKS=false`). El dashboard de SMTP2GO debe tenerlo activado a nivel cuenta — la flag per-mensaje no enciende algo apagado a nivel cuenta.
+
+Eventos webhook se postean a `POST /v1/notifications/email/webhook/smtp2go` (Public, HMAC verify), normalizan a 7 tipos canónicos (`delivered, opened, clicked, bounced, spam, rejected, unsubscribed`), y se persisten en `notification_email_events`. Setup paso a paso en `docs/internal/tools/notifications/runbooks/smtp2go-tracking-setup.md`.
+
+**Caveat Apple MPP:** desde iOS 15, Apple Mail pre-fetcha imágenes del email — todos los emails parecen "abiertos" inmediatamente. Las métricas de open son inflacionarias; clicks son más fiables.
+
+### Schema.org structured data
+
+Eventos en `DOMAIN_EVENT_CATALOG` con campo `schema_org` emiten un `<script type="application/ld+json">` describiendo un `EmailMessage` con `potentialAction`. Gmail muestra un botón inline al lado del sender (sin abrir el email). Cobertura inicial:
+
+| event_type | Action | URL |
+|------------|--------|-----|
+| `user.welcomed` | ViewAction "Abrir Vivla" | `{appUrl}/app/dashboard` |
+| `booking.created` | ViewAction "Ver mi reserva" | `{appUrl}/app/bookings/{bookingId}` |
+| `booking.rent_approved` | ConfirmAction "Ver alquiler aprobado" | `{appUrl}/app/bookings/{bookingId}` |
+
+Añadir más eventos: edita `packages/common/src/types/automation-flow.ts` y agrega `schema_org` al `DomainEventDefinition` correspondiente. `actionName` es `I18nString` (es+en mínimo); `handlerUrl` se interpola contra el payload del evento.
+
+### Tags por mensaje (analítica)
+
+El motor adjunta tres tags a cada email send:
+
+```
+template_id={uuid}
+template_category={reminder|announcement|...}
+event_type={booking.created|...}
+```
+
+SMTP2GO los serializa como custom_headers `X-Vivla-Tag-*` (no tiene campo nativo `tags` en su API v3). El webhook los echo back y `notification_email_events.metadata` los preserva — analytics filtrables por cualquiera.
+
+## Suppressions
+
+Tabla `notification_suppressions` (migración 089). El motor consulta `PreferencesService.findActiveSuppression()` antes de cada send y skipea con log si hay match.
+
+Schema:
+
+```sql
+user_id uuid       -- FK a users
+channel text       -- email | push | in_app | tools_inbox | chat
+scope text         -- all | category | template
+scope_value text   -- category name o template_id (NULL si scope=all)
+source text        -- list_unsubscribe | preferences_ui | manual_admin
+reason text        -- libre
+```
+
+Resolución de matches en orden: `scope=all` mata todo el canal → `scope=category` → `scope=template`.
+
+Endpoints:
+
+- `POST /v1/notifications/unsubscribe?token=...` → One-Click (Public, RFC 8058)
+- `GET /v1/notifications/unsubscribe?token=...` → landing HTML con confirmación + lista de suppressions actuales
+- `GET /v1/notifications/preferences/me` → autenticado, devuelve las suppressions del user
+- `DELETE /v1/notifications/preferences/me/:id` → re-subscribe (borra una suppression)
+
+Tokens HMAC-SHA256 (`UNSUBSCRIBE_TOKEN_SECRET`), TTL default 30 días, soporte de rotación con `UNSUBSCRIBE_TOKEN_SECRETS_ACCEPTED` (lista CSV de secrets antiguos que aún verifican).
+
+## Variables expuestas en email render
+
+Más allá de `event.payload` y `SYSTEM_PROPERTIES`:
+
+- `{{unsubscribeUrl}}` — URL firmada con token, lista para `<a href>`. Vacía si no hay secret configurado.
+- `{{manageNotificationsUrl}}` — `${APP_PUBLIC_URL or app.vivla.com}/app/settings/notifications`.
+
+Ambas se inyectan **solo en el canal email** — push/in_app/tools_inbox/chat mantienen su contexto sin tocar.
+
+## Configuración
+
+Resumen de env vars relacionadas con email (ver `apps/backend/.env.example`):
+
+```
+# Provider
+SMTP2GO_API_KEY=...
+EMAIL_FROM_DEFAULT=noreply@vivla.com
+EMAIL_FROM_NAME_DEFAULT=Vivla
+SMTP2GO_TRACK_OPENS=true             # default true
+SMTP2GO_TRACK_CLICKS=true            # default true
+SMTP2GO_WEBHOOK_SECRET=...           # set after configuring webhook in dashboard
+
+# Compliance / unsubscribe
+UNSUBSCRIBE_TOKEN_SECRET=...                   # required to emit List-Unsubscribe
+UNSUBSCRIBE_TOKEN_SECRETS_ACCEPTED=oldA,oldB   # rotation grace
+PUBLIC_API_URL=https://api.vivla.com           # used in unsubscribe links
+APP_PUBLIC_URL=https://app.vivla.com           # used in {{appUrl}} + manageNotificationsUrl
+
+# UTM
+EMAIL_UTM_DOMAINS=app.vivla.com,vivla.com      # empty disables injection
+```
+
+## BIMI (futura mejora)
+
+[BIMI](https://bimigroup.org/) hace que el logo Vivla aparezca al lado del sender en Gmail/Apple Mail/Yahoo. Requiere DMARC enforcement (ya tenemos), un VMC certificado (~$1,500/año via DigiCert/Entrust), y un registro DNS `default._bimi.vivla.com TXT v=BIMI1;l=https://...logo.svg;a=https://...vmc.pem`. Excluido de la Ronda D por costo; revisar cuando el volumen de email justifique el ROI de marca.

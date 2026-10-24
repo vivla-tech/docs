@@ -1,0 +1,74 @@
+---
+title: "vivla profile"
+description: "Los repos que la CLI te recomienda y por qué está cada uno. Es lo que monta setup --profile y lo que sale con ★ en el asistente."
+---
+
+Los repos que la CLI te recomienda y por qué está cada uno. Es lo que monta `setup --profile` y lo que sale con ★ en el asistente.
+
+```bash
+vivla profile
+vivla profile --json | jq -r '.repos[]'
+```
+
+```
+Recommended for ana@vivla.com (identity-api: base, identity, lead, active):
+  • docs                 base                           wiki.vivla.com — engineering, product and CX wiki (Cloudflare Worker)
+  • vivla-tools          identity, active (59 PRs)      Internal platform — backend, identity, tools frontend, spark (Turborepo)
+  • vivla-cms            lead, active (21 PRs)          vivla.com web + Payload CMS (Turborepo)
+
+→ vivla setup --profile
+```
+
+## Cómo funciona
+
+Suma cuatro fuentes. Ninguna quita repos:
+
+| Motivo             | De dónde sale                                                                                                                                       |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `base`             | `base:` de `manifest/profiles.yaml`: va para todo el mundo                                                                                          |
+| `identity`         | los repos que devuelve Identity (`GET /api/dev-profile`), que salen de la tabla `identity_dev_packages`                                             |
+| `team:…`, `role:…` | solo si Identity no devolvió repos: tu equipo y tus roles (el de Identity y los de tools en el token) contra `teams:` y `roles:` de `profiles.yaml` |
+| `lead`             | los repos con tu usuario de GitHub en `leads:` de su fichero del catálogo                                                                           |
+| `active (N PRs)`   | los repos de `vivla-tech` donde has abierto 2 PRs o más en los últimos 45 días, según `gh` (caché de 6 h; se omite si `gh` no tiene sesión)         |
+
+`source` es `identity-api` si Identity dio repos y `profiles.yaml` si se usó el fallback. `matched` lista qué fuentes encajaron. Solo cuentan los repos que están en el catálogo.
+
+Los paquetes de cada equipo y rol se editan en la herramienta Dev de tools: ver [identity.md](/cli/identity#cómo-cambiar-qué-repos-recibe-cada-equipo).
+
+## Qué toca
+
+Lee: Identity y GitHub. No cambia nada.
+
+## Salida `--json`
+
+```json
+{
+  "type": "profile",
+  "identity": { "email": "ana@vivla.com", "team": "tech", "role": "Developer" },
+  "repos": ["docs", "vivla-tools", "vivla-cms"],
+  "source": "identity-api",
+  "matched": ["base", "identity", "lead", "active"],
+  "reasons": {
+    "docs": ["base"],
+    "vivla-tools": ["identity", "active (59 PRs)"],
+    "vivla-cms": ["lead", "active (21 PRs)"]
+  }
+}
+```
+
+Sin sesión: `{ "type": "profile", "authenticated": false, "message": "Not logged in. Run `vivla login`." }`.
+
+## Exit codes
+
+| Código | Cuándo           |
+| ------ | ---------------- |
+| `0`    | ok               |
+| `2`    | no tienes sesión |
+
+## Para agentes (MCP)
+
+`get_profile` (sin argumentos) devuelve `repos`, `source`, `matched` y `reasons`, o `{ "authenticated": false, "message": "Call login_start first" }`.
+
+## Relacionado
+
+[`whoami`](/cli/commands/whoami) · [`repos`](/cli/commands/repos) · [`setup --profile`](/cli/commands/setup) · [De dónde sale tu perfil](/cli/identity#de-dónde-sale-tu-perfil)

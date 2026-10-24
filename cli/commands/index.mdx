@@ -1,0 +1,66 @@
+---
+title: "Comandos"
+description: "Cada comando tiene su página en esta carpeta: qué hace, ejemplos, opciones, cómo funciona por dentro, qué toca, su salida --json, sus exit codes y su tool MCP. Las guías (montar el entorno, día a…"
+---
+
+Cada comando tiene su página en esta carpeta: qué hace, ejemplos, opciones, cómo funciona por dentro, qué toca, su salida `--json`, sus exit codes y su tool MCP. Las guías ([montar el entorno](/cli/setup), [día a día](/cli/devtools)) cuentan cómo encajan. `vivla <comando> --help` da las opciones en inglés, y `vivla describe` en JSON.
+
+## De un vistazo
+
+**Toca** dice hasta dónde llega: _local_ (solo tu máquina), _lee_ (consulta servicios remotos sin cambiar nada) o _escribe_ (cambia algo fuera de tu máquina, y por eso pide confirmación o `--yes`).
+
+| Comando                                     | Qué hace                                                    | Toca                        | MCP                         | Guía                                                    |
+| ------------------------------------------- | ----------------------------------------------------------- | --------------------------- | --------------------------- | ------------------------------------------------------- |
+| [`vivla`](/cli/commands/vivla)                         | pantalla de inicio; la primera vez, el asistente            | lee                         | —                           | [devtools](/cli/devtools#vivla-la-pantalla-de-inicio)  |
+| [`login`](/cli/commands/login) · [`logout`](/cli/commands/logout) | sesión con Vivla Identity                                   | local                       | `login_start`, `login_poll` | [setup](/cli/setup#sesión-vivla-login-whoami-logout)   |
+| [`whoami`](/cli/commands/whoami)                       | quién eres según Identity                                   | lee                         | `whoami`                    | [identity](/cli/identity)                              |
+| [`doctor`](/cli/commands/doctor)                       | chequeo de la máquina y los repos                           | lee                         | `doctor`                    | [setup](/cli/setup#vivla-doctor)                       |
+| [`profile`](/cli/commands/profile)                     | tus repos recomendados y por qué                            | lee                         | `get_profile`               | [identity](/cli/identity#de-dónde-sale-tu-perfil)      |
+| [`repos`](/cli/commands/repos)                         | el catálogo con su estado local                             | local                       | `list_repos`                | [setup](/cli/setup#vivla-profile-y-vivla-repos)        |
+| [`setup`](/cli/commands/setup) · [`plan`](/cli/commands/plan)     | montar la máquina y los repos · qué haría                   | local                       | `setup` + `get_run`, `plan` | [setup](/cli/setup#vivla-setup-y-vivla-plan)           |
+| [`env pull`](/cli/commands/env)                        | volver a bajar los `.env`                                   | local                       | `env_pull`                  | [setup](/cli/setup#env-de-dónde-sale-y-cómo-se-mezcla) |
+| [`status`](/cli/commands/status)                       | qué commit hay desplegado, cuánto falta y si responde       | lee                         | `status`                    | [devtools](/cli/devtools#vivla-status)                 |
+| [`logs`](/cli/commands/logs)                           | logs de un servicio desplegado                              | lee                         | `logs`                      | [devtools](/cli/devtools#vivla-logs)                   |
+| [`call`](/cli/commands/call)                           | una petición HTTP a un servicio desplegado                  | lee (escribe fuera de prod) | `call`                      | [devtools](/cli/devtools#vivla-call)                   |
+| [`open`](/cli/commands/open)                           | abrir GitHub, PRs, Actions, docs, el dashboard o un entorno | local                       | —                           | [devtools](/cli/devtools#vivla-open)                   |
+| [`dev`](/cli/commands/dev) · [`run`](/cli/commands/run)           | arrancar las apps de un repo · un comando con nombre        | local                       | —                           | [devtools](/cli/devtools#vivla-dev-y-vivla-run)        |
+| [`migrate`](/cli/commands/migrate)                     | migraciones SQL numeradas y registradas                     | escribe                     | `migrations` (status)       | [devtools](/cli/devtools#migraciones-vivla-migrate)    |
+| [`db`](/cli/commands/db)                               | SQL, logs y dashboard de Supabase                           | lee (escribe fuera de prod) | `db_query`, `db_logs`       | [devtools](/cli/devtools#base-de-datos-vivla-db)       |
+| [`pr`](/cli/commands/pr) · [`release`](/cli/commands/release)     | abrir un PR contra la base correcta · cortar una release    | escribe                     | —                           | [devtools](/cli/devtools#prs-y-releases)               |
+| [`user`](/cli/commands/user)                           | buscar a alguien en Identity                                | lee                         | —                           | [devtools](/cli/devtools#vivla-user)                   |
+| [`update`](/cli/commands/update)                       | actualizar la CLI                                           | local                       | —                           | [updates](/cli/updates#versión-de-la-cli)              |
+| [`describe`](/cli/commands/describe) · [`mcp`](/cli/commands/mcp) | contrato JSON · servidor MCP                                | local                       | —                           | [agents](/cli/agents)                                  |
+
+Lo que escribe fuera de la máquina (`migrate apply`, `pr`, `release`) no es una tool MCP: un agente lo lanza por la CLI con `--yes` cuando una persona lo ha aprobado.
+
+## Opciones globales
+
+Van antes o después del comando y valen para todos.
+
+| Opción                             | Qué hace                                                                            |
+| ---------------------------------- | ----------------------------------------------------------------------------------- |
+| `--json`                           | salida para máquinas: NDJSON en los runs, un objeto en el resto. Nunca pregunta     |
+| `--no-interactive`                 | no pregunta nunca; si falta una respuesta, `exit 3`. Por defecto sin TTY            |
+| `-y`, `--yes`                      | acepta lo que tenga valor por defecto y confirma lo que escribe fuera de tu máquina |
+| `--root <dir>`                     | dónde están los clones (por defecto `~/dev`, o `VIVLA_CLI_ROOT`)                    |
+| `--set <clave=valor>`              | responde una pregunta por su clave (repetible): `--set git.name="Ana Pérez"`        |
+| `--answers <fichero>`              | las respuestas en un JSON: `{ "git.email": "…" }`                                   |
+| `--git-name`, `--git-email`        | atajos de `--set git.name=…` y `--set git.email=…`                                  |
+| `--dry-run`                        | solo comprueba, no cambia nada                                                      |
+| `--force-env`                      | lo que llega de Vercel o Railway sobrescribe tus valores de `.env`                  |
+| `--connect <remote\|local>`        | los servicios que usa un repo, en staging (por defecto) o en clones locales         |
+| `--manifest <dir>`                 | usa un catálogo local en vez del de `main` (o `VIVLA_CLI_MANIFEST`)                 |
+| `--identity-url <url>`             | otra Vivla Identity (o `VIVLA_IDENTITY_URL`)                                        |
+| `-V`, `--version` · `-h`, `--help` |                                                                                     |
+
+Exit codes: `0` ok · `1` falló algo (log en `~/.vivla/cli/vivla.log`) · `2` sin sesión · `3` falta una respuesta · `4` necesita a una persona · `64` argumentos inválidos. Detalle en [agents.md](/cli/agents#exit-codes).
+
+## Por grupo
+
+- **Montar el entorno**: [`vivla`](/cli/commands/vivla) · [`login`](/cli/commands/login) · [`logout`](/cli/commands/logout) · [`whoami`](/cli/commands/whoami) · [`doctor`](/cli/commands/doctor) · [`profile`](/cli/commands/profile) · [`repos`](/cli/commands/repos) · [`setup`](/cli/commands/setup) · [`plan`](/cli/commands/plan) · [`env`](/cli/commands/env)
+- **Despliegues**: [`status`](/cli/commands/status) · [`logs`](/cli/commands/logs) · [`call`](/cli/commands/call) · [`open`](/cli/commands/open)
+- **En local**: [`dev`](/cli/commands/dev) · [`run`](/cli/commands/run)
+- **Base de datos**: [`db`](/cli/commands/db) (`query`, `logs`, `open`) · [`migrate`](/cli/commands/migrate) (`new`, `status`, `apply`)
+- **Git**: [`pr`](/cli/commands/pr) · [`release`](/cli/commands/release)
+- **Personas**: [`user`](/cli/commands/user)
+- **La CLI**: [`update`](/cli/commands/update) · [`describe`](/cli/commands/describe) · [`mcp`](/cli/commands/mcp)

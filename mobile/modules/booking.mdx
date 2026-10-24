@@ -1,0 +1,164 @@
+---
+title: 'Booking'
+description: 'Módulo de reservas, intercambios y alquileres'
+---
+
+## Descripción
+
+El módulo **Booking** gestiona la creación, visualización y cancelación de reservas. Soporta tres tipos de operación: reserva directa, intercambio y alquiler.
+
+- **Ubicación:** `src/modules/booking/`
+
+<Note>
+  Los usuarios visitantes y aquellos sin propiedades registradas solo tienen acceso a la pantalla de
+  alquiler (`RentScreen`).
+</Note>
+
+## Screens
+
+| Screen                      | Ruta                             | Descripción                                    |
+| --------------------------- | -------------------------------- | ---------------------------------------------- |
+| `BookScreen`                | `/(tabs)/02_book/book-stays`     | Lista de propiedades disponibles para reservar |
+| `ExchangeScreen`            | `/(tabs)/02_book/exchange-stays` | Propiedades disponibles para intercambio       |
+| `RentScreen`                | `/(tabs)/02_book/rent-stays`     | Propiedades disponibles para alquiler          |
+| `BookingCreationScreen`     | `/booking/new`                   | Crear nueva reserva                            |
+| `BookingConfirmationScreen` | `/booking/review`                | Confirmación de reserva                        |
+
+## API Endpoints
+
+| Método   | Path                              | Descripción                             |
+| -------- | --------------------------------- | --------------------------------------- |
+| `GET`    | `/v2/bookings/{id}`               | Detalle de una reserva                  |
+| `GET`    | `/v2/homes/{id}`                  | Propiedad asociada a reserva            |
+| `POST`   | `/v2/bookings/stay/{id}/update`   | Actualizar datos de la estancia         |
+| `POST`   | `/v1/bookings/{id}/reviews`       | Enviar reseña                           |
+| `POST`   | `/v2/bookings/book`               | Crear reserva (por slots V2)            |
+| `PUT`    | `/v2/bookings/{id}/request-rent`  | Crear reserva de alquiler               |
+| `PUT`    | `/v2/bookings/{id}/exchange`      | Crear reserva de intercambio            |
+| `POST`   | `/v2/bookings/exchange-last-hour` | Intercambio de última hora              |
+| `DELETE` | `/v2/bookings/{id}/cancel`        | Cancelar reserva                        |
+| `DELETE` | `/v2/bookings/stay/{id}/cancel`   | Cancelar la propia estancia (asistente) |
+| `PUT`    | `/v2/bookings/{id}/change`        | Modificar tipo de reserva               |
+
+## Hooks
+
+| Hook                                     | Descripción                                           |
+| ---------------------------------------- | ----------------------------------------------------- |
+| `useBooking(bookingId, propertyId)`      | Fetch de reserva y propiedad                          |
+| `useCancelBooking()`                     | Cancelar con invalidación de cache                    |
+| `useModifyBooking()`                     | Modificar tipo de reserva                             |
+| `useBookingDetail(bookingId)`            | Detalle de una reserva                                |
+| `useBookingReviews()`                    | Enviar reseña                                         |
+| `useCreateBooking()`                     | Crear reserva directa                                 |
+| `useCreateBookingToRent()`               | Crear reserva de alquiler                             |
+| `useCreateBookingToExchange()`           | Crear reserva de intercambio                          |
+| `useCreateBookingToExchangeLastHour()`   | Intercambio última hora                               |
+| `useBookingUpdate({ enableAutoUpdate })` | Autoguardado con _debounce_ del formulario de reserva |
+
+## Tipos principales
+
+<Tabs>
+  <Tab title="BookingInfo">
+    ```typescript
+    interface BookingInfo {
+      checkIn: string;
+      checkOut: string;
+      adults: number;
+      kids: number;
+      pets: number;
+      requests: string;
+      cleaning: boolean;
+      rental: boolean;
+      reservations: Reservation[];
+      crib: boolean;
+    }
+    ```
+  </Tab>
+  <Tab title="Estados y tipos">
+    ```typescript
+    // Estados de reserva
+    type BookingStatus = "ACTIVE" | "CANCELLED" | "PAST";
+
+    // Tipos de reserva
+    type BookingType = "EXCHANGE" | "RENT";
+
+    // Estados de aprobación
+    type ApprovalStatus = "APPROVED" | "REJECTED" | "PENDING" | "FREE";
+    ```
+
+    <Note>
+      Una reserva de alquiler, intercambio o ThirdHome **publicada** (sin estancia asociada)
+      queda en estado `FREE`, no `APPROVED`: aún no hay una solicitud aceptada, por lo que no
+      debe mostrarse como "Alquilada", "Intercambiada" ni "Confirmada". Solo las reservas de
+      tipo `enjoy` sin estancia permanecen en `APPROVED`.
+    </Note>
+
+  </Tab>
+  <Tab title="Guest">
+    ```typescript
+    // Información del huésped asociado a la reserva
+    interface Guest {
+      name: string;
+      email: string;
+      phone: string;
+      // ...campos adicionales
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Componentes destacados
+
+<CardGroup cols={2}>
+  <Card title="booking-creation" icon="calendar-plus">
+    Flujo completo de creación de reserva: selección de propiedad, fechas, huéspedes y confirmación.
+  </Card>
+  <Card title="calendar" icon="calendar-days">
+    Componente de selección de fechas con soporte para rangos, disponibilidad y bloqueos.
+  </Card>
+</CardGroup>
+
+## Calendario de reserva
+
+`usePropertyCalendar(propertyId, propertyType)` combina dos endpoints:
+
+| Endpoint                                    | Uso                                                                                     |
+| ------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `GET /v2/calendars/property/{id}`           | Slots de la casa, cada uno con su temporada: id, nombre, color y `allowsConsecutive`    |
+| `GET /v2/calendars/available-bookings/{id}` | Cupo del usuario por temporada (`available`/`maximum`), ya repartido entre madre e hija |
+
+Las temporadas se distinguen por su **id de la API**, no por categoría. Reglas de selección de fechas:
+
+| Caso                   | Regla                                                                                                              |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Entrada                | El slot está disponible y el usuario tiene cupo en su temporada, o el slot es de última hora                       |
+| Salida dentro del slot | Siempre válida                                                                                                     |
+| Dos slots seguidos     | Misma temporada (mismo id), ambas con `allowsConsecutive` y al menos 2 de cupo; el segundo slot sin reserva propia |
+| Temporadas distintas   | No se pueden encadenar, aunque compartan categoría o sean madre e hija                                             |
+
+<Note>
+  Si la temporada no trae `allowsConsecutive`, el slot no admite reservas consecutivas. El valor que
+  llega en `available-bookings` es un relleno por defecto y no se usa.
+</Note>
+
+**Colores y leyenda.** Los días se pintan con el color de la API; los reservados por el propio usuario usan ese color alejado del fondo del calendario (`getStayBookedSeasonColor`). Si la API no manda color se usa el de `SEASONS`. La leyenda (`SeasonCounter`) muestra una entrada por temporada en el orden de la API, con su cupo y el nombre traducido por `translateSeasonName`, más la entrada fija "Ilimitadas de última hora".
+
+**Estado vacío.** `EmptyCalendar` solo aparece si falla alguna de las dos peticiones o la casa no tiene slots. Un usuario sin cupo en ninguna temporada ve el calendario con solo las semanas de última hora disponibles.
+
+**Llaves de intercambio.** `BookingCreationScreen` calcula con `getStaysKeys` las llaves de toda la reserva: suma las de cada slot y, si un slot no trae las suyas, usa las de la casa para esa temporada (`property.keys`, por id). Las llaves solo se muestran como instantáneas si todos los slots lo son.
+
+**Celdas.** `getCalendarDaySize()` da a cada día un tamaño en píxeles enteros a partir del ancho real de la fila, y las semanas se centran. Así no aparecen líneas de 1 px entre columnas en Android.
+
+## Queries
+
+<Warning>
+  Todas las consultas de reservas utilizan **React Query** (`bookingQueries`) para fetching y
+  caching. No realizar llamadas directas al API fuera de este sistema de queries.
+</Warning>
+
+El módulo define `bookingQueries` con claves de cache estructuradas para:
+
+- Listado de reservas del usuario
+- Detalle de reserva individual
+- Propiedades asociadas
+- Invalidación automática tras mutaciones (crear, cancelar, modificar)

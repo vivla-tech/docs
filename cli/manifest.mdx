@@ -1,0 +1,169 @@
+---
+title: "Manifest"
+description: "Qué sabe montar la CLI vive en manifest/, en YAML validado con zod (src/manifest/schema.ts). Para probar cambios sin publicar: --manifest ./manifest o VIVLACLIMANIFEST=…."
+---
+
+Qué sabe montar la CLI vive en `manifest/`, en YAML validado con zod (`src/manifest/schema.ts`). Para probar cambios sin publicar: `--manifest ./manifest` o `VIVLA_CLI_MANIFEST=…`.
+
+| Fichero             | Contenido                                                                               |
+| ------------------- | --------------------------------------------------------------------------------------- |
+| `repos/<repo>.yaml` | un fichero por repo: cómo se monta (el nombre del fichero es el repo)                   |
+| `profiles.yaml`     | fallback de equipo/rol → repos (ver [identity.md](/cli/identity#de-dónde-sale-tu-perfil)) |
+| `machine.yaml`      | herramientas (mise), versión de Node, servidores MCP y skills para agentes              |
+
+## Añadir un repo
+
+Cada repo es un fichero en [`manifest/repos/`](https://github.com/vivla-tech/vivla-cli/tree/main/manifest/repos). **El nombre del fichero es el repo**: `mi-repo.yaml` corresponde a `github.com/vivla-tech/mi-repo` (para otro owner, usa `github: org/nombre`). Los ficheros que empiezan por `_` se ignoran.
+
+```bash
+cp manifest/repos/_template.yaml manifest/repos/mi-repo.yaml
+vivla --manifest ./manifest plan repo mi-repo   # probarlo antes de hacer el PR
+```
+
+```yaml
+# manifest/repos/mi-repo.yaml
+description: Qué es, en una línea
+branch: develop # opcional; por defecto la rama por defecto del repo
+stack: [node, pnpm, nextjs] # informativo
+packageManager: pnpm # npm | pnpm | yarn | none
+installDirs: [., worker] # dónde instalar deps si no hay workspace raíz
+tools: [supabase] # herramientas globales extra, con mise
+leads: [usuario-github] # quién lo lleva: le sale en su perfil
+skills: [vivla-tech/vivla-design-skill] # skills obligatorias en este repo; ver abajo
+logins: [vercel] # vercel | railway | wrangler | gcloud | firebase | eas
+env: # se aplican en orden; ver abajo
+  - { from: vercel, path: .env.local, project: mi-proyecto, environment: preview }
+  - { from: railway, path: apps/api/.env, project: <id>, service: api, environment: develop }
+  - { from: example, path: .env.local, template: .env.example }
+post: [pnpm db:migrate] # se ejecuta una vez (se vuelve a ejecutar si cambian los comandos)
+verify: [pnpm build] # una vez por commit
+dev: pnpm dev # lo que arranca `vivla dev` (en un monorepo, mejor `apps`)
+apps: # monorepos: cada app con su comando; ver abajo
+  - { name: web, dir: apps/web, dev: pnpm dev:web, port: 3000 }
+  - { name: docs, dir: apps/docs, dev: pnpm --filter docs dev, secondary: true }
+ports: [3000]
+docs: https://wiki.vivla.com/…
+```
+
+El esquema es estricto: un campo mal escrito (`packageManger`) hace fallar la carga indicando el fichero, en vez de ignorarse sin avisar.
+
+Lo que se hace con cada repo, como grafo de tareas (`src/tasks/repo.ts`):
+
+```
+clone ─► runtime (mise install) ─► deps ─┐
+   ├────► env (logins) ──────────────────┴─► post ─► verify
+   └────► skills
+```
+
+## Apps de un monorepo (`apps`)
+
+Un repo con varias apps (vivla-cms: web, admin, design, referrals, factory, agent) las declara una a una. Las **principales** son las que casi siempre quieres levantar; las **secundarias** (`secondary: true`), solo cuando las pides:
+
+```yaml
+apps:
+  - { name: web, dir: apps/web, dev: pnpm dev:site, port: 4321 }
+  - { name: admin, dir: apps/cms, dev: pnpm dev:cms, port: 3000 }
+  - {
+      name: referrals,
+      dir: apps/referrals,
+      dev: pnpm --filter @vivla-cms/referrals dev,
+      port: 3005,
+      secondary: true,
+    }
+```
+
+- `vivla dev <repo>` arranca las principales; `--all`, todas; `vivla dev <repo> referrals`, las que nombres.
+- `dev` se ejecuta desde la raíz del repo. `port` sirve para avisar si ya está ocupado y para enseñar la URL.
+- Si un `deploy` se llama igual que una app, `vivla status` cuenta como _behind_ solo los commits que tocan su `dir`. Así una app que Vercel no reconstruye (porque el commit no la toca) no sale como atrasada.
+
+## Skills por repo (`skills`)
+
+Las skills que un agente **tiene** que usar al trabajar en ese repo. Por ejemplo, en los proyectos de cara al público (`vivla-cms`, `vivla-mobile-app`, `vivla-app-site`, `vivla-alma-web`) la del design system:
+
+```yaml
+skills: [vivla-tech/vivla-design-skill] # o la URL de GitHub
+```
+
+La tarea `repo:<key>:skills` las instala dentro del clon con `npx skills add` (en `.agents/skills/`, con enlace en `.claude/skills/`), así que Claude Code, Cursor, Codex… las ven al abrir el repo, aunque no las tengas globales. Son obligatorias: si no se pueden instalar, el setup del repo falla, y `doctor` avisa si faltan.
+
+No ensucian el repo: lo instalado se añade a `.git/info/exclude` (solo en tu máquina), salvo lo que el repo ya tenga commiteado. Los worktrees de agentes (`--worktree`) también las reciben.
+
+## Dependencias entre repos (`connect`)
+
+Algunos repos solo funcionan si apuntan a otro servicio. Por ejemplo, la app móvil necesita `vivla-api` y el backend de `vivla-tools`. Esa relación se declara con `connect`:
+
+```yaml
+# manifest/repos/vivla-mobile-app.yaml
+connect:
+  - repo: vivla-api # repo del servicio (tiene que tener su fichero en repos/)
+    path: .env.development # fichero y variable de ESTE repo
+    env: API_URL
+    remote: https://vivla-api-staging.up.railway.app
+    local: http://localhost:3000
+    note: Android emulator reaches your Mac at 10.0.2.2
+```
+
+Hay dos modos:
+
+| Modo                   | Qué pasa                                                                                                                                                                                         |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `remote` (por defecto) | la variable apunta al despliegue compartido de develop/staging; no se monta nada más                                                                                                             |
+| `local`                | **también se monta el repo dependiente** (clone, deps, `.env`), la variable apunta a `localhost` y al final se indica qué arrancar primero (`next_actions` de tipo `info`, con su comando `dev`) |
+
+Se elige así:
+
+- **Para todos**: `--connect local|remote`.
+- **Por servicio**: `--set connect.vivla-api=local`.
+- **En la TUI**: tecla `c`.
+- **Por MCP**: `connect` / `answers`.
+
+La tarea `repo:<key>:connect` corre después del `env` del propio repo, así que lo descargado no pisa el cableado. En modo `local`, además, espera a que el repo dependiente esté instalado y configurado.
+
+## Fuentes de `.env`
+
+| `from`    | Qué hace                                                                                                              | Requiere                              |
+| --------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `vercel`  | `vercel env pull --environment <env> --project <p> --scope vivla` (quita las `VERCEL_*`)                              | `vercel login` o `VERCEL_TOKEN`       |
+| `railway` | `railway link` + `railway variables --json` (quita las `RAILWAY_*`); el link se guarda en `~/.railway`, no en el repo | `railway login` o `RAILWAY_API_TOKEN` |
+| `example` | copia del template las claves que falten (`<path>.example` por defecto)                                               | —                                     |
+
+Cómo se combinan:
+
+- Las fuentes se fusionan sobre el fichero existente, manteniendo comentarios y orden.
+- Los valores locales no vacíos se respetan, salvo con `--force-env` o `env pull`.
+- Al terminar, se avisa de las claves del template que siguen vacías.
+
+**Nunca uses `production` como fuente.** Los tests lo comprueban. En Vercel, `development` está vacío en casi todos los proyectos, así que se usa `preview`.
+
+## Día a día
+
+Campos opcionales que usan `vivla status`, `logs`, `open`, `migrate`, `db`, `pr`, `release` y `run` (ver [devtools.md](/cli/devtools)):
+
+| Campo        | Para qué                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `deploys`    | `{ name, env, platform: railway\|vercel\|cloudflare\|other, project, service?, branch?, url?, health?, scope?, account?, auth? }`. `project` es el proyecto de Railway, el de Vercel o el worker de Cloudflare (`account`, su cuenta, para `wrangler tail`); `auth: vivla`, que el servicio acepta el token de `vivla login` y `vivla call` se lo manda. `branch` es la rama de la que sale ese entorno (en Vercel, la de su custom environment o la de sus dominios de preview); `health`, una ruta o URL que responde (mejor si es JSON con `commitSha`). Un `name` igual al de una [app](#apps-de-un-monorepo-apps) hace que el retraso cuente solo los commits de su `dir` |
+| `supabase`   | `{ dev: <ref>, prod: <ref> }`: proyecto de Supabase por entorno                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `migrations` | `{ dir, registry? }`: carpeta de `NNN_nombre.sql` y la tabla que registra lo aplicado                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `flow`       | `{ base?, release?: { target, prefix } }`: rama base de los PRs y, si se hacen releases por cherry-pick, a dónde van                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `commands`   | `{ nombre: comando }` para `vivla run <repo> <nombre>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+
+## Máquina
+
+`machine.yaml` define:
+
+- `tools`: herramientas globales que instala **mise** con `setup machine`, igual en macOS y Linux. Si el binario ya está en el `PATH` (Homebrew, apt…), no se toca. Los runs de un solo repo instalan solo `gh direnv` y los CLIs que piden sus `logins`.
+- `apt`: solo Linux, lo poco que mise necesita del sistema (git, curl y `ca-certificates` van siempre). En macOS git y curl vienen con las Xcode Command Line Tools.
+- `node`: versión global con mise (y `corepack enable`).
+- `mcp`: servidores que se configuran en Claude Code, Cursor y Codex si están instalados.
+- `skills`: se instalan con `npx skills add <repo> -g`, para todos los proyectos. Las que solo tocan a un repo van en su fichero (ver [Skills por repo](#skills-por-repo-skills)).
+- `retired`: lo que versiones anteriores configuraban y ya no. `agents:tooling` lo quita de las máquinas que aún lo tienen y `doctor` lo avisa. Un servidor MCP solo se borra si sigue exactamente como lo dejamos (mismo comando o URL): uno hecho a mano con el mismo nombre no se toca. Las skills van por nombre (`vivla-welcome`, la de antes del rename).
+
+## Ids de tareas
+
+Sirven para `--only` / `--skip`, con `*` en cualquier parte (`login:*`, `repo:*:env`):
+
+```
+system:packages  mise:install  mise:tools  shell:hooks  git:identity  gh:auth  agents:tooling
+login:<vercel|railway|wrangler|gcloud|firebase|eas>
+repo:<key>:<clone|runtime|deps|env|connect|skills|post|verify|worktree>
+```

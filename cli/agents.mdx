@@ -1,0 +1,111 @@
+---
+title: "Uso desde agentes"
+description: "vivla está pensado para que un agente (Claude Code, Codex, Cursor, CI) pueda dejar listo un entorno sin TUI y sin quedarse colgado esperando un prompt."
+---
+
+`vivla` está pensado para que un agente (Claude Code, Codex, Cursor, CI) pueda dejar listo un entorno sin TUI y sin quedarse colgado esperando un prompt.
+
+Hay tres formas, todas sobre el mismo motor:
+
+1. **CLI + `--json`**: NDJSON en stdout, exit codes estables.
+2. **Servidor MCP**: `vivla mcp` (stdio).
+3. **Skill**: `skills/vivla-cli/SKILL.md` le explica al agente cuándo y cómo usar lo anterior.
+
+`vivla describe` imprime el contrato completo en JSON (comandos, flags, claves de respuesta, eventos, variables de entorno). Su fuente es `src/describe.ts`.
+
+## CLI
+
+```bash
+vivla doctor --json                       # solo lectura
+vivla setup repo vivla-tools --json       # clona, toolchain, deps, .env, verify
+vivla setup --profile --json              # máquina + repos recomendados por Identity
+vivla plan repo vivla-panel --json        # dry run
+vivla env pull vivla-cms --json           # re-descarga .env (sobrescribe)
+```
+
+### Modo no interactivo
+
+El modo no interactivo se activa con cualquiera de estas condiciones: `--json`, `--no-interactive`, stdin que no es TTY o `CI` definido. En ese modo **nunca** se pregunta nada. Si a una tarea le falta un dato, termina en `blocked` (kind `input`) y el proceso sale con código 3.
+
+### Responder prompts con flags
+
+| Flag                              | Equivale a                                                                                                        |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `--set key=value` (repetible)     | responder la pregunta `key`                                                                                       |
+| `--answers answers.json`          | `{ "git.email": "…" }`                                                                                            |
+| `--git-name`, `--git-email`       | `--set git.name=…`, `--set git.email=…`                                                                           |
+| `--root <dir>`                    | carpeta de clones (por defecto `~/dev`)                                                                           |
+| `--only <task>` / `--skip <task>` | filtrar tareas (admite `repo:vivla-tools:*`, `login:*`)                                                           |
+| `--force-env`                     | sobrescribir valores existentes en `.env`                                                                         |
+| `--connect local\|remote`         | servicios de los que depende un repo: despliegue compartido (por defecto) o clones locales, que también se montan |
+| `--set connect.<repo>=local`      | lo mismo, para un único servicio                                                                                  |
+| `--dry-run`                       | solo `check()`, sin cambios                                                                                       |
+| `--worktree <path>`               | preparar además un worktree (copia `.env`, instala deps)                                                          |
+
+### Salida NDJSON
+
+```jsonc
+{"type":"start","tasks":[{"id":"gh:auth","title":"GitHub (gh login, git over HTTPS)","deps":["mise:tools"]}, …]}
+{"type":"task","id":"repo:vivla-tools:clone","status":"running","detail":"gh repo clone vivla-tech/vivla-tools"}
+{"type":"task","id":"repo:vivla-tools:clone","status":"done","duration":8123}
+{"type":"result","ok":false,"status":"blocked","exitCode":4,
+ "counts":{"done":5,"skipped":3,"failed":0,"blocked":1,"pending":0,"running":0},
+ "next_actions":[{"task":"login:railway","kind":"auth","message":"Log in to Railway (or export RAILWAY_API_TOKEN).","command":"railway login"}]}
+```
+
+Las entradas de `next_actions` con `kind: "info"` son indicaciones, no errores. Por ejemplo, "arranca `vivla-api` primero", con el comando que hay que usar.
+
+Los estados posibles de una tarea son `pending | running | done | skipped | failed | blocked`. `skipped` significa "ya estaba hecho". Si una tarea falla o se bloquea, sus dependientes quedan igual (`failed` o `blocked`), pero `next_actions` solo recoge la causa raíz.
+
+### Exit codes
+
+| Código | Significado                                                                             |
+| ------ | --------------------------------------------------------------------------------------- |
+| 0      | ok                                                                                      |
+| 1      | alguna tarea falló (`tasks[].error`, log en `~/.vivla/cli/vivla.log`)                   |
+| 2      | no hay sesión: `login`                                                                  |
+| 3      | faltan respuestas: `--set <next_actions[].key>=…`                                       |
+| 4      | necesita a un humano: ejecutar `next_actions[].command` (login de una plataforma, sudo) |
+| 64     | argumentos inválidos                                                                    |
+
+### Login desde un agente
+
+```bash
+vivla login --no-wait --json
+# → {"type":"login","status":"pending","userCode":"KQBB-VQLV","verificationUriComplete":"https://vivlapro.eu.auth0.com/activate?user_code=KQBB-VQLV", …}
+#   El agente le enseña la URL al humano, que confirma el código.
+vivla login --poll --json   # espera hasta que termina (o --no-wait para consultar una vez)
+```
+
+El login pendiente se guarda en disco (`~/.vivla/cli/pending-login.json`), así que un proceso puede empezarlo y otro terminarlo. En CI, `VIVLA_TOKEN=<access token>` evita el login.
+
+Los logins de plataforma también aceptan tokens por variable de entorno, sin login interactivo: `GH_TOKEN`, `VERCEL_TOKEN`, `RAILWAY_API_TOKEN`, `CLOUDFLARE_API_TOKEN`, `EXPO_TOKEN`, `FIREBASE_TOKEN`.
+
+## MCP
+
+```bash
+claude mcp add --scope user vivla-cli -- npx -y github:vivla-tech/vivla-cli mcp
+```
+
+(`setup machine` lo configura solo para Claude Code, Cursor y Codex si los encuentra.)
+
+| Tool                         | Qué hace                                                                                            |
+| ---------------------------- | --------------------------------------------------------------------------------------------------- |
+| `login_start` / `login_poll` | device code (enseña la URL y el código al usuario)                                                  |
+| `whoami`, `get_profile`      | identidad y repos recomendados                                                                      |
+| `doctor`                     | chequeo de solo lectura                                                                             |
+| `list_repos`                 | catálogo con estado local                                                                           |
+| `plan`                       | dry run                                                                                             |
+| `setup`                      | devuelve un `run_id` al momento: el trabajo sigue en segundo plano                                  |
+| `get_run`                    | estado del run; `wait_seconds` hace long-poll (máx. 120)                                            |
+| `env_pull`                   | re-descarga `.env`                                                                                  |
+| `status`                     | qué commit hay desplegado por servicio/entorno, retraso y salud                                     |
+| `logs`                       | logs de un servicio (Railway, Vercel, Cloudflare), con `grep`, `errors`, `since`, `http` y `status` |
+| `call`                       | una petición HTTP a un servicio desplegado, con el login si lo acepta; en producción solo lecturas  |
+| `migrations`                 | últimas migraciones registradas en un entorno                                                       |
+| `db_query`                   | SQL en Supabase; en producción solo una lectura                                                     |
+| `db_logs`                    | logs de Supabase (`api`, `postgres`, `auth`, `functions`); con la sesión de `supabase login`        |
+
+Lo que escribe fuera de la máquina (`migrate apply`, `release`, `pr`) no es una tool: se lanza por la CLI con `--yes` cuando una persona lo ha aprobado. Sin `--yes` termina con `exit 4` y el comando en `next_actions`. Ver [devtools.md](/cli/devtools).
+
+`setup` acepta `machine`, `repos`, `profile`, `only`, `skip`, `answers`, `root`, `force_env`, `worktree` y `connect`. El resultado final (`get_run().result`) tiene la misma forma que el `result` del NDJSON.

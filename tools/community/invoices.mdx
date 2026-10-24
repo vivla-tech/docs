@@ -1,0 +1,146 @@
+---
+title: "Facturas"
+description: "Buzón de facturas de proveedor: subida, correo, OCR, revisión, gasto por casa y envío a Qonto"
+---
+
+# Facturas
+
+El módulo de **Facturas** (sub-módulo de Community, `apps/backend/src/community/invoices/`) es el buzón de facturas de proveedor de Vivla. Recoge facturas por dos vías —subida manual y correo— las pasa por OCR, deja que el equipo de **Home Excellence** las revise línea a línea y, una vez validadas, alimenta el gasto por casa y el envío a Qonto.
+
+<Note>
+  La tool se expone en `/app/invoices` (frontend TanStack). No tiene permiso
+  propio: reutiliza el claim de **Tickets** (`tool-tickets`), de modo que quien
+  entra a Tickets entra a Facturas. `viewer` lee; `editor` sube, corrige,
+  valida y envía a Qonto.
+</Note>
+
+## Ciclo de vida
+
+Cada factura (`invoices.status`) recorre cuatro estados:
+
+| Estado | Significado |
+|--------|-------------|
+| `draft` | Recién creada (subida o detectada en el correo), aún sin procesar |
+| `processing` | El OCR está leyendo el PDF |
+| `pending_review` | Leída; esperando que una persona la revise y corrija |
+| `validated` | Una persona la confirmó. **Solo** este estado cuenta para el gasto |
+
+<Note>
+  No hay auto-validación: la v1 nunca pasa una factura a `validated` por su
+  cuenta. Todo importe que aparece en el gasto por casa es uno que alguien
+  confirmó. El único camino a `validated` es `POST /:id/validate`.
+</Note>
+
+Además del estado del flujo, cada factura lleva un **estado de pago**
+(`payment_status`: `pending` | `paid` | `disputed`) y un **estado Qonto**
+(`qonto_status`: `pending` | `uploaded` | `paid` | `disputed`).
+
+## Entrada por correo (mailbox)
+
+Los buzones de factura de las casas (`pms@vivla.com`, `pms2@vivla.com`, tabla
+`inbound_mailboxes`) se conectan por un conector **Gmail de solo lectura**
+(`gmail.readonly`). Un poller programado en Windmill llama al endpoint de
+ingesta, que para cada adjunto pendiente:
+
+1. **Detecta** si parece una factura (`InvoiceDetectService`) — primero por
+   palabras clave en asunto y nombre de archivo, con un paso de IA
+   (`claude-haiku-4-5`) como respaldo.
+2. **Crea un borrador** de factura (`source = 'mailbox'`) por adjunto que pasa
+   el filtro, deduplicando por `file_hash`.
+3. **Lee con OCR** importe, fecha, número y proveedor, y **clasifica** cada
+   línea (`InvoiceClassifyService`) a partir del `supplier_type` del proveedor.
+
+<Note>
+  Las facturas que llegan con confianza de OCR por debajo de **0,7** quedan
+  marcadas como `lowConfidence` para que la revisión las priorice. Los adjuntos
+  que la detección descarta no se re-clasifican en cada pasada de ingesta.
+</Note>
+
+## Revisión y enlaces
+
+En `pending_review`, el editor corrige cabecera y líneas (`PATCH /:id`) antes de
+validar. Cada **línea** (`invoice_lines`) puede enlazarse a una propiedad, un
+**ticket** (`ticket_id`) y una **visita de proveedor** (`provider_visit_id`); la
+factura puede enlazarse a una **orden de compra** (`purchase_order_id`).
+
+El backend **sugiere** candidatos de ticket y visita
+(`GET /:id/ticket-suggestions`) para que la persona los enlace de un clic, pero
+nunca los escribe por su cuenta: la asignación final siempre la hace alguien.
+
+## Gasto por casa
+
+La vista `v_invoice_spend_by_property_month` (VIV-3028) es la superficie de
+lectura detrás de *"cuánto llevamos gastado este mes en esta casa"*. Solo suma
+facturas `validated`, con grano **propiedad / categoría / mes / proveedor**.
+Cada factura aporta **o** sus líneas con precio **o**, si ninguna línea lo
+lleva, su propio `invoices.amount` —nunca ambos—, de modo que el total coincide
+con el que ya muestra el buzón.
+
+Junto al gasto `validated`, el rollup devuelve lo **pendiente de aprobar**
+(`pendingTotal` y `pendingByCategory`): las facturas en `pending_review` del
+mes, calculadas sobre `invoices`/`invoice_lines` por `issue_date` —no sobre la
+vista— para avisar de lo que aún no cuenta pero va a contar.
+
+### Presupuesto por casa
+
+Cada casa puede tener un **presupuesto anual por categoría** (tabla
+`property_budgets`). El rollup lo reparte a mes (anual ÷ 12) y lo devuelve como
+`budget` y `budgetByCategory` para comparar presupuesto contra real; sin
+presupuesto definido el campo llega a `null`. Se consulta con
+`GET /spend/budgets?propertyId=&year=` y se edita con `PUT /spend/budgets`
+(solo `editor`). Cada cambio de importe queda en `field_changes`
+(`entity_type = 'property_budget'`) y la respuesta trae el último cambio con su
+autor.
+
+## Envío a Qonto
+
+Validada la factura, **Enviar a Qonto** (`POST /:id/qonto-send`) sube el PDF a
+Qonto y crea el borrador de factura de proveedor. **Marcar como subida**
+(`POST /:id/qonto-uploaded`) registra que ya se gestionó manualmente. Ambos
+exigen que la factura esté `validated`.
+
+## Endpoints
+
+Prefijo `/api/community/invoices` (guard Auth0 + `tool-tickets`):
+
+| Método | Ruta | Permiso | Uso |
+|--------|------|---------|-----|
+| `GET` | `/` | viewer | Lista con filtros (estado, propiedad, ticket, visita, origen, categoría, mes, `q`, `lowConfidence`) y paginación |
+| `POST` | `/upload` | editor | Subida manual de un PDF (máx. 20 MB), deduplicada por `file_hash` |
+| `GET` | `/houses` | viewer | Casas del scope del buzón (zona, responsable de mantenimiento, `mine`) |
+| `GET` | `/for-buzon` | viewer | Feed del Buzón personal: facturas en revisión o vencidas de las casas que mantiene quien llama |
+| `GET` | `/:id` | viewer | Detalle de la factura con sus líneas |
+| `GET` | `/:id/file` | viewer | URL firmada del PDF |
+| `GET` | `/:id/history` | viewer | Historial de cambios de campo |
+| `GET` | `/:id/ticket-suggestions` | viewer | Candidatos de ticket y visita (solo sugerencia) |
+| `PATCH` | `/:id` | editor | Corrige cabecera y líneas antes de validar |
+| `POST` | `/:id/ocr/retry` | editor | "Volver a leer": re-ejecuta el OCR sin re-subir |
+| `POST` | `/:id/validate` | editor | Único camino a `validated` |
+| `POST` | `/:id/reopen` | editor | Reabre una factura validada para volver a revisarla |
+| `POST` | `/:id/discard` | editor | Descarta la factura por **no ser una factura** (motivo opcional) |
+| `POST` | `/:id/restore` | editor | Restaura una factura descartada (vuelve a **Por revisar**) |
+| `POST` | `/:id/qonto-send` | editor | Sube el PDF a Qonto y crea el borrador |
+| `POST` | `/:id/qonto-uploaded` | editor | Marca la factura como subida a Qonto |
+| `GET` | `/spend` | viewer | Rollup de gasto por casa y mes (`v_invoice_spend_by_property_month`), con pendiente de aprobar y presupuesto |
+| `GET` | `/spend/budgets` | viewer | Presupuesto anual por categoría de una casa (`propertyId`, `year`) |
+| `PUT` | `/spend/budgets` | editor | Fija, actualiza o borra el presupuesto anual por categoría |
+
+Ingesta desde el correo (prefijo `/api/integrations/mailbox`, guard Auth0 **o**
+API key, para que lo llame Windmill):
+
+| Método | Ruta | Uso |
+|--------|------|-----|
+| `POST` | `/invoices/poll` | Procesa los mensajes nuevos del buzón (opcional: `mailbox`) |
+
+## Datos
+
+| Tabla / vista | Contenido |
+|---------------|-----------|
+| `invoices` | Cabecera: proveedor, propiedad, importes, estados, origen, campos Qonto, `file_hash` único, `ocr_raw` |
+| `invoice_lines` | Líneas con categoría, propiedad, `ticket_id` y `provider_visit_id` |
+| `inbound_mailboxes` | Buzones Gmail conectados (`pms@vivla.com`, `pms2@vivla.com`) |
+| `v_invoice_spend_by_property_month` | Vista de gasto por propiedad/categoría/mes/proveedor (solo `validated`) |
+| `property_budgets` | Presupuesto anual por propiedad/categoría/año (`annual_amount`, moneda); el rollup lo reparte a mes |
+
+Las categorías de línea son **Limpieza**, **Mantenimiento**, **Compras y
+amenities**, **Suministros** y **Otros**.

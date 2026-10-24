@@ -1,0 +1,67 @@
+---
+title: "vivla describe"
+description: "El contrato de la CLI para agentes, en una línea JSON: cada comando, las opciones, las claves de respuesta, los exit codes, los eventos NDJSON y las variables de entorno. Un agente lo lee una vez y…"
+---
+
+El contrato de la CLI para agentes, en una línea JSON: cada comando, las opciones, las claves de respuesta, los exit codes, los eventos NDJSON y las variables de entorno. Un agente lo lee una vez y sabe cómo usar el resto sin depender de `--help`.
+
+```bash
+vivla describe | jq .commands
+vivla describe | jq -r '.exitCodes'
+```
+
+## Cómo funciona
+
+Imprime un objeto fijo (`src/describe.ts`). No abre sesión, no lee el catálogo y no llama a nada. Siempre sale en JSON, con o sin `--json`.
+
+| Clave         | Qué trae                                                                                 |
+| ------------- | ---------------------------------------------------------------------------------------- |
+| `commands`    | cada comando con su sintaxis y una línea de qué hace y qué devuelve                      |
+| `globalFlags` | las [opciones globales](/cli/commands/index#opciones-globales)                                     |
+| `setupFlags`  | `--profile`, `--only`, `--skip`, `--worktree`                                            |
+| `answerKeys`  | las preguntas que se responden con `--set`: `git.name`, `git.email`, `connect.<repo>`    |
+| `exitCodes`   | `0`, `1`, `2`, `3`, `4`, `64` y qué hacer con cada uno                                   |
+| `events`      | la forma de las líneas `start`, `task` y `result` de un run                              |
+| `env`         | las variables que entiende: `VIVLA_TOKEN`, `VIVLA_CLI_ROOT`, `VERCEL_TOKEN`, `GH_TOKEN`… |
+
+## Qué toca
+
+Nada: solo imprime.
+
+## Salida `--json`
+
+```json
+{
+  "type": "describe",
+  "name": "vivla",
+  "version": "0.2.0",
+  "usage": "vivla [global flags] <command> [args] --json",
+  "commands": {
+    "doctor": "Read-only health check of machine (+ --repo / --profile). Never changes anything.",
+    "…": "…"
+  },
+  "globalFlags": { "--json": "NDJSON on stdout; never prompts", "…": "…" },
+  "setupFlags": { "--profile": "Add repos recommended by Vivla Identity", "…": "…" },
+  "answerKeys": {
+    "git.name": "Full name for git commits (default: from Vivla Identity)",
+    "…": "…"
+  },
+  "exitCodes": { "0": "ok", "2": "not logged in — run `login`", "…": "…" },
+  "events": { "start": "…", "task": "…", "result": "…" },
+  "env": { "VIVLA_TOKEN": "Use this access token instead of the stored login (CI)", "…": "…" }
+}
+```
+
+## Exit codes
+
+| Código | Cuándo  |
+| ------ | ------- |
+| `0`    | siempre |
+
+## Para agentes (MCP)
+
+No hay tool: por MCP las tools ya traen su propio esquema. Un agente que va por la CLI empieza por aquí.
+
+## Relacionado
+
+[Uso desde agentes](/cli/agents) · [`mcp`](/cli/commands/mcp) · [Comandos](/cli/commands/index)
