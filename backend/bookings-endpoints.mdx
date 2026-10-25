@@ -83,7 +83,8 @@ App en `src/calendars/v2/apps/calendars.apps.controller.ts` (path `calendars`); 
 | GET | `/v2/calendars/property/:id` | App | Calendario de una casa (slots con disponibilidad, temporada, coste en llaves y marca de última hora). |
 | GET | `/v2/admin/calendars` | `read:calendars` | Calendarios de reservas con filtros. |
 | GET | `/v2/admin/calendars/types` | `read:calendars` | Tipos de calendario. |
-| GET | `/v2/admin/calendars/:id/seasons` | `read:calendars` | Temporadas de un calendario. |
+| GET | `/v2/admin/calendars/:id/seasons` | `read:calendars` | Temporadas de un calendario (con sus traducciones). |
+| PUT | `/v2/admin/calendars/season/:id/update` | `edit:calendars` | **(Nuevo)** Edita una temporada: `name`, `color`, `instantKeys`, `allowsConsecutive`, `slotsAvailable` y sus `translations`. |
 | GET | `/v2/admin/calendars/:id/slots` | `read:calendars` | Slots de un calendario. |
 | POST | `/v2/admin/calendars/:id/slots/create` | `edit:calendars` | Crea un slot. |
 | PUT | `/v2/admin/calendars/slot/:id/update` | `edit:calendars` | Modifica un slot. |

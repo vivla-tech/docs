@@ -31,6 +31,11 @@ Qué fechas caen en qué temporada **no está hardcodeado**: es dato por casa. C
 
 - Cada calendario tiene sus temporadas (`seasons`) y sus slots con `from`/`to`. Varias casas pueden compartir el mismo calendario.
 - Se gestiona desde los **endpoints admin de calendario** v2 (`/v2/admin/calendars/...`: `:id/slots/create`, `slot/:id/update`, `slot/:id/delete`). Ver [Endpoints de reservas](/backend/bookings-endpoints).
+- La **temporada en sí** también se edita desde el panel con `PUT /v2/admin/calendars/season/:id/update` (permiso `edit:calendars`): `name`, `color`, `instantKeys`, `allowsConsecutive`, `slotsAvailable` y las traducciones de su nombre. Es un parche parcial (solo cambia lo que llega) (`src/calendars/v2/admin/calendars.admin.service.ts:495`).
+
+### Nombres de temporada traducidos
+
+Cada temporada guarda traducciones de su nombre en la tabla `seasons_translations` (una fila por idioma, constraint `uq_season_language`) (`src/common/database/v2/entities/calendars/season-translation.entity.ts`). El idioma es un `varchar`; los admitidos salen de los idiomas soportados por i18n (hoy **`es` / `en`**, con `es` por defecto). Al servir una temporada se devuelve el nombre en el idioma del `I18nContext`, con el `name` base como respaldo (`SeasonDto.translatedName`, `src/common/dtos2/calendars/season.dto.ts:31`).
 - El endpoint de calendario de la app (`GET /v2/calendars/property/:id`) devuelve ahora, además de la disponibilidad y el coste en llaves, los **datos de la temporada** que antes faltaban: `maximum` (cupo) y `allowsConsecutive`, más la marca `isLastHour` de cada reserva (`src/calendars/v2/apps/calendars.apps.repository.ts`).
 
 <Warning>

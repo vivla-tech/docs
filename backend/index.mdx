@@ -15,7 +15,7 @@ Esta documentación describe el **estado actual del código**. Cada regla apunta
 
 ## Versionado por URI
 
-La API versiona por URI. Cada ruta empieza por su versión: `/v1/...` o `/v2/...`. No hay prefijo global de API. El versionado se activa en `src/main.ts:16` con `VersioningType.URI`. Quedan rutas `/v1` en casas (`src/homes/v1`), usuarios (`src/users/v1`) y `common` (`src/common/v1`); reservas y calendario ya son solo `/v2`.
+La API versiona por URI. Cada ruta empieza por su versión: `/v1/...` o `/v2/...`. No hay prefijo global de API. El versionado se activa en `src/main.ts:16` con `VersioningType.URI`. Quedan rutas `/v1` en usuarios (`src/users/v1`) y `common` (`src/common/v1`); reservas, calendario y **casas** ya son solo `/v2` (se eliminó `src/homes/v1` entero).
 
 <Warning>
   **No hay OpenAPI ni Swagger.** El proyecto no expone ningún esquema autogenerado (no usa `@nestjs/swagger`). La única "spec" por endpoint son comentarios `@reference` que enlazan a páginas de Notion en las cabeceras de los controllers. No son navegables desde aquí y requieren acceso al workspace de Notion de VIVLA.
@@ -32,7 +32,7 @@ vivla-api todavía convive con dos bases de datos, pero **reservas, calendario y
     Entidades clave: `bookings`, `stays`, `seasons`, `exchange_keys` (movimientos), `exchange_keys_wallet` (saldo con caducidad), `home_exchange_keys` (coste por casa+temporada), `configurations` (parámetros).
   </Tab>
   <Tab title="v1 — Firestore (legacy)">
-    **Datos legacy de casas y usuarios.** Firestore ya **no** es la fuente de verdad de reservas ni de calendario. Conserva datos legacy de casas (caché que se refresca por cron) y usuarios, que se transfieren a Postgres (`users:transfer`). Las tablas v2 aún referencian casas/usuarios por sus IDs antiguos (`oldHid`, `oldUid`).
+    **Datos legacy de casas y usuarios.** Firestore ya **no** es la fuente de verdad de reservas ni de calendario. Conserva datos legacy de casas y usuarios, que se transfieren a Postgres (`users:transfer`). Las tablas v2 aún referencian casas/usuarios por sus IDs antiguos (`oldHid`, `oldUid`).
   </Tab>
 </Tabs>
 
@@ -48,16 +48,16 @@ La API se organiza en módulos NestJS (`src/app.module.ts`).
 |--------|--------------|
 | **Bookings** | Reservas: crear, cancelar, alquilar, intercambiar, experiencias y wallet de llaves. Solo v2 (Postgres); los controllers y la lógica v1 se eliminaron. |
 | **Calendars** | Calendario de cada casa, slots, temporadas, disponibilidad. Módulo propio `src/calendars` (v2, Postgres); ya no vive dentro de `bookings/calendars`. |
-| **Homes** | Casas: lectura de las casas del usuario, listados y localizaciones (v1/v2 + controller `tools` por HMAC). Sus endpoints de catálogo `admin` se están migrando al módulo **Properties**. |
+| **Homes** | Casas: lectura de las casas del usuario y listados (solo v2 + controller `tools` por HMAC; se eliminaron los controllers v1 y el endpoint de localizaciones). Sus endpoints de catálogo `admin` se están migrando al módulo **Properties**. |
 | **Properties** | Catálogo de propiedades (dirección, amenities, proveedores, bancos, hosting, parking, documentos e imágenes). Controllers `admin` y `apps`; destino de la migración desde `Homes`. |
 | **Users** | Usuarios y perfiles. Controllers v1/v2 + variantes `admin` y `tools`. |
 | **Auth** | Autenticación y guard de permisos (`PermissionGuard` + `@RequirePermission`). Convive con un `AuthModule` antiguo en `src/auth_deprecated`. |
 | **Notificaciones** | No es un módulo propio: el buzón de notificaciones de la app vive en Users (`src/users/v2/apps/notifications.apps.controller.ts`) y los eventos salen por la cola de eventos (`EventManagerService`). |
 | **Invitations** | Invitaciones de asistentes a reservas. |
 | **Configuration** | Tabla `configurations` (parámetros clave/valor). |
-| **ScheduledJobs** | Crons: caducidad de llaves, bono anual, refresco de caché de casas, envío de la cola de eventos (incluida la sincronización con Hostaway), auditoría diaria Vivla ↔ Hostaway y transferencia de usuarios. |
+| **ScheduledJobs** | Crons: caducidad de llaves, bono anual, envío de la cola de eventos (incluida la sincronización con Hostaway), auditoría diaria Vivla ↔ Hostaway y transferencia de usuarios. |
 | **Firestore / Database** | Conexión a Firestore (v1) y a Postgres/TypeORM (v2). |
-| **Common** | Filtros de error, i18n, utilidades, entidades compartidas, comprobaciones de salud (`/health`, `/health/ready`), cliente de Hostaway y servicio de Zendesk. |
+| **Common** | Filtros de error, i18n, utilidades, entidades compartidas, comprobaciones de salud (`/health`, `/health/ready`) y la integración con Hostaway (cliente, sincronización, auditoría y webhook entrante). El servicio de Zendesk se eliminó. |
 
 ## Por dónde seguir
 

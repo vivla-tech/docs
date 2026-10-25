@@ -1,0 +1,94 @@
+---
+title: "Licencias y registros de casa"
+description: "Licencia turística y registros (NRA / autonómico) de cada casa, con sus conflictos y validaciones"
+---
+
+# Licencias y registros de casa
+
+Cada casa puede tener **una licencia** turística/de alquiler y uno o varios **registros** oficiales. Son datos de cumplimiento que gestiona CX desde el panel (módulo Properties); la API los guarda y, al leerlos, calcula los **conflictos** entre ellos. No automatizan el alquiler: solo documentan y vigilan la legalidad de cada casa.
+
+<Note>
+  Esta ficha coexiste con la columna antigua `home_hosting_info.licenseNumber`. Mientras dure la migración, la detección de conflictos tiene en cuenta ambas (ver [NRA sin número de licencia](#el-nra-nra_without_licence)).
+</Note>
+
+## Endpoints (panel CX)
+
+En `src/properties/v2/admin/properties.admin.controller.ts`, path `admin/properties`, versión 2, bajo `PermissionGuard`. El `:id` de la ruta es el `externalId` de la casa.
+
+| Método | Ruta | Acceso | Qué hace |
+|--------|------|--------|----------|
+| GET | `/v2/admin/properties/:id/licence` | `read:homes` | Devuelve la licencia, los registros y los conflictos de la casa (`PropertyLicenceDto`). |
+| PUT | `/v2/admin/properties/:id/licence` | `edit:homes` | Crea o actualiza la licencia y/o los registros (parche parcial) y recalcula los conflictos. |
+
+La respuesta es siempre `{ licence?, registrations[], conflicts[] }` (`getPropertyLicence`, `src/properties/v2/admin/properties.admin.service.ts:1302`).
+
+## La licencia (`home_licences`)
+
+Una sola licencia por casa (constraint único `uq_home_licences_home` sobre `homeId`) (`src/common/database/v2/entities/homes/home-licence.entity.ts:30`). El **número de licencia es único a nivel global** cuando está presente (índice parcial `idx_home_licences_number` con `WHERE number IS NOT NULL`) (`home-licence.entity.ts:31`).
+
+Campos relevantes (todos opcionales salvo los marcados):
+
+| Campo | Tipo | Nota |
+|-------|------|------|
+| `type`, `jurisdiction`, `authority`, `number`, `holder` | texto | Datos de la licencia; `number` es el número de licencia. |
+| `status` | enum `LicenceStatus` | `in_force`, `in_process`, `not_applied`, `not_possible`, `expired`, `revoked`. |
+| `holderChangePending` | booleano (no nulo, por defecto `false`) | Cambio de titular pendiente. |
+| `grantedOn` | fecha | Fecha de concesión. |
+| `validUntil` | fecha | Caducidad; **`null` = no caduca**. |
+| `licensedOccupancy` | entero (1-1000) | Ocupación máxima que autoriza la licencia. |
+| `restrictions`, `legalComments` | texto | Sin tope de longitud. |
+| `evidenceUrl` | URL (http/https) | Justificante. |
+| `nextAction`, `nextActionDue` | texto / fecha | Próxima acción y su vencimiento. |
+| `verification` | enum `LicenceVerification` (no nulo, por defecto `unverified`) | `verified`, `unverified`, `disputed`. |
+| `lastReviewedAt` | timestamp | Único campo con hora (ISO-8601 completo). |
+
+## Los registros (`home_registrations`)
+
+Como máximo **un registro por casa y tipo** (constraint `uq_home_registrations_home_kind`) (`src/common/database/v2/entities/homes/home-registration.entity.ts:26`). El tipo es el enum `RegistrationKind`:
+
+- `nra` — Número de Registro de Alojamiento.
+- `regional` — registro autonómico.
+
+Cada registro tiene `number`, `status` (enum `RegistrationStatus`: `registered`, `pending`, `not_required`, `rejected`), `grantedOn` (fecha) y `notes`.
+
+## Conflictos
+
+Se calculan al leer la ficha (`getPropertyLicence`, `properties.admin.service.ts:1311`). El valor estable para ops/ingeniería es el `code`; el `detail` es un texto localizado. Todas las comparaciones de número se hacen **normalizando**: mayúsculas y solo `A-Z`/`0-9` (se ignoran espacios, guiones, barras…) (`LicenceDto.normalizeNumber`, `src/common/dtos2/properties/licence.dto.ts:54`).
+
+### Número duplicado (`DUPLICATED_NUMBER`)
+
+Si el número normalizado de la licencia coincide con el de **otra** casa. Busca tanto en el nuevo `home_licences.number` como en el antiguo `home_hosting_info.licenseNumber` (`properties.admin.service.ts:1311`). Mensaje: `"Otras casas tienen el mismo número de licencia: {homes}"`.
+
+### El NRA (`NRA_WITHOUT_LICENCE`)
+
+El número del **registro NRA** debe contener (como subcadena normalizada) el número de la licencia. La comparación usa:
+
+```
+nraNumber        = normalizar(número del registro NRA)
+nraLicenceNumber = licencia.number || normalizar(home_hosting_info.licenseNumber)
+```
+
+Es decir, **si la ficha nueva no tiene número de licencia, se compara con el número antiguo** de `home_hosting_info` (`properties.admin.service.ts:1349`). Dos variantes, ambas con el mismo `code`:
+
+- Hay NRA pero no hay número de licencia (ni nuevo ni antiguo) → `"La casa tiene NRA, pero la licencia no tiene número"`.
+- Hay NRA y número de licencia, pero el NRA **no lo contiene** → `"El número del NRA no contiene el de la licencia"`.
+
+Si no hay número de NRA, no se levanta este conflicto.
+
+### Ocupación por encima de la licencia (`OCCUPANCY_ABOVE_LICENCE`)
+
+Si la capacidad de la casa (`home_details.capacity`) supera `licensedOccupancy`. Mensaje: `"La capacidad de la casa ({capacity}) supera la ocupación de la licencia ({licensedOccupancy})"`.
+
+## Validaciones al guardar (PUT)
+
+`PropertyLicenceInputDto.validationRules` (`src/common/dtos2/properties/inputs/licence.input.dto.ts:101`). Es un **parche parcial**: un campo ausente no se toca; `null` o `""` lo borra (a `null`); solo se persiste lo que cambia y queda registrado en un `HomeLog`.
+
+- Si no llegan ni `licence` ni `registrations` → error `MISSING_PARAMETERS`.
+- `registrations` con un mismo `kind` repetido → error `DUPLICATED_VALUE`.
+- **Fechas sin hora (`grantedOn`, `validUntil`, `nextActionDue` y el `grantedOn` del registro): deben tener la forma `YYYY-MM-DD`** (ISO-8601 estricto, sin componente de hora); si no → error `INVALID_DATE` (`licence.input.dto.ts:142`). `lastReviewedAt` sí admite hora.
+- Si `validUntil` es anterior a `grantedOn` → error `DATE_BEFORE_START` ("El campo `validUntil` no puede ser anterior a la fecha de concesión").
+- Guardar un número de licencia que **ya tiene otra casa** se rechaza con `LICENCE_NUMBER_IN_USE` ("Otra casa ya tiene este número de licencia"); hay además una red de seguridad ante carreras sobre el índice único (`properties.admin.service.ts:1249`).
+
+<Note>
+  La detección del conflicto de número duplicado mira la columna nueva **y** la antigua; la validación al guardar solo comprueba la tabla nueva `home_licences`. Es deliberado mientras convive la columna heredada.
+</Note>
