@@ -11,16 +11,14 @@ Los crons viven en `src/common/scheduled-jobs/scheduled-jobs.service.ts`. Todos 
 
 | Horario | Tarea | Referencia |
 |---------|-------|------------|
-| **00:00 diario** | Limpia caché completo y, si `cron_homes_cache=enabled`, refresca la caché de casas. | `scheduled-jobs.service.ts:34` |
-| **07:00 diario** | **Auditoría diaria Vivla ↔ Hostaway**, si `cron_hostaway_audit=enabled`. | `scheduled-jobs.service.ts:74` |
-| **12:00 diario** | Si `cron_homes_cache=enabled`, refresca la caché de casas. | `scheduled-jobs.service.ts:133` |
-| **23:30 diario** | Comprueba la **caducidad de llaves** (`KeyExpiresCommand`). | `scheduled-jobs.service.ts:102` |
-| **Cada 5 min** | Envía la **cola de eventos** pendientes (`sendEvents`), si `cron_send_events=enabled`. Incluye las notificaciones del nuevo sistema y la sincronización con Hostaway. Usa un advisory lock para no solaparse. | `scheduled-jobs.service.ts:171` (lock en `src/common/v2/event-manager.service.ts:136`) |
-| **Cada 15 min** | Transfiere usuarios desde Firestore, si `cron_transfer_users=enabled`. | `scheduled-jobs.service.ts:209` |
-| **31-dic 23:30** | **Bono anual de fidelización** (`YearlyBonusCommand`). | `scheduled-jobs.service.ts:245` |
+| **07:00 diario** | **Auditoría diaria Vivla ↔ Hostaway**, si `cron_hostaway_audit=enabled`. | `scheduled-jobs.service.ts:30` |
+| **23:30 diario** | Comprueba la **caducidad de llaves** (`KeyExpiresCommand`). | `scheduled-jobs.service.ts:58` |
+| **Cada 5 min** | Envía la **cola de eventos** pendientes (`sendEvents`), si `cron_send_events=enabled`. Incluye las notificaciones del nuevo sistema y la sincronización con Hostaway. Usa un advisory lock para no solaparse. | `scheduled-jobs.service.ts:91` (lock en `src/common/v2/event-manager.service.ts:136`) |
+| **Cada 15 min** | Transfiere usuarios desde Firestore, si `cron_transfer_users=enabled`. | `scheduled-jobs.service.ts:129` |
+| **31-dic 23:30** | **Bono anual de fidelización** (`YearlyBonusCommand`). | `scheduled-jobs.service.ts:165` |
 
 <Note>
-  **Cambios recientes en los crons.** Desaparecieron el cron horario de transferencia de reservas y casas y los comandos `import`/`transfer-bookings`/`refresh-cache` de reservas (con la retirada de v1 y de la sincronización de reservas con Firestore). La transferencia de usuarios ya no se desactiva con `APP_MODE=debug`, sino con la clave `cron_transfer_users`. El bono anual ya **no** está condicionado a `NEW_EXCHANGE_SYSTEM`.
+  **Cambios recientes en los crons.** Se retiraron los crons de **00:00 y 12:00** que limpiaban/refrescaban la caché de casas, junto con los comandos `common:clear-cache` y `homes:refresh-cache` y el endpoint `v1/app-versions`. La clave `cron_homes_cache` se sigue leyendo pero ya **no activa ningún cron**. Antes ya habían desaparecido el cron horario de transferencia de reservas y casas y los comandos `import`/`transfer-bookings`/`refresh-cache` de reservas (con la retirada de v1 y de la sincronización de reservas con Firestore). La transferencia de usuarios se gobierna con `cron_transfer_users` (no con `APP_MODE=debug`) y el bono anual ya **no** está condicionado a `NEW_EXCHANGE_SYSTEM`.
 </Note>
 
 ### Caducidad de llaves (23:30)
@@ -46,7 +44,7 @@ Parámetros de negocio en la tabla `configurations` (Postgres), con estructura `
 | Clave | Uso | Referencia |
 |-------|-----|------------|
 | `keys_expiration_warning_days` | Días de aviso previo a la caducidad de llaves (CSV). | `src/bookings/v2/commands/key-expires.command.ts:46` |
-| `cron_homes_cache` | `enabled`/`disabled`: activa el refresco de la caché de casas (00:00 y 12:00). | `scheduled-jobs.service.ts:277` |
+| `cron_homes_cache` | `enabled`/`disabled`: el código la lee, pero **ya no activa ningún cron** (los refrescos de caché de 00:00 y 12:00 se retiraron). | `scheduled-jobs.service.ts:195` |
 | `cron_send_events` | `enabled`/`disabled`: activa el envío de la cola de eventos (cada 5 min). | `scheduled-jobs.service.ts:281` |
 | `cron_transfer_users` | `enabled`/`disabled`: activa la transferencia de usuarios (cada 15 min). | `scheduled-jobs.service.ts:285` |
 | `cron_hostaway_sync` | `enabled`/`disabled`: habilita las escrituras de sincronización con Hostaway **en producción**. | `src/common/v2/event-manager.service.ts:162` |
@@ -54,10 +52,14 @@ Parámetros de negocio en la tabla `configurations` (Postgres), con estructura `
 | `cron_hostaway_audit` | `enabled`/`disabled`: activa la auditoría diaria Vivla ↔ Hostaway (07:00). | `src/common/hostaway/hostaway-audit.service.ts:146` |
 | `hostaway_audit_slack_token` | Token del bot de Slack (`xoxb-…`, permiso `chat:write`) por el que se envía la auditoría diaria. | `src/common/hostaway/hostaway-audit.service.ts:152` |
 | `hostaway_audit_slack_channel` | Id del canal (o usuario) de Slack al que se envía la auditoría diaria. | `src/common/hostaway/hostaway-audit.service.ts:155` |
+| `trusted_actor_clients` | CSV de `sub` de clientes M2M de confianza autorizados a indicar el actor con la cabecera `x-vivla-actor-email` (vacío por defecto; `sub` sensible a mayúsculas). | `src/common/auth/middlewares/admin-auth.middleware.ts:109` |
+| `trusted_actor_email_domains` | CSV de dominios de email admitidos en `x-vivla-actor-email` (por defecto `vivla.com`); vacío rechaza a todos. | `src/common/auth/middlewares/admin-auth.middleware.ts:238` |
 | `events_endpoint` | URL de la plataforma de ingesta a la que `sendEvents()` envía los eventos. | `src/common/v2/event-manager.service.ts:148` |
 | `events_api_key` | Clave de API de esa plataforma de ingesta; sin ella `sendEvents()` falla. | `src/common/v2/event-manager.service.ts:153` |
 | `hostaway_api_url` | URL base de la API de Hostaway que usa el cliente de sincronización. | `src/common/hostaway/hostaway.service.ts:457` |
 | `hostaway_token` | Token Bearer de la API de Hostaway. | `src/common/hostaway/hostaway.service.ts:462` |
+| `hostaway_webhook_login` | Usuario de la Basic auth del webhook entrante `POST /v2/webhooks/hostaway`; vacío ⇒ el endpoint responde 401 a todo. | `src/common/hostaway/hostaway-webhook.controller.ts:88` |
+| `hostaway_webhook_password` | Contraseña de esa Basic auth (debe coincidir con la configurada en Hostaway). | `src/common/hostaway/hostaway-webhook.controller.ts:89` |
 | `default_checkin_hour` / `default_checkout_hour` | Hora de check-in / check-out por defecto (`16:00:00` / `10:00:00`). | migración `1779351647973-CreateCalendarTables.ts` |
 
 <Note>

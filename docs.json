@@ -88,7 +88,8 @@
             "group": "Llaves y alquiler",
             "pages": [
               "backend/keys-exchange",
-              "backend/alquiler"
+              "backend/alquiler",
+              "backend/licencias-registros"
             ]
           },
           {
