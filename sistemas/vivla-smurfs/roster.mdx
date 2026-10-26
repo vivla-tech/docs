@@ -44,7 +44,7 @@ Sin acceso a repo. Los `Agent` de Mastra van por el router de modelos (prefijo `
 |---|---|---|---|---|
 | **Poet** | `changelog-drafter.ts` | PRs mergeados → `CHANGELOG.md` → PR borrador | ClaudeSDKAgent · haiku | LIVE |
 | **Reporter** | `reporter.ts` | Digest semanal de prensa: PRs/commits de la semana → Slack (producto + por repo) | Agent · `claude-opus-5` | LIVE |
-| **Alma analyst** | `alma-analyst.ts` | Digest diario de actividad de Lola (métricas + commits) → Slack | Agent · haiku | LIVE |
+| **Alma analyst** | `alma-analyst.ts` | Digest diario de actividad de Lola (métricas + commits) → parte técnico a Joaquín en Slack; incluye «Mejoras detectadas» y un digest semanal «Correcciones CX de Lola» (ediciones/borrados/👍👎 sobre respuestas de Lola, tabla `lola_corrections` de Supabase, ventana de 7 días; best-effort) | Agent · haiku | LIVE |
 | **Lola weekly analyst** | `lola-weekly-analyst.ts` | Análisis semanal (lunes 09:00) de los 7 días previos de Lola → informe interno | Agent · haiku | LIVE |
 | **Lola watcher** | *(sin agente — `lola-watcher.ts`)* | Cada 2 min: avisa en Slack de mensajes nuevos / borradores en canales donde responde un agente | código puro | LIVE |
 | **Postman** | `postman.ts` | **El pitufo cartero**: triaje de Product Requests en Slack → responde, deduplica, abre un issue de Linear con el hilo sincronizado, o pasa a Don Draper | Agent · `claude-opus-5` (`POSTMAN_MODEL`) | event-driven; **en vivo en producción** (`POSTMAN_SHADOW=0`, verificado el 2026-10-20) |
