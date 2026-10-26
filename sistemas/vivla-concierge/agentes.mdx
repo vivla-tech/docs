@@ -37,14 +37,24 @@ Lola no carga las ~80 tools de vivla-tools de golpe. Combina dos mecanismos (`ag
   </Step>
 </Steps>
 
-El catálogo pasa por una cadena de envoltorios antes de llegar al modelo (`agents/lola/index.ts:166`):
+El catálogo pasa por una cadena de envoltorios antes de llegar al modelo (`agents/lola/index.ts:171`):
 
 - **`guardWrites`** — en modo prueba, cualquier tool de escritura (`create_*`, `update_*`, `send_*`, …) rehúsa ejecutarse contra prod (`tools/guard-writes.ts`).
 - **`injectChannelMeta`** — pasa el `channelId` del turno al `_meta` de la llamada MCP saliente.
+- **`sanitizeHandoffOwnerMessage`** — envuelve `chat_handoff_to_human`: si su `ownerMessage` fija día u hora de una llamada o reunión, le quita ese campo para que vivla-tools publique su plantilla fija y Lola no prometa una hora que solo CX puede fijar (`tools/handoff-owner-message.ts`). El traspaso (motivo, resumen, urgencia) no se toca, así que la hora que propone el propietario sigue llegando a CX en el resumen.
 - **`boostToolSearchDescriptions`** — mejora las descripciones para el índice BM25.
 - **`omitToolsByName`** — saca del catálogo tools con datos desactualizados (amenities, inventario, guías de aparatos) y las retiradas (`chat_ask_team`, `chat_send_team_escalation`), para que Lola ni las vea (`agents/lola/index.ts:143`).
 
-Además lleva **guardrails** concurrentes (prompt-injection + moderación) que corren en paralelo con la generación y controlan la entrega del primer trozo, y procesadores de salida para memoria de salida estructurada, memoria de imágenes y una «red de seguridad de promesas» (`agents/lola/index.ts:244`).
+Además lleva **guardrails** concurrentes (prompt-injection + moderación) que corren en paralelo con la generación y controlan la entrega del primer trozo, y procesadores de salida para memoria de salida estructurada, memoria de imágenes, una «red de seguridad de promesas» y el **`LolaRepeatGuard`** (`agents/lola/index.ts:259`).
+
+El `LolaRepeatGuard` es la última línea determinista antes de que una burbuja de Lola salga; descarta burbujas enteras (nunca edita palabras dentro de una) por cuatro reglas (`lola-repeat-guard.ts:10`):
+
+- **Silencio tras traspaso:** si `chat_handoff_to_human` tuvo éxito en este turno y vivla-tools ya publicó su mensaje al propietario, cualquier burbuja posterior de Lola se cae (evita el doble envío visto en producción).
+- **Sin repeticiones:** una burbuja idéntica o casi idéntica a un mensaje reciente de Lola en el hilo (últimos `maxRecent`, dentro de `windowHours`) se descarta; las burbujas cortas (menos de `minChars`) quedan exentas.
+- **Sin horas de llamada:** una burbuja que ata una llamada o reunión a un día u hora (`proposesSchedule`) se cae — solo CX fija esas horas (`schedule-commitment.ts:40`).
+- **Sin tokens de control:** una burbuja que es solo `noReply`/`no_reply`/`null` se descarta.
+
+Las burbujas descartadas también se eliminan del texto que Lola persiste en memoria, para que no «recuerde» haber dicho algo que el propietario nunca vio.
 
 <Info>
   Lola acepta **salida estructurada** y **fotos** sin cambios de cableado: ambos llegan en el cuerpo de `POST /api/agents/lola/stream` desde vivla-tools (`agents/lola/index.ts:44`).
@@ -54,6 +64,10 @@ Además lleva **guardrails** concurrentes (prompt-injection + moderación) que c
 
 - **Impersonación:** su `requestContextSchema` (owner + `testMode`) desbloquea la pestaña **Request Context** de Mastra Studio para fijar «en este chat soy el propietario X» (`agents/owner-context.ts`, `agents/lola/index.ts:266`).
 - **Modo solo-partes** (`mode: 'ticket_only'`): oculta todo salvo `ticket_list`/`ticket_create` (`agents/lola/index.ts:277`).
+
+<Note>
+  **Propuestas de cambio de reserva (latente).** Lola puede dejar preparado un cambio en la reserva del canal —ocupantes (`booking_propose_occupants`), nota (`booking_propose_note`) o fechas de llegada/salida (`booking_propose_dates`)— para que CX solo lo apruebe de un clic, en vez de traspasar. Cada tool crea una propuesta con el antes→después; Lola nunca escribe la reserva directamente. La capacidad (`PROPONER_CAMBIOS_RESERVA`) está **inerte hasta que vivla-tools despliegue las tools `booking_propose_*`**: solo se inyecta si están en el catálogo cargado al arranque (`HAS_BOOKING_PROPOSAL_TOOLS`), en canal de reserva y fuera del modo solo-partes; si no, Lola sigue traspasando con `chat_handoff_to_human` (`agents/lola/index.ts:196`, `agents/owner-context.ts:362`).
+</Note>
 
 ## Fabián — copiloto de CX
 

@@ -44,6 +44,21 @@ Necesita el mismo entorno que correr el agente de verdad (`ANTHROPIC_API_KEY`, `
 - **`--dataset legacy`**: los ~18 casos escritos a mano (`evals/dataset/legacy.ts`).
 - **`--dry-run`**: carga y valida los schemas, resuelve qué scorers/gates/mocks aplican y saca un resumen **sin red ni modelos** — no necesita ninguna credencial (`run-evals.ts:25`).
 
+### Casos a partir de correcciones de CX
+
+El dataset se alimenta de las correcciones reales que CX hace a las respuestas de Lola. `scripts/import-cx-corrections.ts` es una herramienta **manual** (no se auto-ejecuta ni corre evals): descarga del backend de vivla-tools (`GET /chat/lola-corrections/eval-export?sinceDays=N`), valida cada caso contra `datasetCaseSchema` y escribe un fichero nuevo `evals/dataset/cases/cx-corrections-<batch>.json` por import (`import-cx-corrections.ts:1`). El mensaje del propietario queda como turno y el texto corregido por CX como `notas_doradas` de la rúbrica.
+
+```bash
+VIVLA_TOOLS_API_URL=https://api.vivla.com VIVLA_TOOLS_API_KEY=*** \
+  pnpm --filter concierge exec tsx scripts/import-cx-corrections.ts --since-days 14 --batch 2026-10-22
+# revisa el fichero generado antes de confiar en él
+pnpm --filter concierge exec tsx scripts/check-dataset.ts --agent lola
+```
+
+<Info>
+  Este script usa REST directo al backend, no el MCP: pide `VIVLA_TOOLS_API_URL` (base URL del backend) y `VIVLA_TOOLS_API_KEY` (cabecera `x-api-key`, la misma que usa Windmill). Solo descarga, valida y escribe; nunca llama a un agente (`import-cx-corrections.ts:16`).
+</Info>
+
 ### Gates y agregación
 
 Un caso **pasa** si el gate de safety está OK (donde aplique) y la media ponderada de calidad es `≥ 0.7` (`run-evals.ts:128`):
