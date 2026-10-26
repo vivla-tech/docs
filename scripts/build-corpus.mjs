@@ -26,6 +26,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
+import { writeSharded } from "./lib/shard-record.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -263,7 +264,10 @@ function main() {
   };
 
   mkdirSync(out, { recursive: true });
+  // corpus.json stays the on-disk artifact the embeddings/eval scripts read.
   writeFileSync(join(out, "corpus.json"), JSON.stringify(corpus), "utf8");
+  // Sharded copy the Worker imports instead (src/content.ts) — see shard-record.mjs.
+  writeSharded(out, "corpus", corpus, "pages");
 
   writeFileSync(join(out, "llms.txt"), llmsTxtTemplate.replaceAll("{{BASE_URL}}", baseUrl), "utf8");
   writeFileSync(join(out, "llms-full.txt"), llmsFullTxtTemplate.replaceAll("{{BASE_URL}}", baseUrl), "utf8");

@@ -2,10 +2,39 @@
 // JSON module — no filesystem access needed at runtime, no drift between the
 // site and the MCP (one corpus, one deploy).
 //
-// worker/generated/corpus.json does not exist in this checkout until you run
-// the corpus script (see worker/README.md); that's expected — it's a build
-// artifact, not a committed file.
-import corpusData from "../generated/corpus.json";
+// worker/generated/* does not exist in this checkout until you run the corpus
+// script (see worker/README.md); that's expected — these are build artifacts,
+// not committed files.
+//
+// The corpus is imported as size-balanced shards + a metadata file rather than
+// one corpus.json: @cloudflare/vitest-plugin ships each imported module's full
+// source to the workerd test runner in a single WebSocket message, and the
+// whole corpus as one module blows past workerd's per-message limit ("Message
+// is too large", 1009). The shards are merged back here, losslessly. Keep this
+// import list at SHARD_COUNT entries (scripts/lib/shard-record.mjs).
+import corpusMeta from "../generated/corpus-meta.json";
+import corpusPages0 from "../generated/corpus-pages-0.json";
+import corpusPages1 from "../generated/corpus-pages-1.json";
+import corpusPages2 from "../generated/corpus-pages-2.json";
+import corpusPages3 from "../generated/corpus-pages-3.json";
+import corpusPages4 from "../generated/corpus-pages-4.json";
+import corpusPages5 from "../generated/corpus-pages-5.json";
+import corpusPages6 from "../generated/corpus-pages-6.json";
+import corpusPages7 from "../generated/corpus-pages-7.json";
+
+const corpusData = {
+  ...corpusMeta,
+  pages: {
+    ...corpusPages0,
+    ...corpusPages1,
+    ...corpusPages2,
+    ...corpusPages3,
+    ...corpusPages4,
+    ...corpusPages5,
+    ...corpusPages6,
+    ...corpusPages7,
+  },
+};
 
 export interface Chunk {
   /** Heading text (or the page title, for the chunk before the first heading). */
