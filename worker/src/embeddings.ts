@@ -10,8 +10,37 @@
 // ASCII chars per value, barely smaller than float32 text; base64 over the
 // raw bytes is ~2.3x smaller in practice) to keep the bundle small;
 // dequantized once per isolate into Float32Array.
+//
+// Imported as size-balanced shards + a metadata file rather than one
+// embeddings.json, same reason as src/content.ts: @cloudflare/vitest-plugin
+// sends each imported module in a single WebSocket message to the workerd test
+// runner, and a multi-MB module trips workerd's per-message limit ("Message is
+// too large", 1009). Merged back here, losslessly. Keep this import list at
+// SHARD_COUNT entries (scripts/lib/shard-record.mjs).
 import { Buffer } from "node:buffer";
-import embeddingsData from "../generated/embeddings.json";
+import embeddingsMeta from "../generated/embeddings-meta.json";
+import embeddingsChunks0 from "../generated/embeddings-chunks-0.json";
+import embeddingsChunks1 from "../generated/embeddings-chunks-1.json";
+import embeddingsChunks2 from "../generated/embeddings-chunks-2.json";
+import embeddingsChunks3 from "../generated/embeddings-chunks-3.json";
+import embeddingsChunks4 from "../generated/embeddings-chunks-4.json";
+import embeddingsChunks5 from "../generated/embeddings-chunks-5.json";
+import embeddingsChunks6 from "../generated/embeddings-chunks-6.json";
+import embeddingsChunks7 from "../generated/embeddings-chunks-7.json";
+
+const embeddingsData = {
+  ...embeddingsMeta,
+  chunks: {
+    ...embeddingsChunks0,
+    ...embeddingsChunks1,
+    ...embeddingsChunks2,
+    ...embeddingsChunks3,
+    ...embeddingsChunks4,
+    ...embeddingsChunks5,
+    ...embeddingsChunks6,
+    ...embeddingsChunks7,
+  },
+};
 
 export interface QuantizedVector {
   scale: number;

@@ -17,7 +17,8 @@
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { writeSharded } from "./lib/shard-record.mjs";
 
 function parseArgs(argv) {
   const out = {
@@ -151,17 +152,17 @@ function main() {
   }
   rmSync(tmpDir, { recursive: true, force: true });
 
-  writeFileSync(
-    outPath,
-    JSON.stringify({
-      model,
-      dim,
-      generatedAt: new Date().toISOString(),
-      chunkCount: Object.keys(chunks).length,
-      chunks,
-    }),
-    "utf8",
-  );
+  const embeddings = {
+    model,
+    dim,
+    generatedAt: new Date().toISOString(),
+    chunkCount: Object.keys(chunks).length,
+    chunks,
+  };
+  // embeddings.json stays the on-disk artifact the eval scripts read.
+  writeFileSync(outPath, JSON.stringify(embeddings), "utf8");
+  // Sharded copy the Worker imports instead (src/embeddings.ts) — see shard-record.mjs.
+  writeSharded(dirname(outPath), "embeddings", embeddings, "chunks");
 
   const pricePerMInputTokens = 0.0118; // USD, both bge-m3 and qwen3-embedding-0.6b at time of writing
   const estCostUsd = (totalInputTokens / 1_000_000) * pricePerMInputTokens;
