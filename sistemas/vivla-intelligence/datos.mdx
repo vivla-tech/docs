@@ -45,8 +45,16 @@ Hay también un servidor MCP de Metabase definido en el repo (`apps/mastra/src/m
 
 Dos patrones para leer carpetas de Drive (`CLAUDE.md`):
 
-- **RAG** — un cron sincroniza una carpeta de Drive → parseo PDF/Docs → chunking → embeddings Vertex `text-embedding-004` (768d) → **pgvector**; el agente consulta el índice con una tool de búsqueda vectorial. Caso de referencia: el corpus **legal** de Temis (`apps/mastra/src/lib/legal-sync.ts`, carpeta `GOOGLE_DRIVE_LEGAL_FOLDER_ID`, cron `scheduleLegalSync` + ruta `POST /sync/legal`).
+- **RAG** — un cron sincroniza una carpeta de Drive → parseo PDF/Docs/Sheets → chunking → embeddings Vertex `text-embedding-004` (768d) → **pgvector**; el agente consulta el índice con una tool de búsqueda vectorial. Caso de referencia: el corpus **legal** de Temis (`apps/mastra/src/lib/legal-sync.ts`, carpeta `GOOGLE_DRIVE_LEGAL_FOLDER_ID`, cron `scheduleLegalSync` + ruta `POST /sync/legal`).
 - **Workspace** — el agente lee Drive en vivo con cuatro tools de filesystem (`list_files`, `read_file`, `grep`, `file_stat`); sin cron, siempre fresco, para carpetas pequeñas y vivas.
+
+<Note>
+  El sync del RAG es **idempotente**: el índice refleja la carpeta en cada pasada en vez de crecer. Cada chunk lleva un id estable `fileId:chunkIndex` (`chunkVectorId`), así que el `upsert` actualiza la fila en lugar de insertar una copia; las filas obsoletas de un archivo (versión vieja, chunks de más, archivos vaciados o con la importación rota) se borran en la misma transacción, y al final se podan las filas de archivos que ya no están en la carpeta y las que no tienen `fileId` (`apps/mastra/src/lib/gdrive-rag-sync.ts:278`, `:267`, `:374`). Antes de este fix, con el cron corriendo 4×/día, el índice acumulaba cientos de copias idénticas de cada chunk.
+</Note>
+
+<Note>
+  La tool de consulta legal (`legalQueryTool`) **deduplica** por su cuenta: pide 3× más filas de las pedidas (tope 120), colapsa duplicados por `fileId:chunkIndex` y por texto literal, y devuelve cada pasaje **una sola vez** como `document` con su cita (`source`, `fileId`, `chunkIndex`) al lado, en vez de repetir el texto tres veces por fila (`apps/mastra/src/tools/legal-rag.ts:56`, `:150`). El texto repetido fue la causa de que un hilo largo de Temis superara el límite de 1M tokens de entrada el 2026-10-20.
+</Note>
 
 Acceso: el service account (`GOOGLE_CLIENT_EMAIL` / credenciales en env) necesita al menos permiso **Viewer** sobre cada carpeta en la UI de Drive; sin eso todas las llamadas devuelven 403. **Hermes** es el único agente con acceso de **escritura** (requiere Editor sobre su carpeta). Los IDs de carpeta viven en `apps/mastra/src/lib/agent-drive-folders.ts` (`AGENT_GDRIVE_FOLDERS`), nunca en el código de llamada ni en env (`CLAUDE.md`).
 
