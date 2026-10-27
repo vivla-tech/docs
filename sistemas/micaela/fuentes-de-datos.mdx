@@ -19,6 +19,7 @@ El espejo core del CRM. El DTS nativo refresca a diario a las **02:00 UTC** y ac
 | Timestamps reales de transición de etapa | `deal_stage_history` | `hubspot-stage-history-sync` (API de HubSpot) |
 | Atribución / UTM | `*.analytics_attribution` | `hubspot-attribution-sync` (API de HubSpot) |
 | Señales nativas Tier 1 (lead_status, speed-to-lead, CHAMP…) | tablas de señales | `hubspot-native-signals` |
+| Historial de `hs_lead_status` + sello de antigüedad | `hubspot_lead_status_history`, `hubspot_contacts.lead_status_since` | `hubspot-lead-status-history-sync` |
 | Llamadas / meetings / emails (engagements) | `hubspot_calls`, `hubspot_meetings`, `hubspot_emails` | `hubspot-calls-sync`, `hubspot-meetings-sync`, `hubspot-emails-sync` |
 | Propiedades de formulario + outcome | `hubspot_contacts.form_data` | `hubspot-profile-sync` (API de HubSpot) |
 | Membresías de listas (A/B del bot Daniela) | `hubspot_list_memberships` | `hubspot-list-membership-sync` |
@@ -27,6 +28,10 @@ El espejo core del CRM. El DTS nativo refresca a diario a las **02:00 UTC** y ac
 
 <Note>
   `hubspot-emails-sync` copia **asunto y fecha, nunca el cuerpo** del email: el texto libre que escriben clientes y comerciales es donde vive el dato sensible (`scripts/railway-start.sh`, caso `hubspot-emails-sync`).
+</Note>
+
+<Note>
+  `hubspot-lead-status-history-sync` espeja el historial de cambios de `hs_lead_status` (una fila por cambio) desde el BQ nativo `hubspot.ContactPropertiesHistory` y, en la misma pasada, sella `hubspot_contacts.lead_status_since`: desde cuándo lleva el contacto en su `lead_status` actual. Es **full-refresh diario** (DELETE + INSERT + sellado en una sola transacción, ~146K filas), con un **guard del 98%**: si BQ devuelve 0 filas o menos del 98% de lo que ya hay en Postgres, no borra nada y lanza (`packages/ingest/src/workers/hubspot-lead-status-history.ts`, `historyRefreshVerdict`). La tabla **no tiene FK** a `hubspot_contacts` a propósito: el historial trae contactos que el prune ya borró y eso no debe tumbar la carga. Alimenta la antigüedad y la tasa de reactivación a nivel contacto de `/reactivacion` (migración `0065`).
 </Note>
 
 El **grano de evento** del engagement (una fila por page-view/apertura) lo ingiere un **Cloud Run Job** en BigQuery (`engagement-events-sync`, cada 30 min), NO Railway; el worker de Railway `hubspot-engagement-rollup-sync` solo proyecta el rollup por contacto a Postgres (`deploy/engagement-sync/`, `CLAUDE.md`).

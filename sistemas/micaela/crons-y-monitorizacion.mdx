@@ -30,6 +30,7 @@ La rama HubSpot cierra ~**05:51 UTC** (07:51 Madrid) y la rama Gong a las 06:40.
 
 - **`hubspot-stage-history-sync` va a `:15`, no en punto.** A las 05:00 correría a la vez que el ingest, y `daily-review-insights` (05:40) y `forecast-compute` (05:50) leerían `deal_stage_history` rancio en silencio.
 - **`hubspot-ingest` aborta si el BQ nativo lleva `>20 h` sin escribirse.** Un «BQ nativo rancio» en `cron_runs` es el guard evitando reprocesar el snapshot de ayer, no un bug (ver [Fuentes de datos](/sistemas/micaela/fuentes-de-datos)).
+- **`hubspot-lead-status-history-sync` corre DENTRO del proceso de `hubspot-native-signals` (05:20), justo después de él.** No es un servicio de cron propio: comparte el proceso porque sella `lead_status_since` comparándolo con el `lead_status` que `native-signals` acaba de escribir. Tiene **latido propio** en `cron_runs` (vía su propio `withCronRun`), así que un fallo suyo no marca `native-signals` como fallido (`packages/ingest/src/cli/run-hubspot-native-signals.ts`).
 
 ### Crons de alta frecuencia (fuera de la cascada)
 
@@ -102,7 +103,7 @@ El workflow `.github/workflows/sentry-smoke.yml` corre esta prueba **cada noche 
 
 El servicio `watchdog` (`packages/ingest/src/workers/watchdog.ts`) cada 15 min lee `cron_runs` y detecta por job: `stale` (no ha corrido en su umbral), `failed` (último run con error) y `zero_rows` (N runs exitosos con 0 filas, solo para `aircall-sync` y `daniela-contacts-sync`); además hace `GET` a los healthchecks de web y mcp y alerta `http_down` si no es 2xx. Postea agregado a Slack solo si hay novedades, re-alerta cada `WATCHDOG_REALERT_WINDOW_MIN` (default 60) y manda «Recovered» al resolverse. El anti-spam vive en la tabla `watchdog_state`.
 
-Umbrales de ejemplo (catálogo completo en `watchdog.ts` y `docs/monitoring.md`): `aircall-sync` 20 min, `hubspot-ingest` 26 h, `gong-ingest` 28 h, `daniela-profiles-sync` 45 min.
+Umbrales de ejemplo (catálogo completo en `watchdog.ts` y `docs/monitoring.md`): `aircall-sync` 20 min, `hubspot-ingest` 26 h, `gong-ingest` 28 h, `daniela-profiles-sync` 45 min, `hubspot-lead-status-history-sync` 26 h.
 
 <Note>
   Estado real verificado el 2026-10-20:
