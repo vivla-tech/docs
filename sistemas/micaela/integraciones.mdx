@@ -8,7 +8,7 @@ description: "A qué servicios externos llama Micaela, quién le llama a ella y 
 | Servicio | Para qué | Credenciales (por nombre) |
 |---|---|---|
 | **BigQuery** (GCP, proyecto `growthia`) | Fuente de lectura de casi todo (HubSpot nativo, silver/gold, Gong, Windsor) | `GCP_PROJECT_ID`, `GCP_SERVICE_ACCOUNT_JSON`, `GCP_VERTEX_LOCATION`, `HUBSPOT_DATASET`, `GONG_DATASET` |
-| **HubSpot CRM** (API) | Lecturas puntuales (stage-history, atribución, perfiles) y escrituras de scoring | `HUBSPOT_ACCESS_TOKEN`, `HUBSPOT_PORTAL_ID`, `HUBSPOT_PORTAL_URL_BASE`, `HUBSPOT_UI_DOMAIN` |
+| **HubSpot CRM** (API) | Lecturas puntuales (stage-history, atribución, perfiles), los mensajes de WhatsApp vía la **API de Conversaciones** (`whatsapp-sync`, desde el 2026-10-27) y escrituras de scoring | `HUBSPOT_ACCESS_TOKEN`, `HUBSPOT_PORTAL_ID`, `HUBSPOT_PORTAL_URL_BASE`, `HUBSPOT_UI_DOMAIN` |
 | **Supabase de Daniela** (Aircall) | Mirror de contactos, perfiles, enrichments y transcripciones del bot | `AIRCALL_SUPABASE_URL`, `AIRCALL_SUPABASE_SERVICE_ROLE_KEY` |
 | **Anthropic (Claude)** | Copilot, daily-review, scoring de WhatsApp, extracción de preferencias, resúmenes AE | `ANTHROPIC_API_KEY` |
 | **Vertex / Gemini** (alternativa de LLM) | Proveedor de modelo conmutable | `LLM_PROVIDER`, `GEMINI_MODEL`, `GCP_VERTEX_LOCATION` |

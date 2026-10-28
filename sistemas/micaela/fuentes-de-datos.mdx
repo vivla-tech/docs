@@ -1,6 +1,6 @@
 ---
 title: "Fuentes de datos"
-description: "De dónde salen los datos de Micaela: HubSpot (CRM), Aircall/Daniela (llamadas), Gong y las capas de BigQuery, con las tablas donde aterrizan y los workers que las llenan."
+description: "De dónde salen los datos de Micaela: HubSpot (CRM), Aircall/Daniela (llamadas), Gong, WhatsApp (API de Conversaciones de HubSpot) y las capas de BigQuery, con las tablas donde aterrizan y los workers que las llenan."
 ---
 
 Todo aterriza en un único **Postgres** (el mismo que leen web y mcp). Casi todo pasa primero por **BigQuery** y lo copia a Postgres un worker de `packages/ingest`. La tabla canónica de fuentes está en `CLAUDE.md` «Data sources»; aquí va un resumen operativo.
@@ -62,6 +62,29 @@ La cobertura de Aircall es ~7% de los contactos (`CLAUDE.md`). Las transcripcion
   Gong escribe su export `growthia.gong_backup.*` ~06:07 UTC con su **propio** proceso, que Micaela **no controla**; por eso la rama Gong de la cascada va suelta a las 06:30 y no bloquea el daily review (`scripts/railway-start.sh`, caso `gong-ingest`).
 </Note>
 
+## WhatsApp (Conversaciones de HubSpot)
+
+Los mensajes de WhatsApp del bot **Daniela** y de los agentes humanos.
+
+| Qué | Tablas Postgres | Worker | Cadencia sugerida |
+|---|---|---|---|
+| Mensajes de WhatsApp (canal `1007`) | `whatsapp_messages`, `touchpoints` (type `whatsapp_message`) | `whatsapp-sync` | cada 15 min |
+| Scoring de conversaciones (LLM) | — | `whatsapp-scoring` | cada 15 min, tras el sync |
+
+<Warning>
+  **Desde el 2026-10-27 WhatsApp ya NO viene de BigQuery.** `whatsapp-sync` lee la **API de Conversaciones de HubSpot** (`conversations/v3`, hilos del canal `1007`), no el dataset `growthia.hubspot.ThreadMessages` del DTS. Ese espejo exigía una partición por conversación y, al pasar HubSpot de 10.000 hilos, tumbaba el transfer **entero** (Deals, Contacts… todo T-2); se quitó del DTS y `ThreadMessages` quedó congelada el 26-oct (`packages/ingest/src/clients/hubspot-conversations.ts:1`, `CLAUDE.md`). El mapeo produce la **misma fila** que daba la consulta BQ, así que aguas abajo (upsert, huérfanos, touchpoints) no cambia nada; los `id` de la API coinciden con `ThreadMessages.Id` y el upsert por `message_id` absorbe el solape sin duplicar (`hubspot-conversations.ts:9`).
+</Warning>
+
+Tres consecuencias operativas del cambio (`packages/ingest/src/clients/hubspot-conversations.ts`, `packages/ingest/src/workers/whatsapp-window.ts`, `CLAUDE.md`):
+
+- **El servicio necesita `HUBSPOT_ACCESS_TOKEN`.** Antes leía de BigQuery; ahora usa el token de HubSpot (comparte el límite de 100 req/10 s con los demás workers). Al rotar el token, hay que rotarlo **también aquí**.
+- **Un error de la API lanza y el run FALLA.** Con la fuente BQ congelada el cron salía `success` releyendo filas viejas y la alarma del watchdog de «8 runs a cero» no podía saltar — así pasó el 26-oct sin aviso. Un token caducado tiene que acabar como fallo en `cron_runs`.
+- **La ventana es la MÁS ANTIGUA entre la relectura rodante (`WHATSAPP_LOOKBACK_DAYS`, default 1 día — bajó de 7 porque cada día son llamadas a la API) y la marca de agua (último `created_at_source` guardado − 2 h).** Tras una caída de días, el primer run recupera el hueco entero sola, sin backfill a mano. `WHATSAPP_SINCE` sigue siendo el override explícito para una recarga puntual.
+
+<Note>
+  El agente que escribe cada mensaje vive en `whatsapp_messages.created_by` (nunca en `agent_email`, que está siempre a `NULL`): `V-…` = cliente entrante, `S-hubspot` + ids de usuario-bot = **Daniela**/automatización, `A-…` = agente humano. La decodificación vive en `packages/queries/src/whatsapp.ts` y **no cambió** con la migración (`createdBy` llega con el mismo formato que daba el DTS) (`CLAUDE.md`).
+</Note>
+
 ## Capas de BigQuery (silver / gold / Windsor)
 
 | Qué | Tablas Postgres | Worker |
@@ -69,7 +92,6 @@ La cobertura de Aircall es ~7% de los contactos (`CLAUDE.md`). Las transcripcion
 | Scoring + auditoría de Daniela (silver) | `score_events`, `audit_events` | (vía aircall-sync / pipelines) |
 | Engagement + calidad de campaña (Windsor/gold) | `tofu_scores`, `campaign_quality_daily` | `tofu-score-sync` |
 | Gasto publicitario | `campaign_ad_spend_daily` | `ads-spend-sync` |
-| WhatsApp (HubSpot ThreadMessages) | `whatsapp_messages`, `touchpoints` | `whatsapp-sync` (+ `whatsapp-scoring`) |
 
 <Warning>
   El **gasto publicitario** es sutil: la fuente canónica son **4 datasets RAW** (Meta `fbads.AdInsights` nativo, Google `ads_CampaignBasicStats` DTS nativo, TikTok/LinkedIn vía **Windsor.ai**), NO el gold-mart `ads_gold.mart_ads_performance` (que pierde ~99% de Google y omite TikTok). TikTok/LinkedIn por Windsor **se caen en silencio** (auth caducada o errores de tipo): el run «sale OK» sin traer datos — vigilar por `max(date)`, no por éxito del run. (`CLAUDE.md` «Common gotchas».)
