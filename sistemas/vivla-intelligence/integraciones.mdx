@@ -65,6 +65,18 @@ Automatización de CRM y, sobre todo, el motor de captación de Daniela (`apps/m
 
 Daniela y el Qualifier reservan en el calendario del **round-robin de SDR** (`NATIONAL_RR_MEETING_SLUG`); el SDR asignado por la rotación pasa a ser owner del contacto y del deal (`CLAUDE.md`). Las rutas de administración de Daniela (`/admin/daniela/threads`, `/contacts/:id`, `/overview`, `/documents`…) exponen el estado de sus hilos y contactos (`apps/mastra/src/lib/daniela-admin.ts`).
 
+### Conversiones de la primera respuesta (Meta + Google Ads)
+
+Cuando un lead **responde por primera vez** a Daniela o al Qualifier, el workflow envía una conversión «DanielaReply» a las dos plataformas de anuncios, una acción externa por paso, y luego estampa `daniela_inbox_first_reply_at` en el contacto para que no se vuelva a disparar (`apps/mastra/src/workflows/hubspot-conversation-direct-workflow.ts:1364`, `:1419`, `:1458`):
+
+- **Meta Conversions API** — vía una Vercel Function propia (`infra/vercel/meta-capi`); mastra solo le pasa los identificadores en crudo y la función hashea, firma y llama a Graph. El evento viaja como `website` (con `event_source_url` de vivla.com) para poder alimentar una conversión personalizada y la optimización de campañas; el canal real (WhatsApp/email) va en `custom_data.channel`. Se omite si falta `META_CAPI_FUNCTION_URL` / `META_CAPI_SHARED_SECRET` (`apps/mastra/src/lib/meta-conversions.ts:26`, `infra/vercel/meta-capi/README.md`).
+- **Google Ads** — la misma conversión se sube como conversión offline por la **Data Manager API** (las integraciones nuevas ya no pueden usar `UploadClickConversions`). Con `gclid` (`hs_google_click_id`) ata al clic exacto; si no, usa email/teléfono hasheados. Se omite si no está configurada (`apps/mastra/src/lib/google-ads-conversions.ts:36`, `:125`).
+- **Atribución Click-to-WhatsApp (CTWA)** — un anuncio CTWA abre WhatsApp con un texto pre-rellenado y sin UTM; el primer mensaje entrante es la única señal que sobrevive. El workflow lo compara con el texto *autofill* de los anuncios conocidos (o una etiqueta `(ref XXX)`) y estampa las UTM de primer toque (`first_utm_source=fbads`…). El catálogo de anuncios CTWA vive en código (`CTWA_ADS`) y hay que añadir una entrada por anuncio nuevo (`apps/mastra/src/lib/ctwa-attribution.ts:25`, `:61`).
+
+<Note>
+  El mismo `event_id`/`transactionId` estable (`daniela-reply-<contactId>`) viaja a Meta y a Google para que ambas plataformas dedupliquen un doble envío (dos entrantes casi simultáneos que ven la propiedad vacía). La `daniela_inbox_first_reply_at` es el candado que mantiene un solo evento por contacto.
+</Note>
+
 ## WhatsApp
 
 Webhook de la API de Meta Business + el agente **Iris** para cualificación de leads (`apps/mastra/src/lib/whatsapp`, `index.ts:391`):
@@ -89,6 +101,8 @@ Llamadas de voz con TwiML enrutadas a un agente (`apps/mastra/src/lib/twilio`, `
 ## Servidores MCP
 
 El repo define tres servidores MCP (`apps/mastra/src/mcp-servers/index.ts`): `bigquery`, `metabase` y `elevenlabs`. En la instancia Mastra **solo se registra y expone por SSE** el de ElevenLabs, en `/mcp/elevenlabs` (y `/mcp/elevenlabs/message`), pensado para clientes MCP externos como Claude Code o Cursor (`apps/mastra/src/mastra/index.ts:201`, `:408`). El `.mcp.json` del repo apunta ese cliente SSE a la ruta `/mcp/elevenlabs` de la URL de producción del servicio en Railway.
+
+Al revés, el agente **Apollo** es **cliente MCP** de la wiki de la empresa: se conecta a `https://wiki.vivla.com/mcp`. Como `wiki.vivla.com` está detrás de **Cloudflare Access**, autentica con un *service token* (política `non_identity`) por los headers `CF-Access-Client-Id` / `CF-Access-Client-Secret` (`CF_ACCESS_CLIENT_ID` / `CF_ACCESS_CLIENT_SECRET`). Sin esos headers cada petición es un 401 y Apollo arranca sin tools de wiki (`apps/mastra/src/agents/apollo/mcp.ts:6`).
 
 ## Quién le llama
 
@@ -120,6 +134,11 @@ Plantilla en `apps/mastra/env.example`. Nunca se commitean valores.
 | `SLACK_BOT_TOKEN_DANIELA` · `SLACK_BOT_TOKEN_TEMIS` · `SLACK_SIGNING_SECRET_TEMIS` | Tokens/firmas por agente |
 | `NOTION_API_KEY` | Guardado de feedback en Notion |
 | `WHATSAPP_ACCESS_TOKEN` | API de WhatsApp (Meta) |
+| `META_ACCESS_TOKEN` · `META_APP_SECRET` | Meta Marketing API (Fama) y la Conversions API relay |
+| `GOOGLE_ADS_CUSTOMER_ID` · `GOOGLE_ADS_LOGIN_CUSTOMER_ID` · `GOOGLE_ADS_CONVERSION_ACTION_ID` | Cuenta/MCC de Google Ads (lecturas de Fama + conversión offline) |
+| `ADS_AGENT_SIGNING_SECRET` | Firma HMAC de las propuestas de cambio de Fama (opcional; cae a una clave derivada de `META_APP_SECRET`) |
+| `META_CAPI_FUNCTION_URL` · `META_CAPI_SHARED_SECRET` | Relay de la Meta Conversions API (Vercel Function `meta-capi`) |
+| `CF_ACCESS_CLIENT_ID` · `CF_ACCESS_CLIENT_SECRET` | Service token de Cloudflare Access para la wiki MCP de Apollo |
 | `TWILIO_AGENT_NAME` | Agente que atiende las llamadas de Twilio |
 | `ELEVENLABS_API_KEY` | ElevenLabs (agente Atlas + sync de CI) |
 | `POSTHOG_API_KEY` | Instrumentación de producto (PostHog) |

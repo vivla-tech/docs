@@ -20,13 +20,14 @@ Dos públicos, el mismo runtime:
 
 ## La flota de agentes
 
-La instancia registra 18 agentes. Hermes es el orquestador «chief of staff» y el resto son especialistas a los que delega o que atienden un canal concreto (`apps/mastra/src/mastra/index.ts:128`):
+La instancia registra 19 agentes. Hermes es el orquestador «chief of staff» y el resto son especialistas a los que delega o que atienden un canal concreto (`apps/mastra/src/mastra/index.ts:129`):
 
 | Agente | Rol (resumen) |
 |---|---|
 | **Hermes** | Orquestador. Agente por defecto en Slack; delega en los especialistas. |
 | **Mercurio** | GTM y ventas (campañas, pipeline, analítica de llamadas). |
 | **Vulcano** | Especialista SQL: genera y ejecuta consultas sobre BigQuery (sub-agente de Mercurio). |
+| **Fama** | Paid media: lee Meta Ads y Google Ads en vivo y pausa/activa o cambia presupuestos diarios con confirmación. Solo chat web (`/chat/fama`) y Studio, **sin Slack**. |
 | **Vesta** | Operaciones (estado de casas, mantenimiento, ocupación, NPS). |
 | **Mars** | Finanzas (P\&L, presupuestos, decisiones documentadas). |
 | **Dionisio** | Marca (voz y tono, naming, revisión de copy). |

@@ -16,6 +16,10 @@ El servicio principal es la app Mastra (`apps/mastra`), desplegada en **Railway*
   Rama de producción: **`main`**. Clase: agente. Propietario: equipo **IA**.
 </Info>
 
+<Note>
+  Fuera de Railway hay una pieza desplegada aparte: la **Vercel Function `meta-capi`** (`infra/vercel/meta-capi`), un proyecto Vercel propio en el equipo de VIVLA que recibe la conversión «DanielaReply» y la reenvía a la Meta Conversions API. Mastra la llama con el header `META_CAPI_SHARED_SECRET`; la función guarda su propio token de Meta. Se despliega con `vercel --prod` desde esa carpeta y requiere Deployment Protection desactivada. Ver [Integraciones](/sistemas/vivla-intelligence/integraciones) (`infra/vercel/meta-capi/README.md`).
+</Note>
+
 ### URLs
 
 - **API de Mastra (producción):** `https://api.vivla.ai` — es la que vigila la sonda de uptime contra `/health` (`.github/workflows/uptime.yml`). También responde en la URL interna del servicio en Railway, declarada en la allowlist de CORS (`apps/mastra/src/mastra/index.ts:262`).

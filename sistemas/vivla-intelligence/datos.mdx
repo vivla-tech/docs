@@ -41,6 +41,22 @@ El paquete `@VIVLA-intelligence/metabase` es un cliente tipado de la API de Meta
 
 Hay también un servidor MCP de Metabase definido en el repo (`apps/mastra/src/mcp-servers/metabase.ts`), no expuesto por la instancia Mastra.
 
+## Meta Ads y Google Ads (Fama)
+
+El agente **Fama** (paid media) lee las dos plataformas de anuncios **en vivo** con las credenciales propias de VIVLA, mediante dos clientes tipados en `apps/mastra/src/lib/ads/`:
+
+- **Meta Marketing API** (Graph `v23.0`) sobre la cuenta de anuncios permitida `act_952835605437684`: lista campañas/conjuntos/anuncios con su estado y presupuesto, insights de rendimiento (gasto, impresiones, clics, CPC/CPM/CTR, acciones incl. leads) y el log de actividad («quién cambió qué y cuándo»). Todo objeto consultado se valida contra esa cuenta (`apps/mastra/src/lib/ads/meta-marketing.ts:135`, `:167`, `:250`).
+- **Google Ads** (REST `v24` + GAQL) sobre la cuenta `GOOGLE_ADS_CUSTOMER_ID` a través de la MCC `GOOGLE_ADS_LOGIN_CUSTOMER_ID`: rendimiento por campaña y consultas GAQL `SELECT` arbitrarias de solo lectura (`apps/mastra/src/lib/ads/google-ads-api.ts:98`, `:129`).
+
+<Note>
+  Las lecturas son de solo lectura por diseño: GAQL solo acepta una única sentencia `SELECT` por llamada (`validateGaqlSelect`, `apps/mastra/src/lib/ads/google-ads-api.ts:46`) y Meta solo deja consultar la cuenta de la allowlist. Fama **también** puede escribir —pausar/activar y cambiar presupuestos diarios— pero solo tras un bucle firmado de propuesta → confirmación del usuario → aplicación, con topes de ±50 % por cambio y 500 €/día (`apps/mastra/src/lib/ads/proposals.ts`). Eso es operativa de marketing, no una fuente de datos; Fama no tiene Slack (ver [Intelligence](/sistemas/vivla-intelligence)).
+</Note>
+
+Autenticación (solo por nombre):
+
+- **Meta:** `META_ACCESS_TOKEN` (token de System User con `ads_read` + `ads_management`) + `META_APP_SECRET` (para el `appsecret_proof`) (`apps/mastra/src/lib/ads/meta-marketing.ts:42`).
+- **Google Ads:** el service account de mastra (`GOOGLE_CLIENT_EMAIL` / `GOOGLE_PRIVATE_KEY`) con el scope `adwords` a través de la MCC; **sin developer token** (Google movió el acceso a la API a nivel de proyecto GCP en sept. 2026) (`apps/mastra/src/lib/ads/google-ads-api.ts:7`, `:59`).
+
 ## Google Drive (RAG y Workspace)
 
 Dos patrones para leer carpetas de Drive (`CLAUDE.md`):
@@ -82,7 +98,9 @@ Las de datos se agrupan aquí; la tabla completa está en [Integraciones](/siste
 | `GOOGLE_CLOUD_PROJECT` · `BIGQUERY_DATASET` · `BIGQUERY_LOCATION` | BigQuery |
 | `METABASE_URL` · `METABASE_API_KEY` | Metabase |
 | `GOOGLE_VERTEX_PROJECT` · `GOOGLE_VERTEX_LOCATION` | Embeddings de Vertex (RAG + memoria) |
-| `GOOGLE_CLIENT_EMAIL` · `GOOGLE_PRIVATE_KEY` / `GOOGLE_APPLICATION_CREDENTIALS_JSON` | Service account de Drive/GCP |
+| `GOOGLE_CLIENT_EMAIL` · `GOOGLE_PRIVATE_KEY` / `GOOGLE_APPLICATION_CREDENTIALS_JSON` | Service account de Drive/GCP (también Google Ads de Fama) |
+| `META_ACCESS_TOKEN` · `META_APP_SECRET` | Meta Marketing API (lecturas y cambios de Fama) |
+| `GOOGLE_ADS_CUSTOMER_ID` · `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | Cuenta y MCC de Google Ads que lee Fama |
 | `GOOGLE_DRIVE_LEGAL_FOLDER_ID` · `SYNC_SECRET` | Corpus legal y su sync |
 
 <Danger>
