@@ -1,0 +1,128 @@
+---
+title: 'Deployment'
+description: 'CI/CD con GitHub Actions y publicación en stores'
+---
+
+# Deployment
+
+El proceso de deployment de Vivla esta completamente automatizado mediante **GitHub Actions** con workflows reutilizables. El sistema detecta inteligentemente el tipo de deploy necesario y ejecuta el pipeline correspondiente.
+
+## Workflows principales
+
+### Pipeline de Develop (`develop.yml`)
+
+**Trigger:** push a la branch `develop`
+
+Este pipeline implementa una deteccion inteligente del tipo de deploy:
+
+1. **Deteccion del tipo de deploy:**
+   - Si el mensaje de commit contiene `[build]` → full build
+   - Si hay cambios en `ios/`, `android/`, `app.config`, `package.json`, `eas.json` → full build
+   - Solo cambios en archivos JS/TS → OTA update
+
+2. **Tests y lint** siempre se ejecutan primero, independientemente del tipo de deploy
+
+3. **Path OTA:** publica un update al canal `develop` via `eas update`
+
+4. **Path Full Build:** builds secuenciales:
+   - `development` (iOS + Android en paralelo)
+   - `preview` (iOS, luego Android)
+   - `beta-prod` (iOS, luego Android)
+
+5. **Notificacion a Slack** al finalizar
+
+<Note>
+  La deteccion inteligente optimiza los tiempos de CI. Si solo cambiaste codigo TypeScript, el
+  deploy se resuelve en minutos con un OTA update en lugar de generar builds completos.
+</Note>
+
+### Pipeline de Production (`main.yml`)
+
+**Trigger:** push a la branch `main`
+
+1. Tests y lint
+2. Build production iOS y Android **en paralelo**
+3. Notificacion a Slack
+
+<Warning>
+  Los builds de produccion solo se disparan desde la branch `main`. Asegurate de que los tests pasen
+  antes de mergear.
+</Warning>
+
+### Pipeline de PR (`pr.yml`)
+
+**Trigger:** PR a `main` o `develop`
+
+1. Solo tests y lint (no genera builds)
+2. Notificacion a Slack con estado del PR
+
+## Workflows reutilizables
+
+Los workflows reutilizables tienen el prefijo `_` y encapsulan la logica comun de cada tipo de build:
+
+| Workflow                 | Descripcion                        |
+| ------------------------ | ---------------------------------- |
+| `_test.yml`              | Lint, format check y tests         |
+| `_build-development.yml` | Build de desarrollo                |
+| `_build-preview.yml`     | Build preview + submit a stores    |
+| `_build-beta-prod.yml`   | Build beta-prod + submit iOS       |
+| `_build-production.yml`  | Build produccion + submit a stores |
+
+## OTA Updates
+
+El proyecto usa **expo-updates** para distribuir actualizaciones over-the-air sin necesidad de generar nuevos binarios.
+
+### Canales de actualizacion
+
+| Canal         | Descripcion                      |
+| ------------- | -------------------------------- |
+| `development` | Desarrollo local                 |
+| `develop`     | Entorno de desarrollo compartido |
+| `beta-prod`   | QA con API de produccion         |
+| `production`  | Usuarios finales                 |
+
+### Configuracion
+
+- **Check automatico:** `ON_LOAD` — la app busca actualizaciones al iniciar
+- **Runtime version:** igual a la version de la app (semver)
+
+### Scripts de OTA update
+
+<CodeGroup>
+```bash Development
+npm run update:development
+```
+
+```bash Preview
+npm run update:preview
+```
+
+```bash Production
+npm run update:production
+```
+
+</CodeGroup>
+
+## Store submission
+
+<Tabs>
+  <Tab title="iOS">
+    - Los builds se envian a **TestFlight** via EAS Submit - Desde TestFlight se promociona a la App
+    Store manualmente - Las credenciales de firma se gestionan remotamente por EAS
+  </Tab>
+  <Tab title="Android">
+    - Los builds se envian al **internal track** de Google Play via EAS Submit - Desde el internal
+    track se promociona a produccion manualmente - El keystore se gestiona remotamente por EAS
+  </Tab>
+</Tabs>
+
+## Flujo completo de release
+
+El siguiente flujo describe el camino tipico de un cambio desde desarrollo hasta produccion:
+
+1. El desarrollador crea un PR contra `develop` → se ejecutan tests y lint
+2. Al mergear a `develop` → se detecta el tipo de deploy y se ejecuta el pipeline correspondiente
+3. QA valida en los builds de `preview` y `beta-prod`
+4. Se crea un PR de `develop` a `main` → tests y lint
+5. Al mergear a `main` → build de produccion + submit a stores
+6. Notificacion a Slack en cada paso del proceso

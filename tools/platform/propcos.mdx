@@ -1,0 +1,75 @@
+---
+title: "PropCos"
+description: "La sociedad de cada casa en tools, leída en vivo de Propcos: ficha legal y financiera y documentos de Drive BY HOME"
+---
+
+# PropCos
+
+Cada casa es propiedad de una sociedad (la **PropCo**, «VIVLA HOME BAQ 2, S.L.»). Todo lo legal y financiero de esa sociedad vive en **Propcos** (`propcos.vivla.com`), el microservicio de Legal y Finanzas:
+
+- CIF, constitución, domicilio social, registro mercantil, poderes, COS, catastro y registral, capital, préstamo de socios, cuenta bancaria y lotes de compra.
+- Toda la parte financiera: presupuestos, cuotas, estado de pago, alquileres, días disfrutados e informes.
+- El índice de Drive **`VIVLA CORE/BY HOME`**: una carpeta por casa (`VH BAQ 2 - NHEU`) con escrituras, actas, contratos de cada propietario, cuentas anuales, impuestos, pólizas, licencia y juntas de vecinos. Propcos lo recorre cada noche con una service account de solo lectura y clasifica cada documento.
+
+**Tools no copia nada de esto.** Cada pestaña llama a Propcos en el momento, a través de los endpoints `/propcos/*` del backend, que filtran por el rol del usuario. Permiso: `tool-propcos`.
+
+| Rol | Ve |
+| -- | -- |
+| `viewer` | Ficha legal de la sociedad, documentos de Propcos, índice de Drive y documentación de venta de cada propietario |
+| `admin` | Además capital, préstamo, precios de los lotes, IBAN y la pestaña **Finanzas** |
+
+## Dónde se ve
+
+En la ficha de casa (`/app/properties/:id`), grupo **PropCo**:
+
+- **Sociedad**: identidad legal, anexos (garaje/trastero), lotes de compra y documentos guardados en Propcos (se abren con un enlace firmado de 5 minutos). Admin: capital y banco.
+- **Documentos**: el índice de Drive agrupado por sección, subsección y año, con enlace a cada fichero y a cada carpeta.
+- **Finanzas** (admin): presupuesto por categoría, cuotas por propietario y mes, ingresos de alquiler, días disfrutados e informes financieros.
+- En **Propietarios**, la tarjeta **Documentación de venta**: por cada carpeta de propietario, qué documentos tiene y cuáles faltan.
+
+En el perfil de cliente (pestaña Fracciones): sus documentos de Drive y, para admin, el estado de sus cuotas.
+
+## API
+
+| Tools (`tool-propcos`) | Propcos (`/api/internal/tools/…`) |
+| -- | -- |
+| `GET /propcos/properties/:id` | `properties/:toolsPropertyId` |
+| `GET /propcos/properties/:id/documents?section=` | `properties/:toolsPropertyId/documents` |
+| `GET /propcos/properties/:id/ownership-checklist` | `properties/:toolsPropertyId/ownership-checklist` |
+| `GET /propcos/properties/:id/finance?year=` (admin) | `properties/:toolsPropertyId/finance` |
+| `GET /propcos/properties/:id/files/:fileId/url` | `/api/internal/sync/files/:fileId/url` |
+| `GET /propcos/clients/:id` | `clients/:toolsClientId` |
+
+Propcos identifica las casas y los clientes por los ids de tools que guarda (`tools_property_id`, `tools_client_id`). Esos ids los escribe la sync de propietarios (`POST /api/internal/sync/links`). Si Propcos aún no conoce una casa, tools muestra la pestaña vacía en vez de un error.
+
+Env en el backend de tools: `PROPCOS_BASE_URL`, `PROPCOS_CF_ACCESS_CLIENT_ID`, `PROPCOS_CF_ACCESS_CLIENT_SECRET` (Cloudflare Access) y `PROPCOS_TOOLS_SYNC_API_KEY` (`x-internal-api-key`). Sin ellas todo devuelve vacío.
+
+## Lo que Propcos lee de tools
+
+Al revés también: la ficha de casa de Propcos tiene una sección **Secundario y contratos** con lo que solo sabe tools, leído en vivo y sin copiarlo:
+
+- **Avisos de titularidad**: reventas cerradas cuyo vendedor sigue como socio, y compradores con más compras que fracciones. Salen de cruzar por nombre el histórico del secundario con los socios actuales.
+- **Revalorización** de la zona (la última lectura de `property_valuations`).
+- **Contrato y condiciones** de cada socio: recompra, cambio de casa, cláusula de secundario, condiciones especiales y condiciones comerciales (cuotas pagadas por VIVLA, cuota fija, segunda fracción, garantía de alquiler, referidos) (`ownership_terms`, `ownership_special_conditions`, `ownership_commercial_conditions`).
+- **Transmisiones de participaciones**: reventas, recompras de VIVLA y cambios de casa de `sale_requests`, con fecha de cierre, vendedor, comprador y precio.
+
+Endpoint: `GET /propcos-feed/properties/:toolsPropertyId` con `x-api-key` (la misma clave que usa Propcos en el webhook de propietarios, `NOTIFICATIONS_API_KEY`). En Propcos se activa con `TOOLS_API_URL` y `TOOLS_API_KEY`, las mismas variables del webhook.
+
+## Sync de propietarios: webhook, sin Windmill
+
+Lo único que tools sí guarda es lo que ya era suyo: la identidad legal de cada cliente (`tax_id`, `legal_name`, `propcos_id`) y, **solo si están vacíos**, la fecha, el precio (`purchase_price_eur` = precio del lote / nº de fracciones) y la entrada (`expected_access_on`) de cada titularidad. También actualiza `properties.legal_entity_name/vat_id`. El mercado secundario y el portal de propietarios lo leen de ahí.
+
+- Cuando cambian propietarios, lotes o la sociedad, **Propcos llama** a `POST /owners/sync-from-propcos/webhook` (`x-api-key`) con los ids de las casas que cambiaron. Agrupa los cambios unos segundos y reintenta si tools no responde. Tools vuelve a sincronizar solo esas casas.
+- `POST /owners/sync-from-propcos` (admin, dry-run por defecto) y `POST /owners/sync-from-propcos/run` (`x-api-key`, en vivo) hacen la pasada completa a mano.
+- No hay schedule en Windmill.
+
+## Cómo lee Propcos Drive BY HOME
+
+El clasificador reconoce las secciones **por palabra clave, nunca por número**: conviven la plantilla antigua de 11 secciones y la nueva de 10 (`- VH X - X`), y la numeración cambia de casa a casa.
+
+- **Casa**: `VH <ZONA> <n> - <NOMBRE>`; `(pte)` o `[pte]` es una casa pendiente de comprar. Se casa con la PropCo por el código (`VH BAQ 2` ↔ `VIVLA HOME BAQ 2, S.L.`) y, si no, por nombre.
+- **Propietario**: cada carpeta de «Venta de fracciones». `OLD … (vendido)` o `SOLD/` es una reventa, `LOST/` un lead que se cayó y `- ANEXOS CPC` los anexos.
+- **Tipo de documento**: por el nombre del fichero y, si no dice nada, por su carpeta (`Modelo 200 (IS)/scan.pdf` es un modelo 200). Fotos y vídeos se cuentan pero no se indexan.
+- **Documentación de venta**: con escritura de participaciones (ECV) la venta está cerrada y se esperan promesa, pago, ECV, certificado del administrador, adhesión al COS y garantía. Sin ECV está en precierre y basta con promesa y pago.
+
+Probado el 19-oct-2026 contra el árbol real: 78 casas, 27.332 ficheros y 411 carpetas de propietario activas (241 cerradas, 170 en precierre).

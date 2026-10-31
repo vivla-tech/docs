@@ -1,0 +1,82 @@
+---
+title: "vivla config"
+description: "Tus preferencias, las que la CLI recuerda de una ejecución a otra. De momento una: root, la carpeta donde van los repos. Por defecto es ~/dev (en un devcontainer, /workspaces), pero cada persona…"
+---
+
+Tus preferencias, las que la CLI recuerda de una ejecución a otra. De momento una: **`root`**, la carpeta donde van los repos. Por defecto es `~/dev` (en un devcontainer, `/workspaces`), pero cada persona puede elegir otra y no tener que pasarla cada vez.
+
+```bash
+vivla config                      # qué carpeta está en uso y de dónde sale
+vivla config root ~/code          # a partir de ahora los repos van a ~/code
+vivla config root --unset         # vuelve al valor por defecto
+vivla config --json
+```
+
+```
+✔ root → ~/code  (saved in ~/.vivla/cli/config.json)
+root  ~/code  (saved in ~/.vivla/cli/config.json)
+      does not exist yet: setup creates it with the first clone
+```
+
+La misma elección se hace desde el asistente: en la pantalla de repos, `f` edita la carpeta y la guarda.
+
+Mientras no hayas elegido nada, la CLI mira dónde tienes ya tus proyectos y te lo propone: `vivla config` lo dice en una línea y el asistente lo enseña bajo la lista de repos (ahí `f` sale ya con esa carpeta escrita; `enter` la acepta).
+
+## Opciones
+
+| Opción         | Qué hace                                                                                                          |
+| -------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `root <dir>`   | guarda `dir` como carpeta de repos. Vale `~/code` o una ruta absoluta; una relativa se resuelve desde donde estás |
+| `root --unset` | olvida la guardada y vuelve a `~/dev`                                                                             |
+| `--root <dir>` | (global) no guarda nada: enseña qué pasaría con esa carpeta en esta ejecución                                     |
+
+## Cómo funciona
+
+La carpeta que usan todos los comandos (`setup`, `repos`, `status`, `dev`, `run`, la pantalla de inicio y las tools MCP) sale, por este orden, de:
+
+1. `--root <dir>`, solo para esa ejecución.
+2. La variable `VIVLA_CLI_ROOT`, solo para esa ejecución (la pantalla de inicio la usa para pasar su carpeta a los comandos que lanza).
+3. Lo guardado con `config root` o con `f` en el asistente.
+4. `~/dev`, o `/workspaces` si existe y se puede escribir ([Linux](/cli/linux)).
+
+La sugerencia sale de recorrer tu home dos niveles (sin `Library`, `Applications` ni carpetas ocultas) y contar, en cada carpeta, cuántos hijos son proyectos (tienen `.git`, `package.json` o `node_modules`) y cuántos son clones de `github.com/vivla-tech`. Gana la que más clones de vivla-tech tenga y, a igualdad, la que más proyectos; hacen falta al menos dos. El interior de un repo (los `packages/` de un monorepo) no cuenta como carpeta de repos. Solo se mira cuando no hay nada guardado y no tarda ni un segundo.
+
+Lo guardado vive en `~/.vivla/cli/config.json`, junto al resto del estado de la CLI, con la carpeta escrita como `~/code` para que el fichero valga en cualquier máquina. Al guardar no se crea nada ni se mueve nada: los repos que ya tengas en la carpeta anterior siguen ahí, y `vivla repos` los verá como no clonados hasta que los muevas o los vuelvas a montar.
+
+## Qué toca
+
+Local: lee y escribe `~/.vivla/cli/config.json`. No crea la carpeta (la crea `setup` al clonar el primer repo) ni toca ningún servicio.
+
+## Salida `--json`
+
+```json
+{
+  "type": "config",
+  "file": "/Users/ana/.vivla/cli/config.json",
+  "root": {
+    "value": "~/code",
+    "source": "config",
+    "saved": "~/code",
+    "default": "/Users/ana/dev",
+    "exists": true
+  },
+  "suggestions": [{ "dir": "/Users/ana/code", "repos": 12, "vivla_repos": 3 }]
+}
+```
+
+`source` es `flag`, `env`, `config` o `default`, según de dónde haya salido `value`. `suggestions` (vacío si ya hay algo guardado) son las carpetas donde parece que viven tus proyectos, la mejor primero.
+
+## Exit codes
+
+| Código | Cuándo                                       |
+| ------ | -------------------------------------------- |
+| `0`    | ok                                           |
+| `64`   | una clave que no existe o `root` sin carpeta |
+
+## Para agentes (MCP)
+
+No hay tool: la carpeta guardada ya es la que usan `setup`, `plan`, `list_repos` y el resto cuando no reciben `root`. Para montar en otra carpeta solo una vez, las tools aceptan `root`.
+
+## Relacionado
+
+[`setup`](/cli/commands/setup) · [`repos`](/cli/commands/repos) · [`vivla`](/cli/commands/vivla) · [Dónde van los repos](/cli/setup#dónde-van-los-repos)

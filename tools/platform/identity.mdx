@@ -1,0 +1,117 @@
+---
+title: "Identity — el cerebro de «quién es»"
+description: "Vivla Identity es la fuente única de quién es una persona, su etapa y qué casas puede ver, para todas las webs de Vivla. Qué responde Identity (vs Tools y vivla-api), y cómo una web usa el handoff genérico (issue / redeem / me) y extiende el payload de la persona."
+---
+
+# Identity — el cerebro de «quién es»
+
+Vivla Identity (`apps/identity`) es el servicio que responde **quién es una persona** en Vivla: un id estable, su **etapa**, y **qué casas** puede ver con qué rol. Es la fuente única para **todas** las webs de Vivla: el portal de propietarios hoy; el mercado secundario, los alquileres y «mi casa» después.
+
+Esta página es la base para construir una web nueva sobre Identity, o para extender lo que Identity sabe de una persona, sin preguntar. Léela entera.
+
+Documentos relacionados:
+
+- Portal de propietarios (el primer consumidor): [`platform/portal`](/platform/portal).
+- Cómo correr identity y sus variables: `apps/identity/README.md`.
+- Migración Firebase → Auth0: `docs/internal/identity/auth0-firebase-migration.md`.
+
+## La regla
+
+**Identity dice quién es y qué puede ver. Tools enseña el contenido. vivla-api cambia las cosas.**
+
+| Pregunta | Quién responde |
+| -- | -- |
+| ¿Quién es? (id de persona, etapa, qué casas y con qué rol) | **Identity** |
+| Contenido de esas casas (detalle, espejo de reservas, mercado secundario) | **Tools** |
+| Cambios (reservar, pagar, editar perfil) | **vivla-api** (necesita M3) |
+
+La lista de casas y el rol son un **permiso**: viajan con la identidad para que cada web decida qué enseñar. El contenido de esas casas lo sirve Tools; los cambios, vivla-api.
+
+## El payload de la persona
+
+Todo lo que Identity devuelve (en `redeem`, en `GET /me`, y como claims de login) tiene esta forma:
+
+```ts
+{
+  person_id: string          // identity_links.id — NUNCA un id de Auth0
+  name: string | null        // cuando se conoce
+  email: string | null       // cuando se conoce
+  stage: 'owner' | 'ex_owner' | 'visitor'
+  roles: ('owner'|'co_holder'|'guest'|'visitor')[]
+  properties: {
+    property_id: string
+    panel_home_id: number | null
+    name: string | null
+    role: 'owner' | 'co_holder' | 'guest' | 'visitor'
+    ownership_status: string | null
+  }[]
+}
+```
+
+- **`person_id`** es `identity_links.id`. Es estable y nunca se deriva de un id de Auth0.
+- **`stage`** es **calculado, nunca escrito a mano**:
+  - `owner` — tiene al menos una titularidad **viva** (una fracción `signed`/`active`, o un derecho de uso `holder`/`co_holder` vigente).
+  - `ex_owner` — sin titularidad viva, pero tuvo una que terminó.
+  - `visitor` — ni una ni otra: un acceso de invitado, o una persona que el modelo de propietarios aún no conoce.
+  - Las etapas de onboarding/prospecto llegan cuando el proyecto de onboarding y HubSpot den datos reales. Código: `apps/identity/src/clients-login-claims/login-claims.service.ts` (`resolveStage`).
+- **`properties` y `roles`** son los mismos datos que las login-claims resuelven hoy, desde el modelo de propietarios de Tools (`fraction_owners` + `usage_rights`) con el espejo de chat (`user_properties`, `users`) como respaldo.
+
+`stage` se añade también a las login-claims y al claim de Auth0 (`https://vivla.com/stage`), de forma **aditiva**: los consumidores que solo leen `person_id`/`roles`/`properties` no se enteran.
+
+## El handoff genérico (app → web)
+
+Cuando alguien llega desde la app móvil a una web, no tiene sesión de Auth0. El handoff genérico de Identity convierte el token de la app en una sesión de la web, **sin volver a pedir la contraseña**, con un solo contrato para todas las webs.
+
+```
+App  ──issue──▶  Identity  ──(url)──▶  Web /handoff  ──redeem──▶  Identity  ──▶  sesión de la web
+       token de la app            código de un uso         secreto de la web      token + persona
+```
+
+### 1 · Issue — `POST /api/handoff/code`
+
+La app llama con su **token de Firebase** (`Authorization: Bearer …`, nunca en query string) y un cuerpo `{ app_key, return_to?, return_origin? }`. Identity:
+
+- verifica el token (misma verificación que usa hoy el portal),
+- mira el **registro de webs** (`handoff_apps`) por `app_key` (debe estar `enabled`),
+- resuelve la persona (find-or-create, igual que un login),
+- guarda un **código de un uso** como hash, TTL **60 s**, con el `app_key` y el `return_to` validado,
+- y devuelve `{ url }` = la URL de la web destino (`<origen>/<handoff_path>?code=…`).
+
+El `return_to` se valida (ruta relativa, un solo `/` inicial, sin `//`, sin `\`/tab/salto de línea). El origen de la redirección se valida contra el registro (orígenes exactos + patrones glob para los previews de Vercel). Como el token decide **quién** es la persona, un código solo puede meter a su propio dueño en la web: por eso *issue* no necesita el secreto de la web.
+
+### 2 · Redeem — `POST /api/handoff/redeem`
+
+El **servidor** de la web (no el navegador) canjea el código con **su secreto** (`x-vivla-handoff-app` + `x-vivla-handoff-secret`). Identity gasta el código y abre la sesión en una sola operación atómica (un solo uso, a prueba de carreras) y devuelve un **session token opaco** (guardado como hash, revocable, con expiry de 8 h), el `return_to`, y el **payload de la persona**.
+
+### 3 · Me — `GET /api/handoff/me`
+
+Con el secreto de la web y **o bien** el session token (en la cabecera `x-vivla-session-token`, no en query string: es una credencial y las query strings acaban en los logs de acceso) **o bien** el person id (`?person_id=…`, que no es secreto, para webs que entraron por Auth0 y solo quieren refrescar casas/etapa en vivo). Devuelve el payload en vivo. Las webs lo llaman al cargar, con caché corta, para que una venta o una baja se noten **en minutos**, no en el siguiente login.
+
+### Revocar — `POST /api/handoff/revoke` y `/revoke-person`
+
+`revoke` cierra una sesión (p. ej. el logout de la web). `revoke-person` cierra **todas** las sesiones de una persona para esa web (p. ej. tras una venta o una baja).
+
+### Registrar una web nueva
+
+1. Inserta una fila en `handoff_apps` (migración): `app_key`, `name`, `handoff_path`, `allowed_return_origins` (+ `allowed_return_origin_patterns` para previews). **Sin secreto en git.**
+2. Un operador genera un secreto aleatorio, guarda su **sha256** en `handoff_apps.secret_hash`, y pone el secreto en el entorno de la web. Mientras `secret_hash` sea NULL, `redeem`/`me`/`revoke` de esa web fallan cerrado.
+3. La web añade una ruta `/handoff` que canjea el código y una lectura de `GET /me`. El portal (`apps/portal/app/lib/identity.ts`) es la referencia a copiar.
+
+Solo hashes se guardan, nunca un código ni un token. Código: `apps/identity/src/handoff/`.
+
+## Cómo extender lo que Identity sabe de una persona
+
+**La regla:** si un dato **decide qué puede ver** una persona, vive en Identity. Si es **contenido**, se lee de Tools.
+
+- **Añadir un dato de permiso al payload** (p. ej. `is_subscriber`, `has_rentals_access`): resuélvelo en `login-claims.service.ts` a partir de datos de Tools (o del sistema que sea su dueño), añádelo al payload de forma **aditiva**, y —si debe viajar en el login— cópialo como claim en la Action de post-login. Añade un test en `login-claims.service.spec.ts`. No inventes el dato en el cliente: un permiso siempre nace de datos en Identity.
+- **Mostrar contenido** (detalle de la casa, calendario, documentos): no toca Identity. La web lo pide a Tools (o a vivla-api) usando el `person_id`/`property_id` del payload.
+
+## M3 / Native-to-Web SSO
+
+Hoy el paso *issue* verifica un token de **Firebase**. Cuando la app lleve tokens de **Auth0** (M3), solo cambia *issue*: un verificador hermano (`Auth0AccessTokenVerifier`, misma forma de salida) se enchufa junto al de Firebase y el endpoint despacha según el tipo de token. Más adelante, Auth0 ofrece un traspaso nativo a web («Native to Web SSO») que daría una sesión real de Auth0 en todas las webs. En ambos casos **las webs no cambian**: siguen haciendo `redeem` + `GET /me` igual. El seam está en `apps/identity/src/handoff/firebase-id-token.verifier.ts`.
+
+## De quién es cada cosa
+
+- **Identity es del equipo de plataforma.** El registro de webs, el handoff y las login-claims viven aquí.
+- **Cada web tiene su `app_key` y su secreto.** Una web nunca comparte el secreto de otra; el registro aísla orígenes y sesiones por app.
+- **Nunca** se escribe un secreto de web en git; el hash lo pone un operador.

@@ -1,0 +1,157 @@
+---
+title: "vivla watch"
+description: "Después de un deploy: cuenta los errores de la app en los 15 minutos siguientes y los compara con los 15 de antes. Si han subido, sale con exit 1 y, si le das un webhook, avisa en Slack con el commit…"
+---
+
+Después de un deploy: cuenta los errores de la app en los 15 minutos siguientes y los compara con los 15 de antes. Si han subido, sale con `exit 1` y, si le das un webhook, avisa en Slack con el commit y el error nuevo más frecuente. Sirve para mirarlo tú justo después de desplegar, o como último paso del workflow de deploy de un repo.
+
+```bash
+vivla watch vivla-tools backend                    # espera a que pasen 15m desde el deploy y compara
+vivla watch vivla-tools backend --no-wait          # compara lo que haya ya, sin esperar
+vivla watch identity --window 30m                  # dentro de vivla-tools; ventanas de 30 minutos
+vivla watch vivla-cms web --threshold 3 --min 10   # más tolerante
+vivla watch vivla-tools backend --slack "$VIVLA_SLACK_WEBHOOK"
+vivla watch vivla-tools backend --json             # para agentes y CI
+```
+
+```
+vivla-tools/backend · production · deploy c7b813e at 2026-10-23 12:58
+  15m before   2 errors
+  15m after    12 errors
+  new since the deploy:
+       12× Error: payment 4 failed
+          10-23 12:59 → 13:10
+✖ errors rose (more than 2× the ones before, and at least 5)
+  Slack: sent
+```
+
+## Opciones
+
+| Opción                | Por defecto             | Qué hace                                                                         |
+| --------------------- | ----------------------- | -------------------------------------------------------------------------------- |
+| `[repo]`              | el repo en el que estás | de qué repo                                                                      |
+| `[service]`           | el primero del catálogo | qué servicio                                                                     |
+| `--env <env>`         | `production`            | entorno                                                                          |
+| `--window <t>`        | `15m`                   | cuánto mira después del deploy, y lo mismo antes: `90s`, `15m`, `1h`             |
+| `--threshold <ratio>` | `2`                     | "han subido" = más de esas veces los errores de antes (`2`, `1.5x`)              |
+| `--min <n>`           | `5`                     | y al menos esos errores después: 0 antes y 2 después no es una subida            |
+| `--no-wait`           |                         | no espera a que pase la ventana: compara lo que haya ya, con ventanas más cortas |
+| `--slack <url>`       | `VIVLA_SLACK_WEBHOOK`   | webhook de Slack (incoming webhook) al que avisar cuando suben o falla el deploy |
+
+## Cómo funciona
+
+1. **El deploy.** El último de la lista de la plataforma, como en [`why`](/cli/commands/why#cómo-funciona): `railway deployment list` o `vercel ls`. Cuenta desde que se creó (Railway) o desde que empezó a servir (Vercel, `ready`). Si ese último deploy falló, no compara nada: sale con `failed` (y avisa en Slack si hay webhook).
+2. **Esperar.** Si todavía no ha pasado `--window` desde el deploy, espera hasta que pase, y lo dice. Con `--no-wait` usa el tiempo que haya pasado como ventana (como mínimo un minuto).
+3. **Contar.** Las líneas de error ([`vivla logs --errors --json`](/cli/commands/logs)) en la ventana de después y en otra igual justo antes, cada una con `--since` y `--until`. En **Railway** los logs son de un deploy, así que la de antes se pide al deploy anterior y la de después al nuevo. En **Vercel** son del entorno y basta la hora. Hasta 1000 líneas por ventana. **Cloudflare** no guarda histórico y no se puede comparar.
+4. **Decidir.** Han subido si después hay al menos `--min` errores y más de `--threshold` veces los de antes. También dice qué tipos de error son nuevos, agrupados igual que en `why` (sin contar ids, números ni valores entre comillas).
+5. **Avisar.** Solo cuando suben o el deploy falló, y solo si hay webhook (`--slack` o `VIVLA_SLACK_WEBHOOK`): un `POST` con `{ "text": "…" }` con el servicio, el commit, los dos recuentos y el error nuevo más frecuente.
+
+### En el workflow de deploy de un repo
+
+`watch` puede ir como último job del workflow que despliega. Por ejemplo, en el `Deploy` de vivla-tools, que hace `railway up` en cada push a `main`:
+
+```yaml
+watch:
+  needs: deploy # el job que hace railway up
+  if: github.ref == 'refs/heads/main'
+  runs-on: ubuntu-latest
+  timeout-minutes: 30
+  steps:
+    - uses: actions/setup-node@v4
+      with: { node-version: 22 }
+    - run: npm i -g @railway/cli
+    # vivla-cli es privado: el token de este workflow no lo ve
+    - run: git config --global url."https://x-access-token:${{ secrets.VIVLA_CLI_TOKEN }}@github.com/".insteadOf "https://github.com/"
+    - name: Errores después del deploy
+      run: npx -y github:vivla-tech/vivla-cli watch vivla-tools backend --env production --window 15m
+      env:
+        RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+        GH_TOKEN: ${{ secrets.VIVLA_CLI_TOKEN }}
+        VIVLA_SLACK_WEBHOOK: ${{ secrets.VIVLA_SLACK_WEBHOOK }}
+        VIVLA_CLI_NO_UPDATE_CHECK: '1'
+```
+
+- **Secretos.** `VIVLA_CLI_TOKEN` es un token de GitHub con lectura de vivla-cli y del repo. `RAILWAY_API_TOKEN`, un token de cuenta de Railway (los de proyecto no siempre dejan enlazar). `VIVLA_SLACK_WEBHOOK`, un incoming webhook del canal.
+- **Tiempo.** El job espera la ventana entera (15 minutos de Actions por deploy). `timeout-minutes` lo corta si algo se cuelga.
+- **Rojo.** Un `exit 1` deja el job en rojo, que es la idea: se ve en el commit. Si prefieres solo el aviso, `continue-on-error: true` en el step.
+- **Vercel** despliega desde su integración con GitHub, sin workflow: ahí puede ir en un workflow con `on: deployment_status` (cuando `state` es `success`).
+
+Esto es un ejemplo: este PR no añade workflows a ningún repo, y todavía no se ha probado en un runner.
+
+## Qué toca
+
+Solo lee logs y la lista de deploys, con tus sesiones (o los tokens de CI). Lo único que escribe es el enlace de Railway en `~/.vivla/cli/railway/` y, si hay webhook y han subido, un mensaje en Slack.
+
+## Salida `--json`
+
+```json
+{
+  "type": "watch",
+  "ok": false,
+  "repo": "vivla-tools",
+  "service": "backend",
+  "env": "production",
+  "deployment": {
+    "id": "474ee145-…",
+    "state": "SUCCESS",
+    "createdAt": "2026-10-23T10:58:28.302Z",
+    "commit": "c7b813e9…"
+  },
+  "window": 900000,
+  "before": {
+    "from": "2026-10-23T10:43:28.302Z",
+    "to": "2026-10-23T10:58:28.302Z",
+    "count": 2,
+    "capped": false
+  },
+  "after": {
+    "from": "2026-10-23T10:58:28.302Z",
+    "to": "2026-10-23T11:13:28.302Z",
+    "count": 12,
+    "capped": false
+  },
+  "threshold": { "ratio": 2, "min": 5 },
+  "verdict": "rose",
+  "fresh": [
+    {
+      "signature": "Error: payment <n> failed",
+      "count": 12,
+      "example": "Error: payment 4 failed",
+      "first": "…",
+      "last": "…"
+    }
+  ],
+  "top": [{ "…": "…" }],
+  "slack": "sent"
+}
+```
+
+| Campo     | Qué es                                                                                                        |
+| --------- | ------------------------------------------------------------------------------------------------------------- |
+| `window`  | lo que duró cada ventana, en ms (menos que `--window` con `--no-wait`)                                        |
+| `before`  | la ventana de antes: `count` líneas de error, `capped` si llegó a 1000, `error` si no se pudo leer            |
+| `after`   | la de después, igual                                                                                          |
+| `verdict` | `ok` (no han subido) · `rose` (han subido) · `failed` (el último deploy falló) · `unknown` (no pudo comparar) |
+| `fresh`   | hasta 5 tipos de error que aparecen después y no antes                                                        |
+| `top`     | los 5 tipos más frecuentes después                                                                            |
+| `slack`   | `sent`, o `failed: …`. Ausente si no había que avisar o no hay webhook                                        |
+| `error`   | por qué no pudo comparar (sin deploys, sin logs, sin deploy anterior en Railway)                              |
+
+## Exit codes
+
+| Código | Cuándo                                                                                  |
+| ------ | --------------------------------------------------------------------------------------- |
+| `0`    | comparó y los errores no han subido                                                     |
+| `1`    | han subido, el último deploy falló, o no pudo comparar (`verdict` dice cuál)            |
+| `64`   | repo o servicio desconocido, una `--window`, `--threshold` o `--min` que no se entiende |
+
+## Para agentes (MCP)
+
+No hay tool: espera minutos, y eso no cabe en una llamada MCP. Un agente lo lanza por la CLI con `--json` (con `--no-wait` si no quiere esperar) o usa [`why`](/cli/commands/why), que sí es una tool.
+
+## Relacionado
+
+- [`vivla why`](/cli/commands/why): el mismo análisis sin comparar, con lo que cambió y los errores de Supabase.
+- [`vivla logs`](/cli/commands/logs) para leer los errores enteros (`--since`, `--until`).
+- [`vivla status`](/cli/commands/status): qué hay desplegado.
+- Guía: [devtools.md](/cli/devtools#cuando-algo-falla-vivla-why-y-vivla-watch).

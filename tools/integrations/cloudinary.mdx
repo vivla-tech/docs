@@ -1,0 +1,79 @@
+---
+title: "Cloudinary"
+description: "Servicio de upload, almacenamiento y transformacion de imagenes"
+---
+
+# Cloudinary
+
+Modulo de gestion de imagenes que proporciona upload, almacenamiento, transformacion y eliminacion via Cloudinary SDK.
+
+## Configuracion
+
+| Variable de entorno | Requerida | Descripcion |
+|---------------------|-----------|-------------|
+| `CLOUDINARY_CLOUD_NAME` | Si | Nombre del cloud |
+| `CLOUDINARY_API_KEY` | Si | API key |
+| `CLOUDINARY_API_SECRET` | Si | API secret |
+
+## Servicio
+
+`CloudinaryService` expone los siguientes metodos:
+
+Cada upload devuelve un `StoredAsset`: un handle auto-descriptivo que lleva su
+propio `resourceType` (`image` | `video` | `raw`), de forma que un borrado
+posterior apunta siempre al namespace correcto de Cloudinary.
+
+### Upload
+
+| Metodo | Descripcion |
+|--------|-------------|
+| `uploadImage(file, folder, publicId?, options?)` | Upload de buffer de imagen → `StoredAsset` |
+| `uploadFile(file, folder, opts?)` | Upload de cualquier archivo (imagen, PDF, doc) con `resource_type=auto` → `StoredAsset` |
+| `uploadVideo(file, folder, publicId?)` | Upload de video (`resource_type=video`) → `StoredAsset` |
+| `uploadFromUrl(url, folder, publicId?)` | Download + upload desde URL (crop 200x200 para avatars) |
+| `generateSignedUploadUrl(folder)` | URL firmada para upload desde cliente |
+| `optimizeImageBuffer(buffer, opts?)` | Re-encode a WebP antes de subir (devuelve el original si sharp no puede decodificarlo) |
+
+### Store + rollback
+
+| Metodo | Descripcion |
+|--------|-------------|
+| `store(file, opts, persist)` | Optimiza (solo imagenes), sube, ejecuta `persist(asset)` y — si `persist` lanza — borra el asset recien subido (por su `resourceType`) y relanza el error original. Devuelve `{ asset, result }` |
+
+`store` concentra el patron upload → persist → rollback que antes cada caller
+escribia a mano (y a veces equivocaba: un video se borraba por el namespace de
+imagen). El rollback es best-effort para que el error real de `persist` sea el
+que aflore.
+
+### Eliminacion
+
+| Metodo | Descripcion |
+|--------|-------------|
+| `remove(asset)` | Borra usando el handle (`{ publicId, resourceType? }`); apunta siempre al namespace correcto. `resourceType` por defecto `image` |
+| `deleteImage(publicId)` | _(deprecated)_ atajo sobre `remove` para imagenes |
+| `deleteAsset(publicId, resourceType?)` | _(deprecated)_ atajo sobre `remove` para cualquier namespace |
+
+## Uso por otros modulos
+
+| Modulo | Uso | Endpoint |
+|--------|-----|----------|
+| Surveys | Upload de imagenes para definiciones de encuestas | `POST /surveys/upload-image` (max 5MB) |
+| Permissions | Upload de imagenes para modulos y grupos | Via `FileInterceptor` |
+| Chat Users | Avatars de usuario (crop 200x200, face-focused) | Sync desde Firebase |
+
+## Optimizacion
+
+Las imagenes se optimizan a WebP con `optimizeImageBuffer` ANTES de subirse
+(rotacion por EXIF, downsize a 2560px sin upscaling, calidad WebP 80), de forma
+que el almacenamiento y las transformaciones se pagan en kb y no en MB. Si sharp
+no puede decodificar el buffer (SVG, no-imagen, ya diminuto) se sube el original
+sin romper. Los uploads aplican ademas `quality=auto` / `fetch_format=auto` en
+entrega; `uploadFromUrl` recorta 200x200 con `gravity=face` para avatars.
+
+## Estructura de modulo
+
+```
+apps/backend/src/shared/cloudinary/
+  cloudinary.module.ts    # Standard module (not global)
+  cloudinary.service.ts   # Cloudinary SDK wrapper
+```

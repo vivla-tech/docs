@@ -1,0 +1,137 @@
+---
+title: "vivla"
+description: "Sin argumentos y en una terminal, abre tu pantalla de inicio: tus repos con lo que hay desplegado en cada entorno, tus PRs y lo que está esperando por ti. Si estás dentro de un clon, entra…"
+---
+
+Sin argumentos y en una terminal, abre tu **pantalla de inicio**: tus repos con lo que hay desplegado en cada entorno, tus PRs y lo que está esperando por ti. Si estás dentro de un clon, entra directamente en ese repo, con tu rama y el PR que tiene. Desde ahí, una tecla lanza `logs`, `dev`, `pr` o `call`, y una paleta (`/`) da acceso a cualquier comando sin tener que sabérselo.
+
+Si en la máquina todavía no hay nada de VIVLA (no estás en un repo del catálogo y no hay ninguno clonado), abre el **asistente** de montaje, como hasta ahora.
+
+```bash
+vivla                           # la pantalla de inicio (o el asistente, la primera vez)
+vivla --root ~/code             # solo esta vez: tus clones están en ~/code
+vivla config root ~/code        # para siempre: ahí van los repos a partir de ahora
+vivla setup                     # el asistente, siempre
+npx --yes github:vivla-tech/vivla-cli   # en un Mac nuevo: el asistente, sin tenerlo instalado
+```
+
+## Opciones
+
+No tiene opciones propias. Las [globales](/cli/commands/index#opciones-globales) que cuentan aquí:
+
+| Opción                      | Por defecto                | Qué hace                                                                                                                                             |
+| --------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--root <dir>`              | la guardada, si no `~/dev` | dónde están (o se clonan) los repos solo esta vez; para siempre, [`config root`](/cli/commands/config). Los comandos que lanza la pantalla de inicio lo heredan |
+| `--connect <remote\|local>` | `remote`                   | asistente: con qué empieza la conexión de servicios (se cambia con `c`)                                                                     |
+| `--set`, `--answers`        |                            | asistente: respuestas que la instalación ya no te preguntará                                                                                         |
+| `--force-env`               |                            | asistente: lo que llega de Vercel o Railway sobrescribe tus `.env`                                                                                   |
+
+## La pantalla de inicio
+
+Tiene dos vistas. Fuera de un repo, **tus repos**. Dentro de un clon, **ese repo**. `enter` pasa de la primera a la segunda y `esc` vuelve.
+
+### Tus repos
+
+Los recomendados para ti (★, primero) y los que tienes clonados, los mismos que mira `vivla status` sin argumentos. Por cada uno:
+
+| Columna             | Qué dice                                                                                                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `production`        | lo peor de sus apps en producción: ✔ al día, ▲ N commits sin desplegar, ✖ caído o último deploy fallido. `—` si no tiene ese entorno |
+| `develop · staging` | lo mismo para el resto de entornos                                                                                                   |
+| PRs                 | tus PRs abiertos y los que te han pedido revisar en ese repo. ✖ CI si alguno tuyo tiene el CI en rojo                                |
+
+Debajo, **Needs you**: los deploys caídos o fallidos de tus repos, los PRs que esperan tu review, los tuyos con el CI en rojo, con cambios pedidos o aprobados y listos para mergear. `enter` sobre uno lo abre en el navegador.
+
+| Tecla                         | Qué hace                                       |
+| ----------------------------- | ---------------------------------------------- |
+| `↑``↓`      | moverse por repos y pendientes                 |
+| `enter`              | entrar en el repo · abrir el pendiente         |
+| `d`                  | `vivla dev <repo>`                             |
+| `o`                  | el repo en GitHub (o el pendiente)             |
+| `r`                  | volver a pedir deploys y PRs                   |
+| `s`                  | el asistente, con tus recomendados ya marcados |
+| `/`                  | la paleta de comandos                          |
+| `q` · `esc` | salir                                          |
+
+### Un repo
+
+Arriba, tu rama: cuántos commits lleva por delante (↑) y por detrás (↓) de su base (`develop` en vivla-tools), si hay cambios sin commitear y su PR con el CI y la review. Compara con lo último que hayas traído de `origin`: la pantalla no hace `git fetch`.
+
+Después, una tabla de apps × entornos con lo mismo que [`status`](/cli/commands/status): commit y cuándo se desplegó, o cuántos commits faltan, o si está caído. Debajo de la tabla, el detalle de la celda elegida (plataforma, URL, estado, salud) y tus PRs y reviews en ese repo.
+
+| Tecla                                            | Qué hace                                                                                      |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `↑``↓``←``→` | elegir app y entorno                                                                          |
+| `l` · `enter`                  | `vivla logs <repo> <app> --env <entorno>`                                                     |
+| `e` · `f`                      | lo mismo con `--errors` · con `-f` (hasta `ctrl`+`c`)                       |
+| `c`                                     | la paleta con `call <repo> <app> --env <entorno> /` escrito: añade la ruta y `enter` |
+| `o`                                     | la URL de ese entorno en el navegador                                                         |
+| `g`                                     | el repo en GitHub                                                                             |
+| `d`                                     | `vivla dev <repo>`                                                                            |
+| `p`                                     | el PR de tu rama en el navegador o, si aún no tiene y llevas commits, `vivla pr` en ese clon  |
+| `m`                                     | `vivla migrate status --repo <repo>` (si el repo tiene migraciones)                           |
+| `r`                                     | volver a pedir sus deploys, tus PRs y la rama                                                 |
+| `/`                                     | la paleta de comandos                                                                         |
+| `esc` · `b`                    | volver a tus repos                                                                            |
+| `q`                                     | salir                                                                                         |
+
+### La paleta
+
+`/` abre una línea de comandos con sugerencias para tus repos: `logs`, `dev`, `open`, `call`, `status`, `migrate status`, `db`, `release`, `setup`… Escribe palabras sueltas y busca las que las contienen todas: `logs ide` da `logs vivla-tools identity --env production`, y `open vt prs` da `open vivla-tools prs`.
+
+- `enter` ejecuta la sugerencia elegida. Si le falta algo que solo tú sabes (la ruta de `call`, el SQL de `db query`, a quién busca `user`), la escribe en la línea para que lo añadas.
+- `tab` copia la sugerencia en la línea para seguir escribiendo.
+- Si nada coincide, `enter` ejecuta `vivla` con lo que hayas escrito tal cual: `user ana`, `db query "select 1" --repo vivla-tools`.
+- `esc` la cierra.
+
+## Cómo funciona
+
+Solo se abre si hay una persona delante: stdin y stdout son una terminal, no hay `--json` ni `--no-interactive` y no está definida `CI`. Si no, imprime la ayuda y sale.
+
+- **Pantalla completa.** Ocupa la pantalla alternativa del terminal, como lazygit o k9s. Al salir, el terminal queda como estaba.
+- **Los datos.** Al abrirse enseña lo que trajo la última vez (`~/.vivla/cli/home.json`, con "updated hace…") y pide todo de nuevo una vez: los deploys como [`status`](/cli/commands/status) y los PRs en una sola consulta GraphQL a GitHub (`gh api graphql`). Cada fila se actualiza en cuanto contesta. Después ya no pide nada solo: `r` refresca. La rama de un repo se lee al entrar en él (`git` y `gh pr view`).
+- **Los comandos.** Una tecla o la paleta cierran la pantalla, ejecutan el mismo `vivla` con esos argumentos conectado a tu terminal y, al terminar, esperan una tecla para que puedas leer la salida antes de volver (`q` sale del todo). `ctrl`+`c` para el comando, no la pantalla. Lo que solo abre el navegador (`o`, `g`, un pendiente, el PR de tu rama) no sale de la pantalla.
+- **El asistente.** `s` o `setup` en la paleta lo abren con tus recomendados marcados. Al terminar vuelves a la pantalla de inicio, con los repos que hayas añadido.
+
+### El asistente
+
+Si no hay nada montado, o con `vivla setup`, las pantallas del asistente:
+
+| Pantalla    | Qué pasa                                                                                                                                      | Teclas                                                                                                                                                                                                                                                                         |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Bienvenida  | lo que va a hacer y, si los hay, los repos nuevos del catálogo y si hay una versión nueva de la CLI                                           | `enter` empezar · `q` salir                                                                                                                                                                                                                                  |
+| Login       | solo si no tienes sesión: device code con Vivla Identity (como [`login`](/cli/commands/login)). Puedes seguir sin login y elegir a mano                  | `enter` login · `s` saltar · `esc` mientras espera, seguir sin login                                                                                                                                                                                |
+| Repos       | la máquina y todos los repos del catálogo, con tus recomendados (★) primero y ya marcados. Debajo, a qué servicios se conectan                | `↑``↓` moverse · `espacio` marcar · `r` solo los recomendados · `c` servicios en local o remoto · `f` carpeta donde van los repos (se recuerda; si ya tienes proyectos en otra, te la sugiere) · `enter` seguir |
+| Revisión    | quién eres, qué se va a montar y el plan: qué tareas correrán y cuáles ya están hechas (un `plan` en seco)                                    | `enter` instalar · `b` volver                                                                                                                                                                                                                                |
+| Instalación | el grafo de tareas en paralelo, agrupado por repo, con barra de progreso. Si una tarea necesita un dato (tu nombre para git), lo pregunta ahí | `ctrl`+`c` parar                                                                                                                                                                                                                                             |
+| Resumen     | lo que falló, lo que necesita a una persona con su comando, y cómo arrancar cada repo                                                         | `r` ejecutar aquí los comandos pendientes · `q` salir                                                                                                                                                                                                        |
+
+Con `r` en el resumen, la TUI se cierra, ejecuta cada comando pendiente (`gh auth login`, `railway login`…) conectado a tu terminal y vuelve directamente a la instalación. Como todas las tareas comprueban antes de actuar, la segunda pasada solo hace lo que faltaba.
+
+Los recomendados salen de tu perfil ([`profile`](/cli/commands/profile)): si haces login en la propia TUI, se añaden a la selección en ese momento. Las tareas son las de [`setup`](/cli/commands/setup).
+
+## Qué toca
+
+- **La pantalla de inicio** solo lee: Railway, Vercel y GitHub (como `status`), los clones (`git`) y su caché en `~/.vivla/cli/home.json`. Lo que haga cada comando que lances desde ella es lo de ese comando (`pr` sube tu rama, por ejemplo).
+- **El asistente**, lo mismo que [`setup`](/cli/commands/setup): tu máquina (mise, shell, git, los clones en tu carpeta de repos) y lecturas de Identity, GitHub, Vercel y Railway (nunca entornos de producción). No despliega ni escribe nada en servicios remotos.
+
+## Salida `--json`
+
+No hay: con `--json` no abre nada. Para los mismos datos, [`status --json`](/cli/commands/status) y, para montar, [`setup --profile --json`](/cli/commands/setup).
+
+## Exit codes
+
+| Código | Cuándo                                                                                         |
+| ------ | ---------------------------------------------------------------------------------------------- |
+| `0`    | saliste de la pantalla de inicio, todo listo en el asistente o no había TTY (imprime la ayuda) |
+| `1`    | asistente: falló alguna tarea                                                                  |
+| `3`    | asistente: se quedó esperando una respuesta                                                    |
+| `4`    | asistente: quedan pasos de una persona (un login, sudo)                                        |
+
+## Para agentes (MCP)
+
+No hay tool: las dos pantallas son para personas. Un agente usa `status` para lo que enseña la pantalla de inicio y `setup` + `get_run` para montar ([`setup`](/cli/commands/setup)).
+
+## Relacionado
+
+[`status`](/cli/commands/status) · [`logs`](/cli/commands/logs) · [`setup` y `plan`](/cli/commands/setup) · [`login`](/cli/commands/login) · [`profile`](/cli/commands/profile) · [Día a día](/cli/devtools) · [Montar el entorno](/cli/setup)

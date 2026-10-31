@@ -1,0 +1,81 @@
+---
+title: "Linux, Coder y Ona"
+description: "vivla funciona en Linux (Debian/Ubuntu) además de macOS. La idea es usarlo en workspaces en la nube (Coder, Ona, Codespaces, cualquier devcontainer): el workspace arranca y en su script de inicio la…"
+---
+
+`vivla` funciona en **Linux (Debian/Ubuntu)** además de macOS. La idea es usarlo en workspaces en la nube (Coder, Ona, Codespaces, cualquier devcontainer): el workspace arranca y en su script de inicio la CLI deja listos los repos, sin nadie delante.
+
+Probado con:
+
+- **Coder v2.38** en local (OrbStack): una plantilla Docker sobre `codercom/enterprise-node:ubuntu` cuyo `startup_script` es el de abajo, tal cual. El workspace arranca y en unos 18 s tiene el repo listo sin intervención. `doctor` detecta `coder workspace · apt · passwordless sudo` y el token no queda escrito en disco.
+- Docker `node:20-bookworm-slim` como usuario no root con sudo sin contraseña (como la plantilla de `vivla-coder`) y `ubuntu:26.04` como root. En los dos casos, setup completo y una segunda ejecución sin cambios.
+- Cada noche, la Action [`catalog.yml`](https://github.com/vivla-tech/vivla-cli/blob/main/.github/workflows/catalog.yml) monta todos los repos del catálogo en `ubuntu-latest`.
+
+## Qué cambia respecto a macOS
+
+Casi nada: el setup es el mismo grafo en los dos. **mise** instala Node, gh, direnv, railway, vercel, supabase… de la misma forma en macOS y en Linux. Lo único del sistema son git y curl.
+
+|                          | macOS                                             | Linux                                                                                                                  |
+| ------------------------ | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| git, curl                | Xcode Command Line Tools                          | `apt-get` (`system:packages`), con `sudo -n` si no eres root. Si sudo pide contraseña, se bloquea y te da el comando   |
+| mise                     | su instalador (o el de Homebrew, si ya lo tienes) | su instalador (`~/.local/bin/mise`)                                                                                    |
+| Node, gh, direnv, CLIs   | mise (`mise:tools`)                               | mise (`mise:tools`)                                                                                                    |
+| gcloud                   | mise (con su Python, si hace falta)               | mise (con su Python, si hace falta)                                                                                    |
+| wrangler, firebase, eas  | `npx`                                             | `npx`                                                                                                                  |
+| Hooks de shell           | `~/.zshrc`                                        | `~/.bashrc` o `~/.zshrc`, según `$SHELL`                                                                               |
+| GitHub                   | `gh auth login --web`, git por HTTPS              | `GH_TOKEN`/`GITHUB_TOKEN`, o en Coder `coder external-auth access-token github`. Los remotos SSH se reescriben a HTTPS |
+| Abrir el navegador       | `open`                                            | `$BROWSER` (code-server y Codespaces lo reenvían a tu navegador) o `xdg-open`; si no hay ninguno, te enseña la URL     |
+| Tokens de Vivla Identity | Keychain + fichero cifrado                        | `~/.vivla/cli/credentials.json` (0600)                                                                                 |
+| Dónde van los repos      | `~/dev`                                           | `~/dev`, o `/workspaces` en entornos devcontainer                                                                      |
+
+Nadie genera ni sube claves SSH: en ninguno de los dos sistemas hacen falta.
+
+Probado en `node:20-bookworm-slim` limpio: `setup machine` deja Node 22, gh, jq, direnv, railway, vercel y supabase en **19 s**, y una segunda ejecución no hace nada.
+
+La CLI necesita Node ≥ 20 para ejecutarse, y las imágenes de Coder traen `node:20`. Los repos usan su propio Node (22) a través de mise.
+
+`vivla doctor` te dice qué ha detectado: distro, `apt`, si eres root o tienes sudo, y si estás en Coder, Ona, Codespaces o un devcontainer.
+
+## Coder
+
+El token de GitHub sale de la _external auth_ de Coder. Un `credential.helper` lo lee de la variable de entorno en cada operación, así que **nunca se escribe en disco**. En el `startup_script` de la plantilla (ver `vivla-coder/templates`):
+
+```bash
+export GITHUB_TOKEN="$(coder external-auth access-token github)"
+git config --global credential.https://github.com.helper '!f() { echo username=x-access-token; echo "password=$GITHUB_TOKEN"; }; f'
+git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+
+npx --yes github:vivla-tech/vivla-cli setup repo vivla-tools --json \
+  --git-name "${data.coder_workspace_owner.me.full_name}" \
+  --git-email "${data.coder_workspace_owner.me.email}" \
+  > ~/vivla-cli.ndjson 2> ~/vivla-cli.log || true
+```
+
+- **`.env` de Railway o Vercel**: sin login interactivo, pasa `RAILWAY_API_TOKEN` o `VERCEL_TOKEN` como variables del agente, desde los secrets de la plantilla. Si no los pasas, el run termina con `exit 4` y `next_actions` dice qué falta. El resto del repo queda listo igualmente.
+- **Vivla Identity** (repos recomendados, `--profile`): en la terminal del workspace, `vivla login`. El device code se confirma desde tu portátil.
+- **Ver qué pasó**: `~/vivla-cli.ndjson`. La última línea es el `result`. Los avisos de npm van a `~/vivla-cli.log`.
+
+## Ona y devcontainers
+
+Ona (antes Gitpod) y Codespaces arrancan desde un `devcontainer.json`. Con el token de GitHub como secret (`GH_TOKEN`) del entorno:
+
+```jsonc
+{
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "postCreateCommand": "git config --global url.\"https://github.com/\".insteadOf ssh://git@github.com/ && npx --yes github:vivla-tech/vivla-cli setup repo vivla-tools --json --no-interactive > /tmp/vivla-cli.ndjson || true",
+}
+```
+
+Los repos van a `/workspaces/<repo>` si existe y se puede escribir; si no, a `~/dev`. Para siempre, `vivla config root <dir>`; solo una vez, `VIVLA_CLI_ROOT` o `--root`.
+
+> Ona y Codespaces se detectan por sus variables de entorno (`GITPOD_*`/`ONA_*`, `CODESPACES`), pero todavía no se han probado en un entorno real: si algo falla, `doctor --json` dice qué ha detectado.
+
+## Instalar a mano en una máquina Linux
+
+```bash
+sudo apt-get install -y git gh nodejs npm     # Node ≥ 20
+gh auth login && gh auth setup-git
+git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+npm i -g github:vivla-tech/vivla-cli
+vivla doctor
+```

@@ -1,0 +1,174 @@
+---
+title: "vivla why"
+description: "Qué le ha pasado a un deploy, en una sola pantalla: qué trajo (los commits y PRs desde el deploy anterior), qué errores ha escrito desde que salió, agrupados por tipo, los errores de Supabase en ese…"
+---
+
+Qué le ha pasado a un deploy, en una sola pantalla: qué trajo (los commits y PRs desde el deploy anterior), qué errores ha escrito desde que salió, agrupados por tipo, los errores de Supabase en ese tiempo y si responde ahora. Es lo primero que lanzas cuando alguien dice "producción va mal": te dice qué cambió y desde cuándo falla, sin abrir Railway, Vercel, GitHub y Supabase por separado.
+
+```bash
+vivla why vivla-tools backend                # producción, por defecto
+vivla why identity                           # dentro de vivla-tools: la palabra es el servicio
+vivla why vivla-cms web --env develop        # otro entorno
+vivla why vivla-tools backend --top 10       # más tipos de error
+vivla why vivla-tools backend --json         # para agentes
+```
+
+```
+vivla-tools/backend · production · railway · https://api.tools.vivla.com
+
+  2026-10-23 12:35 ✔ previous deploy ······· · REMOVED
+                   2 commits since e73e4f7, the last deploy with another commit (37 files, 15 in backend):
+                     #1721   release: 2026-10-23-a (Ana)
+                     #1720   feat(secondary): owner profiles (Ana)
+  2026-10-23 12:58 ● latest deploy c7b813e · SUCCESS
+  since then       ✖ 14 error lines in the app logs
+                       9× TypeError: Cannot read properties of undefined (reading 'ownerId')
+                          10-23 13:02 → 13:40
+                       5× [HoldedService] sync failed: 429 Too Many Requests
+                          10-23 13:10 → 13:31
+                   ✖ Supabase: 6 Postgres errors · 0 API 5xx
+                       6× column bookings.owner_id does not exist
+                          10-23 13:02 → 13:40
+  now              ✔ up · 200 390ms
+
+→ vivla logs vivla-tools backend --env production --errors --since 2026-10-23T10:58:28.302Z
+```
+
+## Opciones
+
+| Opción        | Por defecto             | Qué hace                                                                                                                |
+| ------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `[repo]`      | el repo en el que estás | de qué repo                                                                                                             |
+| `[service]`   | el primero del catálogo | qué servicio (`backend`, `identity`, `web`…)                                                                            |
+| `--env <env>` | `production`            | entorno                                                                                                                 |
+| `--top <n>`   | `5`                     | cuántos tipos de error de la app, y de cada fuente de Supabase, devuelve. En pantalla, de Supabase salen los 3 primeros |
+
+Como en [`call`](/cli/commands/call), dentro de un clon una sola palabra que no es un repo es el servicio: `vivla why identity` en vivla-tools.
+
+## Cómo funciona
+
+Junta cinco lecturas. Las que no dependen entre sí van en paralelo, y una que falla sale con `?` en su línea sin tirar el resto.
+
+**1. El deploy ahora.** Lo mismo que [`status`](/cli/commands/status): estado del último deploy, commit (el que diga la salud si lo trae), cuánto va por detrás de su rama y si responde.
+
+**2. Los deploys de antes.** La lista de la plataforma:
+
+- **Railway**: `railway deployment list --json` del servicio y entorno. `REMOVED` es un deploy que funcionó y fue sustituido por uno nuevo.
+- **Vercel**: `vercel ls --format json`, sin los `CANCELED` (builds ignorados). Cuenta desde `ready`, cuando empezó a servir.
+- **Cloudflare** y **other** no tienen lista: sale sin deploy anterior.
+
+El **anterior** es el último que funcionó antes del actual (`SUCCESS`, `REMOVED`, `READY`). Si el último deploy falló, ese anterior es el que sigue sirviendo y lo dice (`still serving`).
+
+**3. Qué cambió.** `gh api repos/<repo>/compare/<base>...<commit>`, donde `<base>` es el último deploy que funcionó **con otro commit**: un redeploy del mismo commit no cuenta. Enseña los 8 últimos commits con su PR (el `(#123)` de un squash o el título de un merge) y su autor, cuántos ficheros cambian y, en un monorepo, cuántos están bajo el `dir` de esa app. Los servicios que se despliegan con `railway up` no llevan commit en Railway: lo dice y se salta este paso.
+
+**4. Los errores desde el deploy.** [`vivla logs --errors --since <cuándo salió> --json`](/cli/commands/logs), hasta 1000 líneas. Las líneas se agrupan por su forma: los ids, UUIDs, números, hashes y valores entre comillas no cuentan, así que `uuid "319"` y `uuid "4"` son el mismo error. Salen los más frecuentes primero, con la primera y la última vez. En Cloudflare no hay histórico (`wrangler tail` es en vivo): sale como `?`.
+
+**5. Supabase.** Si el repo tiene un proyecto de Supabase para ese entorno (`production` → `prod`, el resto → `dev`), los errores de Postgres y las respuestas 5xx de su API desde el deploy, igual que [`vivla db logs`](/cli/commands/db#vivla-db-logs). Son de **todo el proyecto**, no solo de este servicio: en vivla-tools el backend e identity comparten base de datos. Supabase da como mucho 24 horas por consulta: un deploy más viejo se mira solo en el último día (`last 24h only`). Necesita tu `supabase login`.
+
+Las horas salen en tu hora local. Al final, si hubo errores, el comando de `vivla logs` para leerlos enteros.
+
+## Qué toca
+
+Solo lee, con tus sesiones de `railway`, `vercel`, `gh` y `supabase`, más un `GET` a la URL de salud. Lo único que escribe es el enlace de Railway en `~/.vivla/cli/railway/`. Los logs de producción pueden llevar datos de clientes: el ejemplo de cada grupo es una línea tal cual.
+
+## Salida `--json`
+
+Un objeto:
+
+```json
+{
+  "type": "why",
+  "ok": false,
+  "repo": "vivla-tools",
+  "service": "backend",
+  "env": "production",
+  "platform": "railway",
+  "current": {
+    "state": "SUCCESS",
+    "commit": "c7b813e9…",
+    "health": { "ok": true, "code": 200, "ms": 390 },
+    "behind": 0
+  },
+  "latest": {
+    "id": "474ee145-…",
+    "state": "SUCCESS",
+    "createdAt": "2026-10-23T10:58:28.302Z",
+    "commit": "c7b813e9…",
+    "branch": "main"
+  },
+  "previous": { "id": "c7972974-…", "state": "REMOVED", "createdAt": "2026-10-23T10:35:03.108Z" },
+  "changes": {
+    "base": "e73e4f74…",
+    "head": "c7b813e9…",
+    "total": 2,
+    "files": 37,
+    "appFiles": 15,
+    "commits": [
+      { "sha": "…", "subject": "release: 2026-10-23-a", "pr": 1721, "author": "Ana", "date": "…" }
+    ]
+  },
+  "logs": {
+    "since": "2026-10-23T10:58:28.302Z",
+    "count": 14,
+    "capped": false,
+    "groups": [
+      {
+        "signature": "TypeError: …",
+        "count": 9,
+        "example": "TypeError: …",
+        "first": "…",
+        "last": "…"
+      }
+    ]
+  },
+  "supabase": {
+    "ref": "…",
+    "since": "…",
+    "clipped": false,
+    "postgres": [{ "count": 6, "…": "…" }],
+    "api5xx": []
+  },
+  "verdict": "errors"
+}
+```
+
+| Campo      | Qué es                                                                                                     |
+| ---------- | ---------------------------------------------------------------------------------------------------------- |
+| `current`  | lo de [`status`](/cli/commands/status#salida---json) para ese deploy                                                  |
+| `latest`   | el último deploy según la plataforma (`id`, `state`, `createdAt`, `readyAt` en Vercel, `commit`, `branch`) |
+| `previous` | el último que funcionó antes; `serving` es el mismo si el último falló                                     |
+| `history`  | `{ error }` si no se pudo leer la lista de deploys                                                         |
+| `changes`  | los commits entre el último deploy con otro commit y este, del más nuevo al más viejo (hasta 250)          |
+| `logs`     | `count` líneas de error desde `since`, `capped` si llegó a 1000, y los `--top` grupos                      |
+| `supabase` | solo si el repo tiene Supabase para ese entorno. `error` si no se pudo leer (por ejemplo, sin login)       |
+| `verdict`  | `failed` (el último deploy falló) · `down` (no responde) · `errors` (hay errores) · `ok`                   |
+
+`ok` es `true` solo con `verdict: ok`.
+
+## Exit codes
+
+| Código | Cuándo                                                                          |
+| ------ | ------------------------------------------------------------------------------- |
+| `0`    | el deploy está arriba, aunque tenga errores (están en el informe)               |
+| `1`    | el último deploy falló o el servicio no responde                                |
+| `64`   | repo o servicio desconocido, o ese servicio no tiene ese entorno en el catálogo |
+
+## Para agentes (MCP)
+
+Tool `why`, de solo lectura:
+
+| Entrada   | Por defecto  | Qué es                               |
+| --------- | ------------ | ------------------------------------ |
+| `repo`    |              | clave del repo                       |
+| `service` | el primero   | servicio                             |
+| `env`     | `production` | entorno                              |
+| `top`     | `5`          | tipos de error que devuelve (1 a 20) |
+
+Devuelve el mismo objeto que `--json`, sin `type` ni `ok`. Si el deploy no existe, `{ error, deploys }` con los que hay.
+
+## Relacionado
+
+- [`vivla watch`](/cli/commands/watch): lo mismo, pero comparando los errores de antes y después del deploy, para usarlo justo después de desplegar.
+- [`vivla logs`](/cli/commands/logs) para leer los errores enteros, y [`vivla db logs`](/cli/commands/db#vivla-db-logs) para los de Supabase.
+- [`vivla status`](/cli/commands/status) para ver de un vistazo qué deploy está mal.
+- Guía: [devtools.md](/cli/devtools#cuando-algo-falla-vivla-why-y-vivla-watch).

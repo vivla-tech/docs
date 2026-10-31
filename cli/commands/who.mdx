@@ -1,0 +1,130 @@
+---
+title: "vivla who"
+description: "A quién preguntar por un repo, una app o una carpeta: quién lo lidera según el catálogo, qué regla de CODEOWNERS lo cubre y quién ha estado haciendo commits ahí últimamente. Sirve para saber quién…"
+---
+
+A quién preguntar por un repo, una app o una carpeta: quién lo lidera según el catálogo, qué regla de CODEOWNERS lo cubre y quién ha estado haciendo commits ahí últimamente. Sirve para saber quién revisa un cambio o a quién avisar si algo se rompe.
+
+```bash
+vivla who vivla-tools                    # un repo entero
+vivla who vivla-tools/identity           # una app del repo
+vivla who vivla-tools/apps/backend/src   # una carpeta
+vivla who identity                       # una app del repo en el que estás
+vivla who src/auth                       # una carpeta, desde donde estás dentro del clon
+vivla who vivla-cms --days 30 --json
+```
+
+```
+vivla-cms · apps/web (web) · feat/web-2026
+Leads       jorgeorejas-vivla  Jorge Orejas <jorge.orejas@vivla.com> · Tekis
+CODEOWNERS  @vivla-tech/web  (apps/web/ · .github/CODEOWNERS:3)
+
+Last 60 days: 271 commit(s)
+   251  jorgeorejas-vivla  Jorge                    last 27h ago
+    18  joaquin-vivla      Joaquin Ferreiros        last 8d ago
+
+On call: no rota to read yet
+```
+
+## Opciones
+
+| Opción          | Por defecto             | Qué hace                                          |
+| --------------- | ----------------------- | ------------------------------------------------- |
+| `<target>`      |                         | qué mirar (ver abajo)                             |
+| `--repo <repo>` | el repo en el que estás | el repo de una app o una carpeta sin repo delante |
+| `--days <n>`    | `90`                    | cuántos días atrás cuentan los commits            |
+
+`<target>` puede ser:
+
+| Forma                  | Qué mira                                                                     |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| `vivla-tools`          | el repo entero                                                               |
+| `vivla-tools/identity` | la app `identity` (su `dir` del catálogo) o, si no es una app, esa ruta      |
+| `identity`             | una app o un deploy del repo en el que estás (o de `--repo`)                 |
+| `src/auth`             | una ruta, relativa a donde estás dentro del clon. `/src/auth`, desde la raíz |
+
+## Cómo funciona
+
+- **La rama.** La base del flujo del repo (`flow.base`, `develop` en vivla-tools) o su `branch` del catálogo. Si no tiene ninguna, la rama por defecto en GitHub.
+- **Leads.** Los logins de GitHub de `leads:` en el catálogo, con el nombre de su perfil de GitHub. Con ese nombre busca en Vivla Identity (como [`user`](/cli/commands/user)) y, si encuentra a una sola persona, añade su email y su equipo. Esa búsqueda necesita perfil hr o admin en Equipos. Sin él, los leads salen solo con su nombre de GitHub y la salida dice por qué.
+- **CODEOWNERS.** Lee `.github/CODEOWNERS`, `CODEOWNERS` o `docs/CODEOWNERS` (el primero que exista en esa rama) con las reglas de GitHub: la última que encaja gana, `/x` va desde la raíz, `x/` es una carpeta a cualquier profundidad y `*` no cruza carpetas. Sin ruta, la regla general (`*`).
+- **Commits.** `gh api repos/…/commits?sha=<rama>&since=<hace N días>&path=<ruta>`, todas las páginas. Cuenta los commits por persona (login de GitHub o, si el commit no está enlazado a una cuenta, el nombre del autor) y deja fuera los bots (`[bot]`). Primero quien más commits tiene. En pantalla, los 10 primeros.
+- **Guardias.** No hay ningún sitio del que leer quién está de guardia: la salida lo dice. Cuando lo haya, irá aquí.
+
+## Qué toca
+
+Solo lee: `gh` (el perfil de cada lead, CODEOWNERS y los commits) y, si tienes sesión, la búsqueda de personas de Identity. No cambia nada.
+
+## Salida `--json`
+
+```json
+{
+  "type": "who",
+  "repo": "vivla-cms",
+  "github": "vivla-tech/vivla-cms",
+  "path": "apps/web",
+  "app": "web",
+  "branch": "feat/web-2026",
+  "leads": [
+    {
+      "login": "jorgeorejas-vivla",
+      "name": "Jorge Orejas",
+      "email": "jorge.orejas@vivla.com",
+      "team": "Tekis"
+    }
+  ],
+  "codeowners": {
+    "file": ".github/CODEOWNERS",
+    "pattern": "apps/web/",
+    "owners": ["@vivla-tech/web"],
+    "line": 3
+  },
+  "days": 60,
+  "commits": 269,
+  "authors": [
+    {
+      "login": "jorgeorejas-vivla",
+      "name": "Jorge",
+      "commits": 251,
+      "last": "2026-10-22T09:12:00Z"
+    }
+  ],
+  "oncall": null
+}
+```
+
+| Campo        | Qué es                                                                                         |
+| ------------ | ---------------------------------------------------------------------------------------------- |
+| `leads`      | `email` y `team` solo si Identity encontró a una sola persona con ese nombre                   |
+| `codeowners` | la regla que gana, con su fichero y su línea. Ausente si no hay CODEOWNERS o no encaja ninguna |
+| `commits`    | commits de personas (sin bots) en la ventana                                                   |
+| `authors`    | todas las personas, con sus commits y el último                                                |
+| `identity`   | por qué los leads no traen email ni equipo (sin perfil hr/admin, sin sesión)                   |
+| `oncall`     | siempre `null` por ahora: no hay rota que leer                                                 |
+
+## Exit codes
+
+| Código | Cuándo                                                               |
+| ------ | -------------------------------------------------------------------- |
+| `0`    | siempre que pudo mirar, aunque no haya leads ni commits              |
+| `64`   | una app o ruta sin repo fuera de un clon, o `--days` no es un número |
+
+## Para agentes (MCP)
+
+Tool `who`, de solo lectura:
+
+| Entrada  | Por defecto | Qué es                                                             |
+| -------- | ----------- | ------------------------------------------------------------------ |
+| `target` |             | `vivla-tools`, `vivla-tools/identity`, `vivla-tools/apps/identity` |
+| `repo`   |             | el repo de una app o una ruta sin repo delante                     |
+| `days`   | `90`        | días atrás para los commits (1 a 365)                              |
+
+Devuelve lo mismo que el JSON de la CLI, o `{ error }`. Desde MCP no hay "repo en el que estás": nombra el repo en `target` o en `repo`.
+
+## Relacionado
+
+- [`vivla user`](/cli/commands/user): todo lo que Identity sabe de una persona.
+- [`vivla profile`](/cli/commands/profile): los repos que lideras y en los que trabajas.
+- [`vivla slack serve`](/cli/commands/slack): la misma pregunta desde Slack ("¿quién lleva identity?").
+- Lo que necesita el catálogo: `leads` con logins de GitHub y `apps` con su `dir`. Ver [manifest.md](/cli/manifest#añadir-un-repo).
+- Guía: [devtools.md](/cli/devtools#vivla-who).

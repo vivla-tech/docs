@@ -1,0 +1,132 @@
+---
+title: "vivla call"
+description: "Una petición HTTP a un servicio desplegado y lo que contesta: código, tiempo, las cabeceras que ayudan a depurar y el cuerpo. Sirve para saber si un endpoint responde y con qué error antes de ponerte…"
+---
+
+Una petición HTTP a un servicio desplegado y lo que contesta: código, tiempo, las cabeceras que ayudan a depurar y el cuerpo. Sirve para saber si un endpoint responde y con qué error antes de ponerte a leer código, y donde el servicio lo acepta va con tu sesión de `vivla login`.
+
+```bash
+vivla call vivla-tools backend /api/health --env develop          # sin login: develop no lo pide
+vivla call vivla-tools identity /api/me                           # producción, con tu login
+vivla call vivla-tools backend '/api/v1/web/properties?limit=1'   # producción, con tu login
+vivla call backend /api/health                                    # dentro del clon de vivla-tools
+vivla call vivla-api /v2/properties/list -H "x-api-key: …"        # otro tenant de Auth0: la clave la pones tú
+vivla call vivla-tools backend /api/x --env develop -d '{"a":1}'  # POST, solo fuera de producción
+vivla call vivla-tools backend /api/x --env develop -X PUT -d @body.json
+```
+
+```
+✔ GET https://api.tools.vivla.dev/api/health → 200 · 314ms
+  content-type: application/json; charset=utf-8
+  x-railway-request-id: 7OTzX5WSSVajCAOjs_GTAg
+  x-request-id: req_fb0388130f5f68f86ddc76b6
+{
+  "status": "healthy",
+  "environment": "development",
+  "commitSha": "6e06e2e9ec2aece2e3dc979cc536e79d50fe1c3a"
+}
+```
+
+La línea de estado y las cabeceras van a stderr y el cuerpo a stdout, así que `vivla call … | jq` funciona.
+
+## Opciones
+
+| Opción           | Por defecto                          | Qué hace                                                       |
+| ---------------- | ------------------------------------ | -------------------------------------------------------------- |
+| `[repo]`         | el repo en el que estás              | de qué repo                                                    |
+| `[service]`      | el primero del repo en el catálogo   | qué servicio                                                   |
+| `<path>`         |                                      | la ruta, empezando por `/` (con su query string si hace falta) |
+| `--env <env>`    | el primero listado para ese servicio | entorno                                                        |
+| `-X`, `--method` | `GET`, o `POST` si hay cuerpo        | método HTTP. En producción solo `GET`, `HEAD` y `OPTIONS`      |
+| `-d`, `--data`   |                                      | cuerpo: JSON, texto, o `@fichero` para leerlo de un fichero    |
+| `-H`, `--header` |                                      | `"Nombre: valor"`, repetible                                   |
+| `--no-auth`      |                                      | no manda tu login aunque el servicio lo acepte                 |
+
+Si la primera palabra no es un repo del catálogo y no hay una segunda, se toma como servicio del repo en el que estás: `vivla call backend /api/health` dentro de vivla-tools.
+
+## Cómo funciona
+
+1. **La URL.** La base es la `url` del deploy en el catálogo o, si no tiene, el dominio que le da Railway (el propio si lo hay). La ruta se pega detrás tal cual, y si el resultado no se queda en el mismo host, no se manda.
+2. **Las cabeceras.** Las tuyas (`-H`), `accept: application/json` si no pones otra y, con cuerpo, `content-type: application/json` si el cuerpo es JSON válido (si no, `text/plain`).
+3. **Tu login**, solo si el deploy está marcado `auth: vivla` en el catálogo y no has puesto tú una cabecera `Authorization`. Ahora mismo son el backend y la Identity de vivla-tools en producción, cuyo Auth0 es el mismo con el que inicia sesión la CLI. Se manda el token de `vivla login` como `Bearer` (se renueva solo si va a caducar; en CI, `VIVLA_TOKEN`). A cualquier otro servicio no se manda nada que no pongas tú. vivla-api, por ejemplo, usa otro tenant de Auth0 y tu token no le sirve.
+4. **La petición**, con 30 s de tiempo máximo. **Una redirección se enseña, no se sigue**: sale el `3xx` con su `location`, y así el token nunca acaba en otro host.
+5. **La respuesta.** Si el `content-type` es JSON, el cuerpo se parsea (y si no se puede, queda como texto). Con `HEAD` no hay cuerpo. De las cabeceras solo salen las útiles para depurar: `content-type`, `location`, `www-authenticate`, `retry-after`, `x-request-id`, `request-id`, `x-railway-request-id`, `x-vercel-id` y `cf-ray`. Las cookies nunca.
+
+## Qué toca
+
+- **Producción**: solo lee. `POST`, `PUT`, `PATCH` o `DELETE` contra `production` o `prod` se rechazan antes de mandar nada. Para cambiar datos, la app o una migración.
+- **Fuera de producción** puede escribir: es una petición de verdad contra develop o staging, con lo que eso haga en ese servicio.
+- Tu token solo sale hacia los deploys con `auth: vivla`, y nunca se imprime.
+
+## Salida `--json`
+
+Por ejemplo, `vivla call vivla-tools backend '/api/v1/web/properties?limit=1' --no-auth --json`:
+
+```json
+{
+  "type": "call",
+  "ok": false,
+  "repo": "vivla-tools",
+  "service": "backend",
+  "env": "production",
+  "method": "GET",
+  "url": "https://api.tools.vivla.com/api/v1/web/properties?limit=1",
+  "status": 401,
+  "statusText": "",
+  "ms": 120,
+  "auth": false,
+  "headers": {
+    "content-type": "application/json; charset=utf-8",
+    "x-request-id": "req_3f9c2a7d1e8b4c60a5d2"
+  },
+  "body": {
+    "error": {
+      "type": "authentication_error",
+      "code": "authentication_required",
+      "message": "Authentication required: provide Authorization (Bearer) or x-api-key header"
+    }
+  }
+}
+```
+
+| Campo     | Qué es                                              |
+| --------- | --------------------------------------------------- |
+| `ok`      | `status` por debajo de 400                          |
+| `auth`    | si tu login fue con la petición                     |
+| `headers` | solo las cabeceras útiles para depurar (ver arriba) |
+| `body`    | el JSON parseado, o el texto tal cual               |
+
+Sin sesión, cuando el servicio la pide: `{ "type": "call", "ok": false, "message": "Not logged in: vivla login (or --no-auth)" }`.
+
+## Exit codes
+
+| Código | Cuándo                                                                                                                                   |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`    | respondió con un código por debajo de 400                                                                                                |
+| `1`    | respondió con 400 o más, o la petición no llegó (timeout, DNS…)                                                                          |
+| `2`    | el servicio acepta tu login y no tienes sesión: `vivla login`, o `--no-auth`                                                             |
+| `64`   | repo o servicio desconocido, ruta sin `/`, escritura en producción, una ruta que sale del host, un `-H` mal formado, o un deploy sin URL |
+
+## Para agentes (MCP)
+
+Tool `call`:
+
+| Entrada   | Por defecto | Qué es                                     |
+| --------- | ----------- | ------------------------------------------ |
+| `repo`    |             | clave del repo                             |
+| `service` | el primero  | servicio                                   |
+| `env`     | el primero  | entorno                                    |
+| `path`    |             | ruta, empezando por `/`                    |
+| `method`  | `GET`       | o `POST` si hay `body`                     |
+| `body`    |             | cuerpo (JSON o texto)                      |
+| `headers` |             | `["Nombre: valor"]`                        |
+| `auth`    | `true`      | manda el login donde el servicio lo acepta |
+
+Devuelve lo mismo que el JSON de la CLI, sin `type`, `ok`, `repo`, `service` ni `env`. Sin sesión, `{ authenticated: false, message: "Call login_start first" }`. Con una escritura en producción u otro error de uso, `{ error }`.
+
+## Relacionado
+
+- [`vivla logs`](/cli/commands/logs) para ver cómo vio el servicio esa petición, por ejemplo `--status 401 --since 10m`.
+- [`vivla status`](/cli/commands/status) para saber qué versión está contestando.
+- Lo que necesita el catálogo: `deploys` con `url` (o un deploy de Railway con `project`, para sacar su dominio) y `auth: vivla` en los servicios que aceptan el login de la CLI. Ver [manifest.md](/cli/manifest#día-a-día).
+- Guía: [devtools.md](/cli/devtools#vivla-call).

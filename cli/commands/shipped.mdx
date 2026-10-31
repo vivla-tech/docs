@@ -1,0 +1,145 @@
+---
+title: "vivla shipped"
+description: "Responde a \"¿está en prod el fix de X?\". Para un PR (o un commit), mira cada deploy de las apps que toca y dice si lo que hay desplegado ya lo lleva. En vivla-tools, donde main recibe los cambios por…"
+---
+
+Responde a "¿está en prod el fix de X?". Para un PR (o un commit), mira cada deploy de las apps que toca y dice si lo que hay desplegado ya lo lleva. En vivla-tools, donde `main` recibe los cambios por releases con cherry-pick, busca la release que incluye el PR y comprueba esa.
+
+```bash
+vivla shipped 1662                         # un PR del repo en el que estás
+vivla shipped vivla-tools#1662             # de otro repo
+vivla shipped https://github.com/vivla-tech/vivla-cms/pull/212
+vivla shipped 1662 --env production        # solo producción
+vivla shipped 3aa5c50                      # un commit: busca su PR
+vivla shipped vivla-tools#1662 --json      # para agentes
+```
+
+```
+vivla-tools #1720 feat(identity): perfiles del secundario · merged into develop 2026-10-23
+  via release #1721 release: perfiles del secundario en identity (VIV-3476) · merged 2026-10-23
+✔ identity  production  deployed c7b813e · 1h ago
+✔ identity  develop     deployed ebf9230 · 1h ago
+✖ frontend  production  in release #1730, not merged yet
+  4 more deploy(s) of apps it doesn't change: backend, spark, home-excellence, exchange
+
+→ Not everywhere yet
+```
+
+## Opciones
+
+| Opción          | Por defecto                                     | Qué hace                                    |
+| --------------- | ----------------------------------------------- | ------------------------------------------- |
+| `<ref>`         |                                                 | qué buscar (ver abajo)                      |
+| `--repo <repo>` | el repo que diga el ref; si no, en el que estás | el repo de un número o un SHA sueltos       |
+| `--env <env>`   | todos                                           | solo ese entorno (`production`, `develop`…) |
+
+`<ref>` puede ser:
+
+| Forma                      | Ejemplo                                               |
+| -------------------------- | ----------------------------------------------------- |
+| número de PR               | `1662`, `#1662`                                       |
+| repo y PR                  | `vivla-tools#1662`                                    |
+| enlace al PR               | `https://github.com/vivla-tech/vivla-tools/pull/1662` |
+| commit (7 a 40 caracteres) | `3aa5c50`, `vivla-tools@3aa5c50`                      |
+
+## Cómo funciona
+
+1. **El PR.** `gh pr view` da su estado, su base, su commit de merge, cuándo se mergeó y los ficheros que cambia. Con un commit, primero busca el PR mergeado del que salió (`gh api repos/…/commits/<sha>/pulls`); si no hay, busca el commit tal cual. Un PR sin mergear no está en ningún sitio: lo dice y para.
+2. **Qué deploys mirar.** Los de las apps que el PR cambia: un deploy cuenta si hay algún fichero bajo el `dir` de su app (`apps:` del catálogo). Si el repo no tiene apps, o GitHub no da la lista de ficheros, cuentan todos. El resto sale al final como "apps it doesn't change" y no afecta a la respuesta.
+3. **Qué commit buscar en cada uno.**
+   - **Lo normal**: el commit de merge del PR.
+   - **Con `flow.release`** (vivla-tools), en los deploys de la rama de release (`main`) y si el PR fue a otra base (`develop`): el commit de merge de la release que lo lleva. La busca entre los PRs a `main` creados desde el día del merge cuya rama empieza por el prefijo de release (`release/`) y cuyo cuerpo cita `#1662`, que es como los escribe [`vivla release`](/cli/commands/release). Si hay varias mergeadas, vale la primera. Si solo hay una abierta, el deploy sale como "not merged yet". Si no hay ninguna, "no release PR lists #1662 yet".
+4. **Qué hay desplegado.** Lo mismo que [`status`](/cli/commands/status): Railway, Vercel o el commit que diga la salud del servicio.
+5. **¿Lo lleva?** `gh api repos/…/compare/<buscado>...<desplegado>`. Si GitHub dice `identical` o `ahead`, lo desplegado lo incluye. Si dice `behind` o `diverged`, todavía no. Si no puede comparar porque el commit desplegado no existe en GitHub (un deploy hecho desde un commit local o reescrito), lo dice.
+
+La respuesta final sale de los deploys que toca: ✔ si está en todos, ✖ si falta en alguno y ? si en alguno no se pudo saber.
+
+Lo que no sabe ver:
+
+- Una release que no cita el PR en su cuerpo (hecha a mano, sin `vivla release`).
+- Una rama que llega a otra con squash: por ejemplo, `develop` → `main` squasheado en un repo sin `flow.release`. Los commits son otros y la comparación dice `diverged`.
+
+## Qué toca
+
+Solo lee: `gh` (PRs, comparaciones de commits), `railway` y `vercel` como `status` y un `GET` a la salud de cada deploy. No cambia nada.
+
+## Salida `--json`
+
+```json
+{
+  "type": "shipped",
+  "repo": "vivla-tools",
+  "pr": {
+    "number": 1720,
+    "title": "feat(identity): perfiles del secundario",
+    "url": "https://github.com/vivla-tech/vivla-tools/pull/1720",
+    "state": "MERGED",
+    "base": "develop",
+    "mergeCommit": "c18696b…",
+    "mergedAt": "2026-10-23T10:00:00Z",
+    "files": 12
+  },
+  "release": {
+    "number": 1721,
+    "title": "release: perfiles del secundario en identity (VIV-3476)",
+    "url": "https://github.com/vivla-tech/vivla-tools/pull/1721",
+    "state": "MERGED",
+    "mergeCommit": "c7b813e…",
+    "mergedAt": "2026-10-23T10:34:22Z"
+  },
+  "deploys": [
+    {
+      "name": "identity",
+      "env": "production",
+      "platform": "railway",
+      "branch": "main",
+      "commit": "c7b813e…",
+      "deployedAt": "2026-10-23T10:41:08Z",
+      "looksFor": "c7b813e…",
+      "touched": true,
+      "shipped": true
+    }
+  ],
+  "shipped": true
+}
+```
+
+| Campo                | Qué es                                                                                        |
+| -------------------- | --------------------------------------------------------------------------------------------- |
+| `pr.files`           | cuántos ficheros cambia (GitHub da hasta 100)                                                 |
+| `release`            | la release que lo lleva a `main`, solo con `flow.release`                                     |
+| `deploys[].looksFor` | el commit que se buscó en ese deploy                                                          |
+| `deploys[].touched`  | si el PR cambia esa app. Los que no, no se comprueban                                         |
+| `deploys[].shipped`  | `true` lo lleva, `false` todavía no, `null` no se sabe                                        |
+| `deploys[].reason`   | por qué no se sabe, o por qué no (sin release, release abierta, commit que no está en GitHub) |
+| `shipped`            | lo mismo para todo: `true` en todos los que toca, `false` si falta en uno, `null` si no       |
+| `reason`             | el PR no está mergeado (y entonces `deploys` va vacío)                                        |
+
+## Exit codes
+
+| Código | Cuándo                                                               |
+| ------ | -------------------------------------------------------------------- |
+| `0`    | está en todos los deploys que toca                                   |
+| `1`    | falta en alguno, no se pudo saber en alguno o el PR no está mergeado |
+| `64`   | un ref que no se entiende, un repo que no existe o un PR que no hay  |
+
+Como `grep`: `vivla shipped 1662 --env production && echo "ya está"`.
+
+## Para agentes (MCP)
+
+Tool `shipped`, de solo lectura:
+
+| Entrada | Por defecto   | Qué es                                |
+| ------- | ------------- | ------------------------------------- |
+| `ref`   |               | cualquiera de las formas de arriba    |
+| `repo`  | `vivla-tools` | el repo de un número o un SHA sueltos |
+| `env`   |               | solo ese entorno                      |
+
+Devuelve lo mismo que el JSON de la CLI, o `{ error }`.
+
+## Relacionado
+
+- [`vivla status`](/cli/commands/status): qué hay desplegado y cuánto falta, sin pensar en un PR.
+- [`vivla release`](/cli/commands/release): las releases cuyo cuerpo lee este comando.
+- [`vivla slack serve`](/cli/commands/slack): la misma pregunta desde Slack ("¿está en prod #1662?").
+- Guía: [devtools.md](/cli/devtools#vivla-shipped).

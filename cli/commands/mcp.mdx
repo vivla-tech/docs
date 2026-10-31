@@ -1,0 +1,67 @@
+---
+title: "vivla mcp"
+description: "Arranca la CLI como servidor MCP por stdio, para que Claude Code, Cursor o Codex la usen como tools: montar repos, ver qué hay desplegado, leer logs o consultar Supabase. No se lanza a mano: lo…"
+---
+
+Arranca la CLI como servidor MCP por stdio, para que Claude Code, Cursor o Codex la usen como tools: montar repos, ver qué hay desplegado, leer logs o consultar Supabase. No se lanza a mano: lo arranca el cliente.
+
+```bash
+claude mcp add --scope user vivla-cli -- npx -y github:vivla-tech/vivla-cli mcp
+vivla setup machine --only agents:tooling    # lo mismo, en Claude Code, Cursor y Codex
+```
+
+## Cómo funciona
+
+Expone un servidor llamado `vivla` con instrucciones para el agente: empezar por `doctor`, hacer login con `login_start` y `login_poll` si hace falta, y qué hacer con cada `next_actions`. Cada tool abre su propia sesión, como un comando de la CLI.
+
+`setup` y `env_pull` devuelven un `run_id` al momento y siguen en segundo plano; `get_run` hace long-poll de hasta 120 s. Los runs viven en la memoria del proceso del servidor: si el cliente lo reinicia, ese `run_id` deja de existir.
+
+`agents:tooling` (parte de `setup machine`) lo registra como `vivla-cli` con `npx -y github:vivla-tech/vivla-cli mcp`, así siempre corre lo último de `main`:
+
+| Cliente     | Dónde                                                    |
+| ----------- | -------------------------------------------------------- |
+| Claude Code | `claude mcp add --scope user` (para todos los proyectos) |
+| Cursor      | `~/.cursor/mcp.json`                                     |
+| Codex       | `~/.codex/config.toml`                                   |
+
+Si encuentra el nombre antiguo (`vivla-welcome`) lo sustituye. [`doctor`](/cli/commands/doctor) comprueba que el servidor conecta en Claude Code.
+
+## Tools
+
+| Tool                        | Entrada                                                                                              | Equivale a                               |
+| --------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `login_start`, `login_poll` | `wait_seconds` (0–120, 30)                                                                           | [`login --no-wait` / `--poll`](/cli/commands/login) |
+| `whoami`                    |                                                                                                      | [`whoami`](/cli/commands/whoami)                    |
+| `doctor`                    | `repos`, `profile`                                                                                   | [`doctor`](/cli/commands/doctor)                    |
+| `get_profile`               |                                                                                                      | [`profile`](/cli/commands/profile)                  |
+| `list_repos`                | `root`                                                                                               | [`repos`](/cli/commands/repos)                      |
+| `plan`                      | `machine`, `repos`, `profile`, `only`, `skip`, `answers`, `root`, `force_env`, `worktree`, `connect` | [`plan`](/cli/commands/plan)                        |
+| `setup`, `get_run`          | lo mismo que `plan` · `run_id`, `wait_seconds`                                                       | [`setup`](/cli/commands/setup)                      |
+| `env_pull`                  | `repos`, `connect`                                                                                   | [`env pull`](/cli/commands/env)                     |
+| `status`                    | `repos`, `env`                                                                                       | [`status`](/cli/commands/status)                    |
+| `logs`                      | `repo`, `service`, `env`, `lines`, `grep`, `errors`, `since`, `http`, `status`, `seconds`            | [`logs`](/cli/commands/logs)                        |
+| `call`                      | `repo`, `service`, `env`, `path`, `method`, `body`, `headers`, `auth`                                | [`call`](/cli/commands/call)                        |
+| `migrations`                | `repo`, `env`                                                                                        | [`migrate status`](/cli/commands/migrate)           |
+| `db_query`, `db_logs`       | `repo`, `env`, `sql` · `source`, `since`, `grep`, `errors`, `lines`                                  | [`db`](/cli/commands/db)                            |
+
+Lo que escribe fuera de la máquina (`migrate apply`, `pr`, `release`) no es una tool: el agente lo lanza por la CLI con `--yes` cuando una persona lo ha aprobado.
+
+## Qué toca
+
+Lo que toque cada tool. El servidor en sí solo lee stdin y escribe stdout.
+
+## Salida `--json`
+
+No aplica: habla MCP (JSON-RPC) por stdio. Cada tool devuelve su resultado como texto JSON y como `structuredContent`.
+
+## Exit codes
+
+El proceso vive mientras el cliente lo tenga abierto.
+
+## Para agentes (MCP)
+
+Es este. Las tools están en la tabla de arriba y en [agents.md](/cli/agents#mcp).
+
+## Relacionado
+
+[Uso desde agentes](/cli/agents) · [`describe`](/cli/commands/describe) · [`doctor`](/cli/commands/doctor) · [Máquina: `mcp`](/cli/manifest#máquina)

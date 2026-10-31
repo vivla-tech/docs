@@ -1,0 +1,118 @@
+---
+title: "vivla doctor"
+description: "Chequeo de solo lectura de tu máquina y, si los pides, de tus repos. Dice qué está bien, qué falta y qué lanzar para arreglarlo. Es lo primero que hay que mirar cuando algo no arranca, y lo primero…"
+---
+
+Chequeo de solo lectura de tu máquina y, si los pides, de tus repos. Dice qué está bien, qué falta y qué lanzar para arreglarlo. Es lo primero que hay que mirar cuando algo no arranca, y lo primero que debería lanzar un agente.
+
+```bash
+vivla doctor                              # la máquina
+vivla doctor --repo vivla-tools,vivla-cms # y esos repos
+vivla doctor --profile                    # y tus recomendados
+vivla doctor --json | jq '.checks[] | select(.ok == false)'
+```
+
+```
+✔ macOS 26.5 (arm64)
+✔ Node 26.12.0
+✔ /Library/Developer/CommandLineTools
+✔ 210 GB free
+✔ github.com → 200
+✔ MCP vivla-wiki: Connected
+✖ MCP vivla-cli: Failed to connect  → claude mcp get vivla-cli
+✔ Vivla Identity: ana@vivla.com
+✔ mise
+○ vivla-tools: .env files
+
+1 task(s) pending → vivla setup machine
+```
+
+## Opciones
+
+| Opción       | Por defecto | Qué hace                                              |
+| ------------ | ----------- | ----------------------------------------------------- |
+| `--repo <r>` |             | incluye estos repos (repetible o separados por comas) |
+| `--profile`  |             | incluye tus repos recomendados (si tienes sesión)     |
+
+## Cómo funciona
+
+Hace tres cosas en paralelo:
+
+**La máquina.**
+
+| Check       | Qué mira                                                                   | Arreglo que sugiere                      |
+| ----------- | -------------------------------------------------------------------------- | ---------------------------------------- |
+| `os`        | macOS, o Linux con apt (Debian/Ubuntu). Dice si es un workspace en la nube | instalar git y curl a mano si no hay apt |
+| `node`      | que la CLI corre en Node 20 o más (los repos van con el suyo por mise)     | instalar Node 20+                        |
+| `root`      | Linux con apt: root, sudo sin contraseña, o sudo con contraseña            | apt pedirá ejecutarse con sudo           |
+| `xcode-clt` | macOS: las Xcode Command Line Tools                                        | `xcode-select --install`                 |
+| `disk`      | espacio libre en tu home: 15 GB (5 GB en un workspace)                     | liberar espacio                          |
+| `network`   | que `github.com` responde (HEAD, 5 s)                                      |                                          |
+
+**Los agentes.** Si tienes Claude Code, lanza `claude mcp list` y comprueba que cada servidor MCP del catálogo (`vivla-wiki`, `vivla-cli`) conecta. Si falta uno sugiere `vivla setup machine --only agents:tooling`, si pide login `/mcp` en Claude Code, y si falla `claude mcp get <nombre>`. También avisa de los servidores retirados que siguen configurados exactamente como los dejamos.
+
+**Las tareas.** Ejecuta el plan de [`setup`](/cli/commands/setup) en seco, la máquina más los repos que pidas: cada tarea sale como ✔ (ya hecha) u ○ (pendiente). Solo corren las comprobaciones, nunca las acciones.
+
+Además dice si tienes sesión en Identity. Con `--json`, marca como vistos los repos nuevos del catálogo (ver [updates.md](/cli/updates)).
+
+## Qué toca
+
+Lee: tu máquina, `claude mcp list`, github.com e Identity. No cambia nada.
+
+## Salida `--json`
+
+```json
+{
+  "type": "doctor",
+  "ok": false,
+  "authenticated": true,
+  "checks": [
+    { "id": "os", "ok": true, "detail": "macOS 26.5 (arm64)" },
+    { "id": "disk", "ok": true, "detail": "210 GB free" },
+    {
+      "id": "mcp:vivla-cli",
+      "ok": false,
+      "detail": "MCP vivla-cli: Failed to connect",
+      "fix": "claude mcp get vivla-cli"
+    }
+  ],
+  "tasks": [
+    { "id": "mise:install", "title": "mise", "satisfied": true },
+    {
+      "id": "repo:vivla-tools:env",
+      "title": "vivla-tools: .env files",
+      "repo": "vivla-tools",
+      "satisfied": false
+    }
+  ],
+  "next": "vivla setup machine vivla-tools",
+  "updates": {
+    "new_repos": [{ "key": "vivla-maps", "description": "…", "recommended": false }],
+    "cli": {
+      "kind": "global",
+      "current": "63cd4d8…",
+      "latest": "63cd4d8…",
+      "available": false,
+      "command": "npm i -g github:vivla-tech/vivla-cli"
+    },
+    "manifest_source": "remote"
+  }
+}
+```
+
+`next` solo aparece si hay tareas pendientes. `updates` tiene la misma forma que en [`repos`](/cli/commands/repos).
+
+## Exit codes
+
+| Código | Cuándo                                          |
+| ------ | ----------------------------------------------- |
+| `0`    | todos los checks bien y ninguna tarea pendiente |
+| `1`    | algún check falla o queda alguna tarea          |
+
+## Para agentes (MCP)
+
+`doctor` con `repos` (lista, por defecto vacía) y `profile` (por defecto `false`). Devuelve `authenticated`, `updates` (`new_repos`, `cli`), `checks` y `tasks` (`id`, `title`, `satisfied`). En el MCP, `checks` solo trae los de la máquina, no los de los servidores MCP.
+
+## Relacionado
+
+[`setup` y `plan`](/cli/commands/setup) · [`repos`](/cli/commands/repos) · [Montar el entorno](/cli/setup#vivla-doctor)

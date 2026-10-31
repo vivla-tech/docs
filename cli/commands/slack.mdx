@@ -1,0 +1,92 @@
+---
+title: "vivla slack serve"
+description: "La cuarta puerta: un bot de Slack que contesta lo mismo que status, shipped y who, para quien no abre una terminal. Producto, operaciones o quien sea pregunta en un canal \"¿está en prod el #1662?\" y…"
+---
+
+La cuarta puerta: un bot de Slack que contesta lo mismo que [`status`](/cli/commands/status), [`shipped`](/cli/commands/shipped) y [`who`](/cli/commands/who), para quien no abre una terminal. Producto, operaciones o quien sea pregunta en un canal "¿está en prod el #1662?" y le contesta con lo que hay desplegado de verdad.
+
+```bash
+SLACK_BOT_TOKEN=xoxb-… SLACK_APP_TOKEN=xapp-… vivla slack serve
+vivla slack serve --repo vivla-cms     # un #1662 suelto es un PR de vivla-cms
+```
+
+En Slack:
+
+| Escribes                                              | Contesta                                            |
+| ----------------------------------------------------- | --------------------------------------------------- |
+| `/vivla 1662` · "¿está en prod el #1662?"             | si ese PR de vivla-tools ya está desplegado y dónde |
+| `/vivla shipped vivla-cms#212 --env production`       | lo mismo, en otro repo y solo producción            |
+| un enlace a un PR mencionando a `@vivla`              | lo mismo para ese PR                                |
+| `/vivla status vivla-tools` · "estado de vivla-cms"   | qué hay desplegado en cada entorno y si responde    |
+| `/vivla who apps/identity` · "¿quién lleva identity?" | leads, CODEOWNERS y quién ha hecho commits ahí      |
+| `/vivla` · "ayuda"                                    | qué sabe hacer                                      |
+
+Sirve con `/vivla`, mencionando a `@vivla` en un canal (contesta en el hilo) y por mensaje directo.
+
+## Opciones
+
+| Opción          | Por defecto   | Qué hace                                              |
+| --------------- | ------------- | ----------------------------------------------------- |
+| `--repo <repo>` | `vivla-tools` | el repo de un `#1662` suelto (y de `status` sin repo) |
+
+| Variable          | Qué es                                                                        |
+| ----------------- | ----------------------------------------------------------------------------- |
+| `SLACK_BOT_TOKEN` | el token del bot (`xoxb-…`), de **OAuth & Permissions** al instalar la app    |
+| `SLACK_APP_TOKEN` | un token de app (`xapp-…`) con el scope `connections:write`, para Socket Mode |
+
+## Montarlo
+
+**1. La app de Slack** (una vez, alguien con permiso para instalar apps en el workspace):
+
+1. En [api.slack.com/apps](https://api.slack.com/apps): **Create New App → From a manifest**, elige el workspace y pega [`slack/app-manifest.yaml`](https://github.com/vivla-tech/vivla-cli/blob/main/slack/app-manifest.yaml). Trae el comando `/vivla`, los eventos de menciones y mensajes directos, y Socket Mode activado.
+2. **Basic Information → App-Level Tokens → Generate Token** con el scope `connections:write`. Ese es `SLACK_APP_TOKEN`.
+3. **Install App** en el workspace. El **Bot User OAuth Token** es `SLACK_BOT_TOKEN`.
+4. Invita a `@vivla` a los canales donde quieras mencionarlo (`/invite @vivla`). `/vivla` y los mensajes directos funcionan sin invitarlo.
+
+**2. Dónde corre.** Socket Mode abre una conexión saliente hacia Slack: no hace falta URL pública, ni dominio, ni abrir puertos. Lo que sí hace falta es lo mismo que para `vivla status` en esa máquina:
+
+- `gh` con sesión o `GH_TOKEN` (PRs, comparaciones, commits).
+- `vercel` con sesión o `VERCEL_TOKEN`, y `railway` con sesión o `RAILWAY_API_TOKEN` (qué hay desplegado).
+- Para que `who` traiga email y equipo de los leads, una sesión de `vivla login` (o `VIVLA_TOKEN`) de alguien con perfil hr o admin en Equipos. Sin ella, sale el nombre de GitHub.
+
+Valen un portátil para probar, un workspace de Coder o un servicio siempre encendido (Railway, una VM) con esas variables. Un proceso por workspace de Slack. Si se corta, Socket Mode reconecta solo. `ctrl`+`c` (o `SIGTERM`) lo para.
+
+## Cómo funciona
+
+- **Mensaje → intención → respuesta.** Primero intenta leerlo como un comando (`status`, `shipped`, `who`, o un PR suelto). Si no, busca en el texto:
+  - un PR: un enlace, `repo#N`, `#N` o "PR 1662";
+  - un entorno: "prod", "producción", "staging", "develop";
+  - palabras como "quién"/"who" o "estado"/"status";
+  - un repo, una app o una ruta del catálogo.
+- **Las mismas funciones que la CLI**, con su forma de leer Railway, Vercel y GitHub. Cambia solo el formato, que es el de Slack (emojis, enlaces, negritas).
+- **`/vivla`** contesta "Looking…" solo para ti, porque Slack quiere respuesta en 3 s. Después publica la respuesta en el canal por el `response_url` del comando, a la vista de todos, que es lo que interesa en un canal de equipo. Las menciones se contestan en su hilo y los directos, en la conversación.
+- **Solo lectura, a propósito.** No hay logs, ni `call`, ni SQL, ni nada que escriba. Los logs pueden llevar datos de clientes y Slack no es sitio para ellos.
+- **Errores como texto.** Un PR que no existe o una plataforma que no contesta salen como un mensaje con ⚠️, nunca dejan el bot colgado.
+
+## Qué toca
+
+Lee lo mismo que `status`, `shipped` y `who`, con las sesiones de la máquina donde corre. En Slack solo publica las respuestas (`chat:write`) en los canales y conversaciones donde le preguntan. Cualquiera del workspace que pueda usar `/vivla` ve lo que contesta: qué hay desplegado, títulos de PRs, logins de GitHub y, si hay sesión hr/admin, emails y equipos de los leads. No escribe nada en ninguna plataforma.
+
+## Salida `--json`
+
+No hay: es un proceso que se queda escuchando. Con `--json` y sin tokens, sale con `{ "type": "result", "ok": false, "exitCode": 64, "message": "…" }`.
+
+## Exit codes
+
+| Código | Cuándo                                                              |
+| ------ | ------------------------------------------------------------------- |
+| `0`    | se paró con `ctrl`+`c` o `SIGTERM`                |
+| `1`    | Slack rechazó la conexión (token inválido, Socket Mode sin activar) |
+| `64`   | faltan `SLACK_BOT_TOKEN` o `SLACK_APP_TOKEN`, o `--repo` no existe  |
+
+## Para agentes (MCP)
+
+No hay tool: un agente ya tiene `status`, `shipped` y `who` directamente.
+
+## Relacionado
+
+- [`vivla shipped`](/cli/commands/shipped) · [`vivla status`](/cli/commands/status) · [`vivla who`](/cli/commands/who): lo que contesta.
+- [`slack/app-manifest.yaml`](https://github.com/vivla-tech/vivla-cli/blob/main/slack/app-manifest.yaml): la app de Slack.
+- Guía: [devtools.md](/cli/devtools#slack-vivla-slack-serve).
+
+Usa [`@slack/socket-mode`](https://www.npmjs.com/package/@slack/socket-mode) y [`@slack/web-api`](https://www.npmjs.com/package/@slack/web-api), no Bolt ni el Chat SDK. Socket Mode es lo que deja correrlo junto a `gh`, `vercel` y `railway` sin URL pública. El Chat SDK está pensado para webhooks (una función en Vercel), que no tendría esas CLIs. Bolt hace lo mismo que estos dos paquetes y además trae Express, que aquí no hace falta.

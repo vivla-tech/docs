@@ -1,0 +1,555 @@
+---
+title: "Ficha de la casa"
+description: "Ficha de una casa en /homes/:id: cabecera, resumen, pestañas (La casa, Llegada y estancia, Alquiler, Contenido del anuncio, Licencias, Propietarios, Calendario y Documento de check-in), editor lateral y guardado automático"
+---
+
+# Ficha de la casa
+
+La ficha reúne todo lo que CX necesita de una casa en el día a día: acceso, wifi, alarma, fotos, guías, alquiler, licencias, propietarios y calendario.
+
+Es la única pantalla de casa del panel, en todos los entornos. Cuando pulsas una casa en el [listado](/panel/homes), entras directamente aquí.
+
+La ficha se organiza en pestañas. Cada pestaña es una rejilla de tarjetas. El lápiz de una tarjeta abre su editor en un panel lateral, y lo que cambias se guarda solo.
+
+## Rutas
+
+| Ruta | Qué hay | Permiso |
+|------|---------|---------|
+| `/homes/:id` | Ficha abierta en **La casa** | `read:homes` |
+| `/homes/:id?tab=:tab` | Ficha abierta en otra pestaña | `read:homes` |
+| `/homes/:id?tab=:tab&component=:editor` | Ficha con un editor abierto | `read:homes` (editar exige `edit:homes`) |
+| `/homes/:id?tab=checkin-doc` | Pestaña [**Documento de check-in**](/panel/homes/checkin-doc) | `edit:homes` |
+
+Si la casa no existe o no se puede leer, verás **No se ha encontrado la casa** y el panel te lleva a `/homes`.
+
+### Parámetros de la URL
+
+| Parámetro | Para qué |
+|-----------|----------|
+| `tab` | Pestaña abierta: `home`, `arrival`, `rental`, `listing`, `licences`, `owners`, `calendar` o `checkin-doc`. Si falta, la ficha usa la pestaña del editor de `component` y, si no hay, **La casa** |
+| `component` | Editor abierto en el panel lateral, por ejemplo `parking`, `wifi` o `licences`. La lista completa está en `RecordEditor` (`homeRecordEditors.ts`) |
+| `focus` | Tarjeta que se resalta al llegar. La usa **Ver cuáles**: la ficha baja hasta la tarjeta, la resalta 2 segundos y quita el parámetro |
+| `section` | Parámetro de la pantalla de casa anterior. La ficha lo traduce a una pestaña y lo quita de la URL |
+
+Cada cambio de pestaña o de editor añade una entrada al historial del navegador. Puedes compartir la URL para llevar a alguien a una pestaña o a un editor concretos.
+
+<Note>
+  Los atajos del [listado de casas](/panel/homes#listado-de-casas) todavía
+  construyen los enlaces con `section` y con los ids de tarjeta antiguos en
+  `component`. La ficha los traduce: `section=basicInformation` abre **Llegada
+  y estancia**, `calendar` abre **Calendario**, `owners` abre **Propietarios**,
+  `checkinDoc` abre **Documento de check-in**, y `propCos` y `services` abren
+  **La casa**. Los ids de tarjeta abren su editor nuevo: `parkings-card` abre
+  **Parking**, `account-number-card` abre **Pagos**, `wifi-card` abre **Wifi**,
+  etc. (`CARD_EDITORS` en `homeRecordEditors.ts`). Un id sin editor, como
+  `house-guide-card`, solo abre su pestaña.
+</Note>
+
+## Cabecera
+
+Arriba ves la portada en miniatura, el tipo de casa (**Montaña**, **Playa** o **Ciudad**), su destino y su nombre. Debajo del nombre están el estado, el agente CX y la licencia.
+
+- La flecha de volver te saca de la ficha y te devuelve a la pantalla desde la que entraste, aunque hayas cambiado de pestaña o abierto editores. Si entraste con un enlace directo o recargando la página, te lleva a `/homes`.
+- **Ver reservas** abre [Reservas](/panel/bookings) filtrado por esta casa.
+
+<Note>
+  Si tienes una casa fijada en el
+  [selector global](/panel/homes#selector-global-de-casa), la flecha de volver
+  desaparece y la ficha muestra siempre esa casa. Si abres otra, el panel te
+  devuelve a la fijada.
+</Note>
+
+### Estado
+
+El selector de estado tiene tres opciones: **Activa**, **Preactivada** e **Inactiva**. Cada una muestra su descripción en el desplegable.
+
+- El cambio se aplica al elegir, sin botón de guardar.
+- Si va bien, verás **Estado de la casa actualizado**.
+- Si falla, el selector vuelve al estado anterior y verás **Error al actualizar el estado de la casa**.
+
+Qué implica cada estado para reservas e intercambios está en [Operativa](/operativa#estados-de-una-casa).
+
+### Agente CX
+
+El selector **Agente CX** lista los agentes de `GET /v2/admin/properties/cx-agents`. Si la casa no tiene, verás **Sin asignar**.
+
+- Al elegir un agente se guarda al momento y verás **Información de la casa actualizada**.
+- Si falla, vuelve el agente anterior.
+- Es el mismo dato que el **Home manager** del [documento de check-in](/panel/homes/checkin-doc).
+
+<Note>
+  `CxAgentSelector` es otro componente: un filtro por agente CX (**Agente CX**,
+  **Todos**) que usan los listados de [Usuarios](/panel/users) y
+  [Reservas](/panel/bookings). No se usa en la ficha.
+</Note>
+
+### Licencia de alquiler
+
+La píldora **Licencia de alquiler** enseña el estado del registro de licencias (`GET /v2/admin/properties/:id/licence`), con su color:
+
+| Estado | Color |
+|--------|-------|
+| **En vigor** | Verde |
+| **En trámite**, **Sin pedir** | Naranja |
+| **No se puede obtener** | Gris, con un icono de prohibido |
+| **Caducada**, **Revocada** | Rojo |
+
+Si la casa aún no tiene ese estado, la píldora enseña la licencia turística de la casa: **Sí**, **No**, **Pendiente** o **Sin dato**. Las dos cosas se editan en la pestaña [Licencias](#licencias).
+
+## Resumen
+
+Debajo de la cabecera hay una fila de cinco celdas:
+
+| Celda | Qué muestra |
+|-------|-------------|
+| **Capacidad** | Viajeros y, debajo, dormitorios, camas y baños. Si falta, **Sin rellenar** |
+| **Próxima estancia** | Fecha de la próxima reserva del calendario, con el propietario, el tipo y las noches. Si no hay, **Sin reservas** |
+| **Fracciones** | Fracciones vendidas de las 8 de la casa, con una barra. Si los propietarios suman más de 8, la celda sale en rojo con **Sobra 1 · Revisar propietarios**, que te lleva a **Propietarios** |
+| **Datos de la casa** | Datos rellenos sobre el total. Sale en rojo con **N sin rellenar · Ver cuáles** mientras falte algo, y en verde con **Todo rellenado** cuando está todo |
+| **Incidencias de alquiler** | Incidencias de la última auditoría diaria con Hostaway, con su fecha y hora. Si la casa no tiene ID de Hostaway, **Sin anuncio**. Si aún no hay auditoría, **Sin auditoría**. Pulsa la celda para abrir **Alquiler** |
+
+Las cuentas con email `@vivla.com` (CX y pruebas) no cuentan como propietarios. Quedan fuera de las fracciones, de los códigos de acceso y de **Datos de la casa**. En **Propietarios** salen aparte, en **Cuentas internas**. La excepción es `carlos@vivla.com`, que es propietario real y sale como uno más.
+
+### Datos de la casa
+
+**Ver cuáles** abre **Lo que falta por rellenar**, con los datos que faltan agrupados por pestaña. Pulsa uno para ir a su tarjeta: la ficha abre la pestaña, baja hasta la tarjeta y la resalta. **Agente CX** abre directamente el selector de la cabecera.
+
+| Pestaña | Datos que cuentan |
+|---------|-------------------|
+| **La casa** | **Agente CX**, **Características**, **Superficie**, **Dirección**, **Coordenadas**, **Página en la web**, **Descripción**, **Portada**, **Fotos del recorrido**, **Trastero y otros espacios**, **Domiciliación de la comunidad**, **Administrador de la comunidad**, **Conserje**, **Cuenta bancaria** y **Enlace de pago** |
+| **Llegada y estancia** | **Cómo llegar**, **Parking**, **Códigos de acceso de los propietarios**, **Wifi**, **Pin de la alarma**, **Palabra clave SD**, **Mi palabra clave**, **Palabra de coacción**, **Código de coacción**, **Guía de la casa**, **Guía de recomendaciones**, **Pack de bienvenida**, **Supermercado**, **Zonas comunes y lugares de interés**, **Basura y reciclaje**, **Email de la casa** y **Dirección de envíos** |
+| **Alquiler** | **ID de Hostaway**, **ID de Airbnb** y **Coanfitrión de Airbnb** |
+| **Licencias** | **Licencia turística**, **Número de licencia** y **Registro de corta estancia** |
+
+- **Características** cuenta como relleno cuando tiene viajeros, dormitorios, camas y baños.
+- **Códigos de acceso de los propietarios** cuenta cuando todos los propietarios tienen código.
+- **Coordenadas** no tiene campo en la ficha: viene de la API.
+
+Las reglas están en `getHomeRecordFields` (`src/core/homes/rules/homeRecord.rules.ts`).
+
+## Pestañas
+
+| Pestaña | `tab` | Qué hay |
+|---------|-------|---------|
+| **La casa** | `home` | Características, ubicación, descripción, fotos, trastero, comunidad y pagos |
+| **Llegada y estancia** | `arrival` | Cómo llegar, parking, códigos, wifi, alarma, normas, guías, bienvenida, zonas comunes, basura y email |
+| **Alquiler** | `rental` | Sincronización e incidencias de Hostaway, condiciones de alquiler e IDs de Hostaway y Airbnb |
+| **Contenido del anuncio** | `listing` | Nombres, textos, camas, seguridad y amenities del anuncio. Ver [Contenido del anuncio](/panel/homes/listing) |
+| **Licencias** | `licences` | Licencia turística, detalle de la licencia, registros, verificación y comentarios de Legal |
+| **Propietarios** | `owners` | Fracciones vendidas y una tarjeta por propietario. La pestaña lleva el número de propietarios |
+| **Calendario** | `calendar` | Planificador del año, próximas estancias y semanas libres |
+| **Documento de check-in** | `checkin-doc` | Datos y vista previa del documento de bienvenida. Solo aparece con `edit:homes`. Ver [Documento de check-in](/panel/homes/checkin-doc) |
+
+Un punto naranja en **Alquiler** avisa de que la última auditoría encontró incidencias. En **Contenido del anuncio**, avisa de que el anuncio aún no está listo para publicar.
+
+<Note>
+  En el código hay dos pestañas más que no se muestran: **Pricing**
+  (`IS_HOME_RECORD_PRICING_ENABLED` está a `false`) y **Proveedores** (está
+  comentada en `HOME_RECORD_TABS`). Si una URL pide una pestaña que no ves, la
+  ficha abre **La casa**.
+</Note>
+
+### Tarjetas
+
+- El lápiz (**Editar**) abre el editor de la tarjeta.
+- Una tarjeta vacía muestra una pregunta (por ejemplo "¿Tiene plaza de parking? ¿Dónde está y cómo se entra?") y el botón **Añadir**, que abre el mismo editor.
+- El icono de copiar copia el valor y muestra **Copiado al portapapeles**.
+- Los valores sensibles (cuenta bancaria, contraseñas de wifi, códigos y palabras de la alarma) salen ocultos. El icono del ojo los muestra durante 30 segundos. En el pin de la alarma verás **Visible 30 s · Ocultar**.
+- **Ver más** y **Ver menos** expanden los textos largos.
+
+## La casa
+
+| Tarjeta | Qué muestra | Editor |
+|---------|-------------|--------|
+| **Características** | Viajeros, dormitorios, camas, baños, bañeras y m² | **Características**: **Viajeros**, **Superficie (m²)**, **Dormitorios**, **Camas** y **Baños**. Tienen que ser 0 o más |
+| **Ubicación** | Dirección (copiable), coordenadas, **Abrir en Maps** y la página de la casa en la web | **Ubicación**: **Dirección** (**Calle y número**, **Ciudad**, **Código postal**, **URL de Google Maps**), **Zona** de solo lectura y **Página en la web** |
+| **Descripción** | Texto descriptivo | **Descripción** |
+| **Fotos** | Mosaico con la portada y las primeras fotos, y **Portada elegida · N en el recorrido** | **Fotos**, ver [Fotos](#fotos) |
+| **Trastero y otros espacios** | Texto libre | **Trastero y otros espacios** |
+| **Comunidad** | **Administrador**, **Domiciliación** y **Conserje**, con **Falta N** si falta alguno | **Comunidad**: solo la **Dirección de domiciliación** |
+| **Pagos** | **Cuenta** (oculta) y **Enlace de pago** | **Pagos**: **Cuenta bancaria** y **Enlace de pago (Stripe)** |
+
+- **Abrir en Maps** usa la URL de Google Maps de la casa. Si no tiene, busca por coordenadas o por dirección.
+- La misma dirección se edita también desde **Dirección y llegada**, en **Llegada y estancia** y en el documento de check-in.
+- El nombre interno, el tipo, la localización y la provincia no se cambian desde la ficha. La **Zona** del editor **Ubicación** los enseña deshabilitados.
+- Las bañeras se muestran, pero no se editan.
+
+<Tip>
+  **Administrador** y **Conserje** no se escriben a mano. Salen de los
+  proveedores de la categoría **Comunidad** con servicio administrador o
+  conserje. Ver [Proveedores](#proveedores).
+</Tip>
+
+### Fotos
+
+El editor **Fotos** se abre más ancho que el resto. Tiene dos bloques:
+
+- **Portada**: "Es la foto que ve el propietario al abrir la casa en la app."
+- **Recorrido**: el resto de fotos, en orden de subida. El propietario las ve en ese orden. No se pueden reordenar.
+
+Para subir fotos, pulsa **Añadir fotos** o arrastra archivos sobre el editor (**Suelta las fotos aquí**). Admite JPG, PNG o WebP de hasta 25 MB por foto. Puedes elegir hasta 100 fotos por tanda. Si pasas de ahí, se rechaza la tanda entera con **No se pueden subir más de 100 fotos a la vez**.
+
+Las fotos entran en el recorrido en el orden de la selección. Mientras se suben, la cabecera muestra el progreso (**Subiendo 7 de 32**) y cada foto aparece en el recorrido en cuanto termina. Si alguna falla, el resto sigue y al final verás un solo aviso con las que no se han subido, por ejemplo **No se han podido subir 2 fotos: «a.jpg», «b.jpg»**.
+
+<Note>
+  Los archivos se suben al bucket de 3 en 3, pero cada foto se registra en la
+  API de una en una y en orden: `POST /v2/admin/properties/:id/images/add`
+  reescribe la galería entera de la casa en Firestore, así que dos llamadas a
+  la vez se pisan y se pierden fotos.
+</Note>
+
+En cada foto tienes:
+
+- **Hacer portada**: la foto pasa a portada y la portada anterior vuelve al recorrido.
+- **Editar título**: cambia el texto alternativo de la foto.
+- **Eliminar**: pide confirmación en **Eliminar imagen**, con **Cancelar** para salir sin borrar.
+- Clic en la foto: abre el visor a pantalla completa. Muévete con las flechas y cierra con Esc.
+
+Para borrar varias fotos de una vez, pasa el ratón por encima de una foto y marca la casilla que aparece en su esquina. En móvil las casillas se ven siempre.
+
+- En cuanto hay una marcada, todas las fotos muestran su casilla. Un clic sobre una foto la marca o la desmarca en vez de abrirla.
+- Arriba aparecen **N seleccionadas**, **Cancelar** y **Eliminar (N)**. La portada también se puede marcar.
+- El diálogo pide confirmación en plural (**Eliminar N imágenes**) y también tiene **Cancelar**.
+- Las fotos desaparecen al momento y se borran de una en una. Si alguna falla, vuelve a su sitio y verás **No se han podido eliminar N de las M imágenes. Siguen en la galería.**
+- **Cancelar** quita la selección sin borrar nada.
+- Mientras se están subiendo fotos, las casillas y **Eliminar (N)** quedan desactivados.
+
+<Warning>
+  Si eliminas la portada, la casa se queda sin portada en la app hasta que
+  elijas otra foto del recorrido. El diálogo te lo avisa.
+</Warning>
+
+Sin `edit:homes` verás **Solo lectura. No tienes permiso para editar las fotos de esta casa.**
+
+## Llegada y estancia
+
+| Tarjeta | Qué muestra | Editor |
+|---------|-------------|--------|
+| **Cómo llegar** | Indicaciones, dirección con coordenadas y **Abrir en Maps** | **Dirección y llegada**: **Dirección** y **Cómo llegar** (**Indicaciones**) |
+| **Parking** | Plaza, código, dirección, cómo se entra y fotos de cada parking | **Parking**, ver [Parking](#parking) |
+| **Códigos de acceso** | Código de cada propietario, con **N de M** | **Códigos de acceso**, ver más abajo |
+| **Wifi** | Red (copiable) y contraseña oculta | **Wifi**, ver [Wifi](#wifi) |
+| **Alarma y seguridad** | **Pin** oculto, palabras clave, **Código de la puerta** y **Cajetín**. Si falta algo, **Falta: …** | **Alarma y seguridad**: bloque **Códigos** (**Pin de la alarma**, **Código de coacción**, **Código de la puerta** y **Cajetín**) y bloque **Palabras clave** (**Palabra clave SD**, **Mi palabra clave** y **Palabra de coacción**) |
+| **Normas de la casa** | **Todas las casas**, con la etiqueta **Igual en todas**, y **Propias de esta casa** | **Normas de la casa**: solo **Normas propias** |
+| **Guías** | PDFs de **Guía de la casa** y **Recomendaciones** | Se gestionan en la propia tarjeta, ver más abajo |
+| **Bienvenida y compras** | Pack de bienvenida y enlace **Supermercado** | **Bienvenida y compras**: **Pack de bienvenida** y **Supermercado online** |
+| **Zonas comunes y lugares de interés** | Texto libre | **Zonas comunes y lugares de interés** |
+| **Basura y reciclaje** | Indicaciones y **Ver ubicación de los contenedores** | **Basura y reciclaje**: **Indicaciones** y **Ubicación de los contenedores** |
+| **Email y envíos** | Email de la casa (copiable) y **Dirección de envíos** | **Email y envíos**: **Email de la casa** y **Dirección de envíos** |
+
+- **Todas las casas** son las normas esenciales del [documento de check-in](/panel/homes/checkin-doc). Salen de la plantilla y no se editan aquí. Las **Propias de esta casa** son opcionales y las ve el propietario en la app.
+- Si el email no es válido, el campo avisa con **Revisa el email** y no se guarda.
+
+### Basura y reciclaje
+
+Guarda las indicaciones y un enlace a los contenedores.
+
+- Si pegas el enlace sin `https://`, el panel lo completa, igual que en el documento de check-in.
+- Si lo que escribes no es un enlace, verás **Esto no parece un enlace. Pega la URL de Google Maps de los contenedores.** y no se guarda.
+- En la tarjeta, el enlace se abre con **Ver ubicación de los contenedores**.
+
+### Guías
+
+La tarjeta **Guías** tiene dos grupos: **Guía de la casa** y **Recomendaciones**.
+
+- Pulsa **Subir** en el grupo y elige uno o varios PDF de hasta 50 MB. Mientras se suben verás **Subiendo…**.
+- Pulsa el nombre del documento para abrirlo en otra pestaña.
+- Pulsa la **X** para borrarlo. Te pide confirmación en **Eliminar documento**: deja de estar disponible en la app y en el documento de check-in.
+
+La primera **Guía de la casa** es la que enlaza el documento de check-in con **Ver guía de la casa**.
+
+### Parking
+
+El editor **Parking** admite hasta dos plazas. Cada plaza es un bloque (**Plaza 1**, **Plaza 2**) con:
+
+- **Número de plaza** y **Código de acceso**.
+- **Cómo se entra**: dónde está el mando, por qué puerta se entra…
+- **Dirección** (opcional): solo si el parking no está en la propia casa.
+- **Fotos** (opcional): hasta 3 por plaza, en JPG, PNG o WebP de hasta 10 MB.
+
+Para añadir una plaza, pulsa **Añadir plaza**. La plaza se crea con el primer guardado. Hasta entonces, el campo de fotos dice **Guarda el parking para poder añadirle fotos.**
+
+Las fotos se suben en cuanto las eliges (**Foto del parking subida**). La **X** de una foto la borra al momento, sin confirmación (**Foto del parking borrada**). En la tarjeta salen en miniatura y se abren en grande.
+
+**Quitar** pide confirmación en **Quitar plaza**: deja de salir en la app y en el documento de check-in.
+
+<Note>
+  Cada guardado envía solo la plaza que cambias. Si no es la primera, la
+  petición incluye también la primera tal y como está, porque la API copia el
+  primer parking que recibe en el dato de parking que leen las apps v1. El
+  borrado va contra `DELETE /v2/admin/properties/parkings/:parkingId/remove`.
+</Note>
+
+<Warning>
+  Por ahora la API no deja quitar la dirección de un parking, solo cambiarla:
+  solo guarda ese campo cuando trae valor. El editor de la ficha no lo avisa,
+  así que si vacías una dirección que ya tenía valor, comprueba en la tarjeta
+  cuál ha quedado.
+</Warning>
+
+### Wifi
+
+El editor **Wifi** admite hasta dos redes. Cada red es un bloque (**Red 1**, **Red 2**) con **Nombre de la red** y **Contraseña**.
+
+- El nombre es obligatorio. Si lo dejas vacío, verás **Pon el nombre de la red** y no se guarda.
+- **Añadir red** abre un bloque vacío. La red se guarda sola en cuanto tiene nombre.
+- **Quitar** borra la red al momento, sin confirmación.
+- Con dos redes desaparece el botón de añadir.
+
+El listado de casas solo enseña la primera red.
+
+<Note>
+  La API guarda dos huecos de wifi y no los vacía por su cuenta: ignora una
+  lista vacía y, si recibe una sola red, deja la segunda como estaba. Por eso
+  cada cambio envía siempre los dos huecos, con la lista completa y los libres
+  vacíos (`fillWifiSlots`). La ficha no enseña las redes sin nombre.
+</Note>
+
+### Códigos de acceso de propietarios
+
+Cada propietario puede tener un código de acceso personal para esta casa. La tarjeta **Códigos de acceso** lista a todos los propietarios, incluidos los copropietarios vinculados, con su código o **Sin código**. La etiqueta **N de M** sale en verde cuando todos tienen código.
+
+El editor **Códigos de acceso** tiene un bloque **Por propietario**, con un campo por propietario. La lista de propietarios es fija: aquí no se añaden ni se quitan.
+
+- Escribe el código y sal del campo. Se guarda solo.
+- Si todo va bien, verás **Código de acceso guardado** (o **Códigos de acceso guardados** si cambiaste varios).
+- Si falla alguno, verás **No se pudo guardar el código de acceso de: …** con los nombres afectados. El resto queda guardado.
+
+El mismo bloque está en el editor **Códigos de acceso** del documento de check-in. Con `edit:homes`, el **Añadir** de un propietario sin código en **Llegada y estancia** o en **Propietarios** abre este editor.
+
+<Warning>
+  Por ahora un código se puede cambiar, pero no quitar: la API rechaza los
+  códigos vacíos. Si vacías un código, el guardado falla con el aviso de error.
+</Warning>
+
+<Note>
+  La API no tiene un endpoint propio para estos códigos. Viajan en la edición
+  del usuario (`PUT /v2/admin/users/:userId/update`, campo `accessCodes`), una
+  petición por propietario. Antes de cada petición el panel lee el teléfono y
+  la foto del propietario (`GET /v2/admin/users/:userId`) y los reenvía,
+  porque esa edición los vacía en Firestore si no llegan.
+</Note>
+
+El [documento de check-in](/panel/homes/checkin-doc) usa estos códigos en la tabla de llegada. Lo explica su apartado sobre el código del propietario.
+
+## Alquiler
+
+| Tarjeta | Qué muestra |
+|---------|-------------|
+| **Sincronización** | Estado de la sincronización con Hostaway: **Al día**, **Cambios en cola**, **Con errores** o **Sin sincronizar todavía**. Debajo, la última sincronización, los cambios en cola, los que no se han podido enviar y el último error |
+| **Incidencias de alquiler** | Incidencias de la última auditoría diaria con Hostaway. Son descuadres entre las estancias de VIVLA y el anuncio, no tickets |
+| **Canales** | Canales del anuncio. Lleva la marca **Ejemplo** |
+| **Condiciones** | **Entrada**, **Salida**, **Estancia** (**De N a M noches**) y **Tasas y cargos**, leídas de Hostaway |
+| **Hostaway y Airbnb** | **ID de Hostaway**, **ID de Airbnb** y **Coanfitrión de Airbnb** |
+| **HubSpot** | Vinculación de la casa con HubSpot. Lleva la marca **Ejemplo** |
+
+Sin ID de Hostaway, **Sincronización**, **Incidencias de alquiler** y **Condiciones** salen vacías y te piden el ID. Se añade en **Hostaway y Airbnb**.
+
+<Warning>
+  **Canales** y **HubSpot** llevan la marca **Ejemplo**: "Dato de ejemplo:
+  todavía no viene de la API". No los uses como fuente.
+</Warning>
+
+### Incidencias de alquiler
+
+La tarjeta enseña hasta 6 incidencias. Si hay más, verás **y N incidencias más**.
+
+- Cada incidencia lleva su tipo, sus fechas y el detalle.
+- **Venta de otro canal en una semana que no es de alquiler**, **Venta de otro canal sin estancia en el panel** y **Estancia aprobada sin reserva en Hostaway** salen en rojo. El resto, en naranja.
+- Si la incidencia tiene reserva, **Ver reserva** la abre en [Reservas](/panel/bookings).
+- Si está todo cuadrado, verás **La última auditoría no encontró incidencias.**
+
+### Condiciones de alquiler
+
+El editor **Condiciones de alquiler** guarda directamente en el anuncio de la casa en Hostaway. Solo se abre si la casa tiene ID de Hostaway.
+
+- **Horarios**: **Entrada desde** y **Salida hasta**, en horas en punto.
+- **Estancia**: **Noches mínimas** (al menos 1) y **Noches máximas** (no menos que las mínimas).
+- Tasas y cargos: cada tasa es un bloque con **Tipo**, **Se cobra**, **Importe** y **En** (**Euros** o **Porcentaje**). **Añadir tasa** abre una nueva, que se crea al guardarla.
+- **Quitar** una tasa pide confirmación en **Quitar tasa**: se borra del anuncio de Hostaway.
+- Si una tasa tiene un tipo que el panel no conoce, sale bloqueada con **Este tipo de tasa solo se puede cambiar en Hostaway.**
+
+Cada guardado muestra **Condiciones de alquiler actualizadas en Hostaway**. Si falla, verás el mensaje de la API.
+
+### Hostaway y Airbnb
+
+El editor **Hostaway y Airbnb** guarda **ID de Hostaway**, **ID de Airbnb** y **Coanfitrión de Airbnb** con el resto de datos de la casa.
+
+El ID de Hostaway activa la sincronización, la auditoría, las condiciones y la pestaña [Contenido del anuncio](/panel/homes/listing).
+
+## Contenido del anuncio
+
+La pestaña recoge lo que dice el anuncio de la casa en los canales: nombre público, textos por idioma y por canal, camas, seguridad, amenities y piscina. Todo se explica en [Contenido del anuncio](/panel/homes/listing).
+
+Los amenities de la casa solo se editan en esta pestaña.
+
+## Licencias
+
+| Tarjeta | Qué muestra |
+|---------|-------------|
+| **Licencia turística** | **Estado** (**Sí**, **No** o **Pendiente**), **Nº de licencia** y **Corta estancia** |
+| **Verificación** | **Verificada**, **Sin verificar** o **En disputa**, la última revisión y los conflictos abiertos |
+| **Detalle de la licencia** | **Tipo**, **Jurisdicción**, **Organismo**, **Concedida**, **Caduca** y **Titular**. Avisa si hay un **Cambio de titular pendiente** |
+| **Ocupación** | Viajeros **Con licencia** y **En la ficha**. Si la ficha admite más, verás **La ficha admite más viajeros que la licencia.** |
+| **Registros** | **Registro NRA** y **Registro autonómico**, con su estado. Si falta el NRA, verás **Falta el registro NRA.** |
+| **Documentación** | Enlace a la resolución de la licencia (**Abrir documento**) |
+| **Comentarios de Legal** | Comentarios, **Restricciones** y **Próxima acción** |
+
+Todas las tarjetas abren el mismo editor, **Licencia**:
+
+- **Licencia turística** (**Licencia**, **Número de licencia** y **Registro de corta estancia**) se guarda con los datos de la casa.
+- El resto de bloques (**Detalle de la licencia**, **Ocupación con licencia**, **Registros**, **Verificación**, **Documentación** y **Comentarios de Legal**) se guarda en la ficha de licencia (`PUT /v2/admin/properties/:id/licence`) y muestra **Licencia actualizada**.
+
+Si la ficha de licencia no se puede leer, verás **No se ha podido leer la ficha de licencia.** En el editor, solo podrás cambiar la licencia turística.
+
+## Propietarios
+
+- **Fracciones vendidas** enseña las fracciones vendidas de 8 y una barra con el nombre de cada propietario. Si sobran fracciones, lo avisa en rojo.
+- Cada propietario tiene su tarjeta, ordenadas de más a menos fracciones. El título junta al propietario y a sus copropietarios vinculados.
+- En cada tarjeta ves **Email**, **Teléfono** y **Código** de cada persona, con copiar.
+- Si falta el teléfono, **Añadir** te lleva a editar el usuario. Necesitas `edit:users`.
+- Si falta el código, **Añadir** abre el editor **Códigos de acceso**. Necesitas `edit:homes`.
+- **Ver reservas** abre [Reservas](/panel/bookings) filtrado por ese propietario y esta casa. **Perfil** abre su ficha en [Usuarios](/panel/users).
+- **Cuentas internas** lista las cuentas `@vivla.com`, que no cuentan como propietarios. `carlos@vivla.com` no sale aquí: es propietario real.
+- Si quedan fracciones libres, la tarjeta **Fracciones libres** te lleva a Usuarios con **Ir a Usuarios**.
+
+Esta pestaña es de consulta. Los propietarios y sus fracciones se gestionan desde [Usuarios](/panel/users).
+
+## Calendario
+
+La pestaña muestra los slots del calendario de la casa en un planificador anual, coloreados por temporada. Es de solo lectura.
+
+- Cambia de año con las flechas. Al lado ves **N semanas · N reservadas · N libres**.
+- Si hay alguien en la casa, verás **En la casa: …, hasta el …**.
+- **Temporadas en Calendarios** abre el calendario de la casa en [Calendarios](/panel/calendars).
+- La leyenda enseña las temporadas, las reservas de cada tipo (**Disfrute**, **Alquiler**, **Intercambio**, **ThirdHome**) y **Hoy**.
+- Pulsa una reserva del planificador para ver sus fechas, noches, tipo, propietario, huéspedes, temporada y si está **Pendiente de aprobar**. **Ver reserva** la abre en [Reservas](/panel/bookings).
+- **Lo próximo** lista hasta cuatro estancias, con **Ver todas las reservas**.
+- **Semanas libres** cuenta las semanas sin reserva en lo que queda de año, por temporada.
+
+Si la casa no tiene slots, verás **Esta casa todavía no tiene calendario.** Los slots y las temporadas se gestionan en [Calendarios](/panel/calendars). Contexto de producto en [Calendario y temporadas](/backend/calendario-temporadas).
+
+## Documento de check-in
+
+Con `edit:homes`, la última pestaña reúne los datos que alimentan el documento de bienvenida y su vista previa. Todo se explica en [Documento de check-in](/panel/homes/checkin-doc).
+
+## Editor lateral
+
+El editor se abre en un panel a la derecha. Arriba ves la pestaña, el título y la descripción del editor. En los editores de textos del anuncio, la pestaña lleva también el idioma.
+
+- Pulsa la **X** (**Cerrar**) o fuera del panel para cerrarlo. El parámetro `component` desaparece de la URL.
+- Cada editor se divide en bloques. Cada bloque guarda por su cuenta.
+- Los editores salen de `renderHomeRecordEditor`. Casi todos son propios de la ficha (`src/features/homes/components/homeRecord/editors/`). **Fotos** reutiliza el editor de fotos de la pantalla anterior (`GalleryEditor`). **Guía de la casa** y **Home manager** reutilizan los del documento de check-in.
+
+### Cómo se guarda
+
+No hay botón **Guardar**. Cada bloque guarda solo (`useBlockForm`, sobre `useAutoSaveForm`):
+
+- Mientras escribes, se guarda cuando dejas de teclear un momento (0,8 segundos).
+- Se guarda al instante al salir del campo, al pulsar Enter en un campo de una línea y al elegir una opción en un desplegable. En los campos de varias líneas, Enter añade un salto de línea.
+- Solo se envía si algo ha cambiado. Si un campo no es válido, no se envía nada y el campo muestra su error.
+- Si cierras el editor con un cambio pendiente o con un guardado que falló, se vuelve a intentar al cerrar. Un valor no válido no se guarda.
+- Si cierras o recargas la pestaña del navegador con un cambio sin guardar (pendiente, en curso, con error o no válido), el navegador te pide confirmación.
+
+Cada guardado se confirma con un aviso. Si guardas varias veces seguidas, el aviso se actualiza en vez de apilarse.
+
+| Qué guardas | Aviso | Si falla |
+|-------------|-------|----------|
+| Datos de la casa (casi todos los editores) | **Información de la casa actualizada** | **Error al actualizar la información de la casa** |
+| Ficha de licencia | **Licencia actualizada** | Mensaje de la API |
+| Condiciones de alquiler | **Condiciones de alquiler actualizadas en Hostaway** | Mensaje de la API |
+| Códigos de los propietarios | **Código de acceso guardado** | **No se pudo guardar el código de acceso de: …** |
+| Contenido del anuncio | **Anuncio guardado** | Ver [Contenido del anuncio](/panel/homes/listing) |
+
+### Sin permiso de edición
+
+Sin `edit:homes`:
+
+- Las tarjetas no tienen lápiz ni **Añadir**.
+- El selector de estado queda bloqueado y el agente CX sale como una etiqueta fija.
+- En **Guías** no hay **Subir** ni **X**.
+- No ves la pestaña **Documento de check-in**.
+- Si abres un editor desde una URL, ves sus campos deshabilitados y sin botones de añadir o quitar.
+
+## Proveedores
+
+La ficha no tiene pestaña de proveedores. Aun así, los proveedores siguen en la casa:
+
+- **Administrador** y **Conserje** de la tarjeta **Comunidad** salen de los proveedores de **Comunidad**.
+- En el [listado de casas](/panel/homes#listado-de-casas), las columnas de proveedores enlazan a la ficha. **Ver listado** abre **La casa**. El nombre de un proveedor de comunidad abre su editor en el panel lateral.
+
+El editor de proveedor es el de la pantalla anterior (**Editar proveedor**). Cambias **Nombre**, **Teléfono**, **Email**, **Página web** y **Tipo de servicio**, y pulsas **Guardar**. **Quitar de la lista** lo desvincula de esta casa, pero no borra el proveedor.
+
+<Warning>
+  Editar un proveedor cambia sus datos (nombre, teléfono, email, web) en todas
+  las casas donde está asignado. La edición va contra el proveedor
+  (`PUT /v2/admin/properties/providers/:providerId/edit`), no contra su
+  asignación a la casa.
+</Warning>
+
+## Endpoints de vivla-api
+
+| Método | Endpoint | Para qué |
+|--------|----------|----------|
+| `GET` | `/v2/admin/properties/:id` | Ficha completa de la casa |
+| `PUT` | `/v2/admin/properties/:id/edit` | Edición general: características, dirección, web, descripción, acceso, alarma, wifi, parkings, normas, bienvenida, zonas comunes, basura y reciclaje (`hostingInfo.garbageInfo` y `garbageLocationUrl`), email y envíos, IDs de Hostaway y Airbnb, licencia turística, pagos, comunidad y agente CX |
+| `PUT` | `/v2/admin/properties/:id/change-status` | Cambio de estado |
+| `GET` | `/v2/admin/properties/cx-agents` | Lista de agentes CX |
+| `DELETE` | `/v2/admin/properties/parkings/:parkingId/remove` | Borra un parking |
+| `POST` | `/v2/admin/properties/parkings/:parkingId/images/add` | Añade una foto a un parking |
+| `GET` | `/v2/upload-url` | URL firmada para subir fotos y PDFs |
+| `POST` | `/v2/admin/properties/:id/images/add` | Añade una foto al recorrido |
+| `PUT` | `/v2/admin/properties/images/:imageId/edit` | Cambia el título de una foto |
+| `PUT` | `/v2/admin/properties/:id/images/:imageId/set-cover` | Marca una foto como portada |
+| `DELETE` | `/v2/admin/properties/images/:imageId/delete` | Borra una foto, también las del parking. El borrado múltiple la llama una vez por foto, de una en una |
+| `POST` | `/v2/admin/properties/:id/documents/add` | Añade un PDF (`home-guide` o `recommendations-guide`) |
+| `DELETE` | `/v2/admin/properties/documents/:documentId/delete` | Borra un PDF |
+| `GET` | `/v2/admin/users/:userId` | Lee el teléfono y la foto del propietario antes de guardar su código |
+| `PUT` | `/v2/admin/users/:userId/update` | Guarda el código de acceso de un propietario (`accessCodes`) |
+| `GET` | `/v2/admin/properties/:id/hostaway` | Sincronización y última auditoría de Hostaway. Solo si la casa tiene ID de Hostaway |
+| `GET` | `/v2/admin/properties/:id/rental-conditions` | Condiciones de alquiler del anuncio de Hostaway |
+| `PUT` | `/v2/admin/properties/:id/rental-conditions` | Guarda horarios y noches mínimas y máximas |
+| `POST` | `/v2/admin/properties/:id/rental-conditions/fees` | Añade una tasa |
+| `PUT` | `/v2/admin/properties/:id/rental-conditions/fees/:feeId` | Cambia una tasa |
+| `DELETE` | `/v2/admin/properties/:id/rental-conditions/fees/:feeId` | Quita una tasa |
+| `GET` | `/v2/admin/properties/:id/licence` | Ficha de licencia. La cabecera lee de aquí **Licencia de alquiler** |
+| `PUT` | `/v2/admin/properties/:id/licence` | Guarda la ficha de licencia |
+| `GET` | `/v2/admin/properties/:id/listing-content` | Anuncio de la casa. La ficha lo lee al abrirse para marcar la pestaña **Contenido del anuncio**. El resto de endpoints del anuncio están en [Contenido del anuncio](/panel/homes/listing#endpoints-de-vivla-api) |
+| `GET` | `/v2/admin/calendars` | Slots del calendario de la casa (filtro `homes`) |
+| `GET` | `/v2/admin/calendars/:calendarId/seasons` | Colores de las temporadas, si los slots no los traen |
+| `GET` | `/v2/admin/properties/providers` | Catálogo de proveedores |
+| `GET` | `/v2/admin/properties/providers/services` | Tipos de servicio por categoría |
+| `POST` | `/v2/admin/properties/:id/providers/add` | Asigna un proveedor existente o crea uno nuevo en la casa |
+| `PUT` | `/v2/admin/properties/providers/:providerId/edit` | Edita los datos del proveedor |
+| `DELETE` | `/v2/admin/properties/:id/providers/:providerId/remove` | Quita el proveedor de la casa |
+
+Los endpoints de las imágenes de acceso están en [Documento de check-in](/panel/homes/checkin-doc#endpoints-de-vivla-api).
+
+## Código
+
+| Qué | Dónde |
+|-----|-------|
+| Página | `src/pages/HomeRecord` |
+| Componentes de la ficha | `src/features/homes/components/homeRecord/` (`HomeRecordHeader`, `HomeRecordSummary`, `HomeRecordTabs`, `RecordCard`, `RecordEditorDrawer`) |
+| Pestañas | `src/features/homes/components/homeRecord/tabs/` |
+| Editores | `src/features/homes/components/homeRecord/editors/`, con el guardado en `useBlockForm.ts` y `useSaveHome.ts` |
+| Guardado automático | `src/hooks/useAutoSaveForm.ts` |
+| Pestañas y parámetros de la URL | `src/features/homes/constants/homeRecordTabs.ts` |
+| Editores e ids de tarjeta antiguos | `src/features/homes/constants/homeRecordEditors.ts`, `src/features/homes/constants/sectionsCardIds.ts` |
+| Navegación por la URL | `src/features/homes/hooks/useHomeRecordNavigation.ts` |
+| Editores reutilizados | `src/features/homes/components/detailsSections/BasicInformation/editors/GalleryEditor`, `src/features/homes/components/detailsSections/Services/editors/` |
+| Slots del calendario | `src/features/homes/components/detailsSections/Calendar/useHomeCalendarSlots.ts` |
+| Reglas de la ficha (fracciones, datos que faltan, wifi y parking) | `src/core/homes/rules/homeRecord.rules.ts` |
+| Reglas de propietarios y cuentas internas | `src/core/homes/rules/owner.rules.ts` |
+| Reglas de la sincronización y la auditoría | `src/core/homes/rules/hostawayStatus.rules.ts` |
+| Datos de ejemplo (**Canales**, **HubSpot**) | `src/features/homes/mocks/homeRecordMocks.ts` |
+| Límites de subida | `src/lib/dropzone.ts` |
+| Peticiones y queries | `src/features/homes/api/requests/`, `src/features/homes/queries/` |
+| Textos de UI | `src/assets/locales/es/homeRecord.json`, `src/assets/locales/es/homes.json` (editor de fotos y proveedores) |
+
+<Note>
+  `flattenLinkedOwners` ordena a los propietarios por id antes de aplanar los
+  vinculados. La API los devuelve en un orden que cambia cada vez que se
+  actualiza un propietario, así que sin ese orden los campos de códigos se
+  reordenarían tras cada guardado.
+</Note>

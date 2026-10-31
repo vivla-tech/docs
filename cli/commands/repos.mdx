@@ -1,0 +1,91 @@
+---
+title: "vivla repos"
+description: "El catálogo entero: cada repo que la CLI sabe montar, si ya lo tienes clonado y si te lo recomienda. Para ver qué hay antes de elegir."
+---
+
+El catálogo entero: cada repo que la CLI sabe montar, si ya lo tienes clonado y si te lo recomienda. Para ver qué hay antes de elegir.
+
+```bash
+vivla repos
+vivla repos --root ~/code                     # mira los clones en otra carpeta
+vivla repos --json | jq -r '.repos[] | select(.cloned | not) | .key'
+```
+
+```
+✔ docs                     ★ wiki.vivla.com — engineering, product and CX wiki (Cloudflare Worker)
+✔ vivla-tools              ★ Internal platform — backend, identity, tools frontend, spark (Turborepo)
+○ vivla-mobile-app           Owners app (Expo SDK 54)
+
+✔ cloned in /Users/ana/dev   ★ recommended for you
+```
+
+## Opciones
+
+No tiene opciones propias. `--root` (global) cambia dónde busca los clones, y `--manifest` usa otro catálogo.
+
+## Cómo funciona
+
+Carga el catálogo (de `main`, cacheado; ver [updates.md](/cli/updates#el-catálogo-sale-de-main)) y, para cada repo:
+
+- `cloned`: si existe `<root>/<repo>/.git`.
+- `recommended`: si está en tu [perfil](/cli/commands/profile).
+- `dev`: cómo arrancarlo (el `dev` del catálogo o `vivla dev <repo>` si tiene apps).
+- `new`: si apareció en el catálogo desde la última vez que miraste.
+
+En una terminal, al empezar avisa de los repos nuevos y de si hay una versión nueva de la CLI; con `--json` eso va en `updates`. En los dos casos, los repos nuevos quedan marcados como vistos y no vuelven a salir.
+
+## Qué toca
+
+Local, más las lecturas de cualquier comando: el catálogo de `main` vía `gh` e Identity para tu perfil.
+
+## Salida `--json`
+
+```json
+{
+  "type": "repos",
+  "root": "/Users/ana/dev",
+  "repos": [
+    {
+      "key": "vivla-tools",
+      "description": "Internal platform — backend, identity, tools frontend, spark (Turborepo)",
+      "github": "vivla-tech/vivla-tools",
+      "path": "/Users/ana/dev/vivla-tools",
+      "cloned": true,
+      "recommended": true,
+      "stack": ["node", "pnpm", "turborepo", "nestjs", "supabase", "auth0"],
+      "leads": [],
+      "dev": "vivla dev vivla-tools",
+      "apps": [{ "name": "backend", "port": 3001, "secondary": false }],
+      "docs": "https://wiki.vivla.com/repositories",
+      "new": false
+    }
+  ],
+  "updates": {
+    "new_repos": [],
+    "cli": {
+      "kind": "global",
+      "current": "63cd4d8…",
+      "latest": "63cd4d8…",
+      "available": false,
+      "command": "npm i -g github:vivla-tech/vivla-cli"
+    },
+    "manifest_source": "remote"
+  }
+}
+```
+
+`manifest_source` es `flag` (`--manifest`), `local-checkout` (un `npm link`), `remote` (el de `main`) o `bundled` (el de tu instalación, sin red o sin `gh`).
+
+## Exit codes
+
+| Código | Cuándo |
+| ------ | ------ |
+| `0`    | ok     |
+
+## Para agentes (MCP)
+
+`list_repos` con `root` opcional. Devuelve `repos` (lo mismo, con `new`) y `cli_update`. También marca los nuevos como vistos.
+
+## Relacionado
+
+[`profile`](/cli/commands/profile) · [`setup`](/cli/commands/setup) · [Añadir un repo](/cli/manifest#añadir-un-repo) · [Estar al día](/cli/updates)

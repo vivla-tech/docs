@@ -1,0 +1,87 @@
+---
+title: "vivla user"
+description: "Busca a alguien en Vivla Identity por nombre o por email @vivla.com: su equipo, rol, estado y en qué herramientas tiene cuenta. Útil para saber a quién dar acceso o por qué a alguien no le funciona…"
+---
+
+Busca a alguien en Vivla Identity por nombre o por email `@vivla.com`: su equipo, rol, estado y en qué herramientas tiene cuenta. Útil para saber a quién dar acceso o por qué a alguien no le funciona una herramienta. Necesita perfil hr o admin en Equipos.
+
+```bash
+vivla user ana                    # por nombre (o parte de él)
+vivla user ana@vivla.com          # por email exacto
+vivla user "ana pérez" --json
+```
+
+## Uso
+
+`vivla user <nombre o email>`
+
+| Argumento        | Qué es                                            |
+| ---------------- | ------------------------------------------------- |
+| `nombre o email` | parte del nombre, o el email corporativo completo |
+
+## Cómo funciona
+
+- Pide a Identity `GET /api/people?search=<texto>&limit=25` con tu sesión de `vivla login`. Identity busca por nombre, así que como mucho devuelve 25 personas.
+- **Con un email**, busca por la parte de antes de la `@` (con `.`, `_` y `-` como espacios: `ana.perez` → `ana perez`) y se queda solo con quien tenga exactamente ese email corporativo.
+- Identity solo responde a quien tenga perfil `hr` o `admin` en Equipos; al resto le da 403.
+
+En pantalla, una línea por persona y debajo sus herramientas (✔ activa, ○ inactiva):
+
+```
+Ana Pérez <ana@vivla.com>  Tech · Growth Engineer · Activa
+   ✔ tools  ✔ github  ○ hubspot
+```
+
+## Qué toca
+
+Lee. No cambia nada en Identity.
+
+## Salida `--json`
+
+```json
+{
+  "type": "user",
+  "people": [
+    {
+      "id": "6f1c…",
+      "name": "Ana Pérez",
+      "corporateEmail": "ana@vivla.com",
+      "teamName": "Tech",
+      "roleName": "Growth Engineer",
+      "state": "active",
+      "stateLabel": "Activa",
+      "apps": [
+        { "appKey": "tools", "active": true },
+        { "appKey": "hubspot", "active": false }
+      ]
+    }
+  ]
+}
+```
+
+Sin resultados, `people` viene vacío. Si Identity dice que no:
+
+```json
+{
+  "type": "user",
+  "ok": false,
+  "message": "Identity says no: looking people up needs an Equipos hr or admin profile"
+}
+```
+
+## Exit codes
+
+| Código | Cuándo                                                         |
+| ------ | -------------------------------------------------------------- |
+| `0`    | búsqueda hecha, aunque no haya nadie                           |
+| `1`    | sin perfil hr o admin en Equipos (403), o Identity no responde |
+| `2`    | sin sesión: `vivla login`                                      |
+
+## Para agentes (MCP)
+
+No hay tool. Un agente puede lanzar `vivla user <nombre> --json`; responde con los permisos de la persona que tiene la sesión.
+
+## Relacionado
+
+- [Identity](/cli/identity): la sesión, `/api/me` y de dónde salen tus repos.
+- Ver y dar roles en las herramientas: [`vivla access`](/cli/commands/access), o en tools, Equipos → la ficha de la persona → Roles en Tools.

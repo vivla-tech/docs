@@ -1,0 +1,97 @@
+---
+title: "vivla login"
+description: "Inicia sesión con tu cuenta @vivla.com en Auth0 (tenant vivlapro). Con esa sesión la CLI sabe quién eres en Vivla Identity, qué repos te tocan y con qué nombre firmar tus commits."
+---
+
+Inicia sesión con tu cuenta `@vivla.com` en Auth0 (tenant `vivlapro`). Con esa sesión la CLI sabe quién eres en Vivla Identity, qué repos te tocan y con qué nombre firmar tus commits.
+
+```bash
+vivla login                    # device code: abre la URL y confirma el código
+vivla login --browser          # navegador + callback en localhost
+vivla login --no-wait --json   # agentes: URL y código, y sale
+vivla login --poll --json      # agentes: espera a que la persona confirme
+vivla login --poll --no-wait   # mira una sola vez si ya está
+```
+
+## Opciones
+
+| Opción      | Por defecto | Qué hace                                                                      |
+| ----------- | ----------- | ----------------------------------------------------------------------------- |
+| `--browser` |             | flujo de navegador (Authorization Code + PKCE) en vez de device code          |
+| `--no-wait` |             | imprime URL y código y sale con `exit 4`; con `--poll`, consulta una sola vez |
+| `--poll`    |             | sigue un login empezado antes (por otro proceso o con `--no-wait`)            |
+
+## Cómo funciona
+
+**Device code** (por defecto). Pide un código a `https://vivlapro.eu.auth0.com/oauth/device/code` con `openid profile email offline_access` y la audiencia de Identity. Te enseña la URL y el código, y en una terminal intenta abrir la URL. Puedes abrirla en cualquier otro dispositivo, así que sirve también en un workspace remoto. Mientras confirmas, consulta `/oauth/token` cada pocos segundos (más despacio si Auth0 lo pide) hasta que confirmas, lo rechazas o el código caduca (lo que diga Auth0, normalmente 15 minutos).
+
+El login a medias se guarda en `~/.vivla/cli/pending-login.json` (permisos `0600`). Por eso un proceso puede empezarlo (`--no-wait`) y otro terminarlo (`--poll`).
+
+**Navegador** (`--browser`). Abre `/authorize` con PKCE y escucha la vuelta en `http://localhost:9876/callback` durante 3 minutos. No sirve en un workspace remoto: el navegador no llega a ese `localhost`.
+
+**Dónde quedan los tokens.**
+
+- **macOS:** cifrados con AES-256-GCM en `~/.vivla/cli/credentials.enc`, con la clave en el llavero (servicio `vivla-welcome`).
+- **Linux, o con `VIVLA_CLI_PLAIN_CREDENTIALS=1`:** en `~/.vivla/cli/credentials.json` con permisos `0600`.
+
+El access token se renueva solo con el refresh token cuando le queda menos de un minuto. Si eso falla, toca volver a hacer login. `VIVLA_TOKEN` se salta todo esto: la CLI usa ese token tal cual (CI, o un agente al que le pasan uno).
+
+Al terminar pregunta a Identity quién eres (como [`whoami`](/cli/commands/whoami)).
+
+Variables para apuntar a otro Auth0: `VIVLA_AUTH0_DOMAIN`, `VIVLA_AUTH0_CLIENT_ID`, `VIVLA_IDENTITY_AUDIENCE`, `VIVLA_AUTH0_ORGANIZATION`. Más en [identity.md](/cli/identity).
+
+## Qué toca
+
+Local: escribe los tokens en `~/.vivla/cli/` (y en macOS, la clave en el llavero). Habla con Auth0 y, al acabar, lee de Identity.
+
+## Salida `--json`
+
+Al empezar (con `--no-wait` sale aquí):
+
+```json
+{
+  "type": "login",
+  "status": "pending",
+  "userCode": "KQBB-VQLV",
+  "verificationUri": "https://vivlapro.eu.auth0.com/activate",
+  "verificationUriComplete": "https://vivlapro.eu.auth0.com/activate?user_code=KQBB-VQLV",
+  "expiresAt": 1792745892000,
+  "interval": 5,
+  "message": "Open https://vivlapro.eu.auth0.com/activate?user_code=KQBB-VQLV and confirm code KQBB-VQLV"
+}
+```
+
+Sin `--no-wait`, después llega una segunda línea con el resultado:
+
+```json
+{
+  "type": "login",
+  "status": "done",
+  "identity": {
+    "sub": "auth0|…",
+    "email": "ana@vivla.com",
+    "name": "Ana Pérez",
+    "team": "tech",
+    "source": "identity-api"
+  }
+}
+```
+
+`identity` tiene la forma de [`whoami`](/cli/commands/whoami#salida---json). Con `--browser` el resultado es `{ "type": "login", "status": "done", "expiresAt": 1792749492000 }`. Si caduca o se rechaza: `{ "type": "login", "status": "expired" | "denied" | "none", "message": "…" }` (`none` es que no había ningún login a medias).
+
+## Exit codes
+
+| Código | Cuándo                                                                                              |
+| ------ | --------------------------------------------------------------------------------------------------- |
+| `0`    | sesión iniciada                                                                                     |
+| `1`    | Auth0 rechazó la petición (p. ej. la app no tiene el grant de device code) o el navegador no volvió |
+| `2`    | el código caducó, se rechazó, o `--poll` sin ningún login a medias                                  |
+| `4`    | `--no-wait`, o `--poll --no-wait` cuando la persona aún no ha confirmado                            |
+
+## Para agentes (MCP)
+
+`login_start` (sin argumentos) devuelve el código y la URL, con un `message` para enseñárselo a la persona. Después, `login_poll` con `wait_seconds` (0 a 120, por defecto 30) hace long-poll hasta `done`, o devuelve `pending` con el `userCode`.
+
+## Relacionado
+
+[`whoami`](/cli/commands/whoami) · [`logout`](/cli/commands/logout) · [Identity](/cli/identity) · [Login desde un agente](/cli/agents#login-desde-un-agente)

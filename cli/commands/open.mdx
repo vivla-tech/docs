@@ -1,0 +1,82 @@
+---
+title: "vivla open"
+description: "Abre en el navegador la página de un repo que necesitas en ese momento: GitHub, sus PRs, sus Actions, su documentación, el dashboard de la plataforma, su Supabase o la URL de un entorno. Con --json…"
+---
+
+Abre en el navegador la página de un repo que necesitas en ese momento: GitHub, sus PRs, sus Actions, su documentación, el dashboard de la plataforma, su Supabase o la URL de un entorno. Con `--json` solo devuelve la URL, para que un agente se la pase a una persona.
+
+```bash
+vivla open                               # GitHub del repo en el que estás
+vivla open vivla-tools prs               # sus pull requests
+vivla open vivla-tools actions           # sus GitHub Actions
+vivla open vivla-tools dashboard         # Railway del primer deploy del catálogo
+vivla open vivla-tools frontend          # la URL del frontend (producción, el primero listado)
+vivla open vivla-tools frontend --env develop   # https://tools.vivla.dev
+vivla open vivla-tools develop           # el primer deploy de develop: https://api.tools.vivla.dev
+vivla open vivla-tools db --env prod     # el proyecto de Supabase de producción
+vivla open vivla-tools dashboard --json  # solo la URL
+```
+
+## Opciones
+
+| Opción        | Por defecto             | Qué hace                                                                 |
+| ------------- | ----------------------- | ------------------------------------------------------------------------ |
+| `[repo]`      | el repo en el que estás | de qué repo                                                              |
+| `[target]`    | `github`                | qué abrir (ver abajo)                                                    |
+| `--env <env>` |                         | el entorno del deploy, del dashboard o de la base de datos (`db`: `dev`) |
+
+Dentro de un clon, `vivla open` sin nada abre su GitHub y `vivla open dashboard` (una sola palabra que no es un repo del catálogo) abre ese destino del repo en el que estás. Con dos palabras, la primera es el repo.
+
+## Cómo funciona
+
+| `target`         | Abre                                                                                               |
+| ---------------- | -------------------------------------------------------------------------------------------------- |
+| `github`, `repo` | `https://github.com/<owner>/<repo>`                                                                |
+| `prs`            | sus pull requests                                                                                  |
+| `actions`        | sus GitHub Actions                                                                                 |
+| `docs`           | el `docs` del repo en el catálogo (la wiki, un README…)                                            |
+| `dashboard`      | el proyecto en Railway (`railway.com/project/<id>`) o en Vercel (`vercel.com/<equipo>/<proyecto>`) |
+| `db`             | el proyecto de Supabase de `--env` (o `dev`). El editor SQL es [`vivla db open`](/cli/commands/db)            |
+| un servicio      | la `url` de ese deploy (`--env` elige el entorno; si no, el primero listado)                       |
+| un entorno       | la `url` del primer deploy de ese entorno                                                          |
+
+- **`dashboard`** usa el primer deploy de `--env` o, sin `--env`, el primero del catálogo. En Railway el dashboard es del proyecto entero, el mismo para todos sus entornos. Los deploys de Cloudflare y `other` no tienen.
+- **Un servicio o un entorno** abre la `url` que tiene en el catálogo. Un deploy sin `url` (algunos de Railway solo tienen dominio de Railway) no se puede abrir así: mira su URL en [`vivla status`](/cli/commands/status).
+- Si el destino no existe, el error lista los que sí: `github, repo, prs, actions, docs, dashboard, db` (los que tiene ese repo), sus servicios y sus entornos.
+
+Para abrir el navegador usa `open` en macOS y, en Linux, `$BROWSER` o `xdg-open` si hay pantalla. Si no puede (un workspace remoto, por ejemplo), imprime la URL para que la abras tú.
+
+## Qué toca
+
+Nada fuera de tu máquina: no consulta ninguna plataforma, solo arma la URL con lo que dice el catálogo.
+
+## Salida `--json`
+
+```json
+{
+  "type": "open",
+  "repo": "vivla-tools",
+  "target": "dashboard",
+  "url": "https://railway.com/project/5581236a-5220-4726-a636-7176bccedb72"
+}
+```
+
+Con `--json` no se abre nada.
+
+## Exit codes
+
+| Código | Cuándo                                              |
+| ------ | --------------------------------------------------- |
+| `0`    | había URL (se abrió, o se imprimió)                 |
+| `64`   | repo desconocido, o nada que abrir para ese destino |
+
+## Para agentes (MCP)
+
+No hay tool. Un agente usa `vivla open <repo> <target> --json` y le pasa la URL a la persona.
+
+## Relacionado
+
+- [`vivla status`](/cli/commands/status) y [`vivla logs`](/cli/commands/logs) traen a la terminal lo que mirarías en el dashboard.
+- [`vivla db`](/cli/commands/db) para el editor SQL de Supabase (`vivla db open`).
+- Lo que necesita el catálogo: `docs` del repo, `supabase` por entorno y `deploys` con `url`, `platform`, `project` y `scope` (Vercel). Ver [manifest.md](/cli/manifest#día-a-día).
+- Guía: [devtools.md](/cli/devtools#vivla-open).

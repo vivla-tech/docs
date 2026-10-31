@@ -1,0 +1,140 @@
+---
+title: "vivla access"
+description: "Qué herramientas de tools puede abrir una persona y con qué rol, y dar o quitar uno. Los roles viven en Auth0 (appmetadata.tools), que es lo que cada herramienta lee del token (el claim…"
+---
+
+Qué herramientas de tools puede abrir una persona y con qué rol, y dar o quitar uno. Los roles viven en Auth0 (`app_metadata.tools`), que es lo que cada herramienta lee del token (el claim `https://auth.vivla.com/tools`). La CLI los lee y los escribe a través de Vivla Identity con tu propia sesión: sin Management API, sin dashboard de Auth0 y sin tocar `app_metadata` a mano. Necesita perfil hr o admin en Equipos.
+
+```bash
+vivla access ana@vivla.com                               # sus roles, herramienta por herramienta
+vivla access ana@vivla.com secondary-market              # solo esa (exit 1 si no la tiene)
+vivla access ana@vivla.com secondary-market editor       # dar o cambiar el rol
+vivla access ana@vivla.com secondary-market --remove     # quitársela
+vivla access ana@vivla.com equipos hr                    # el perfil de Equipos (solo admin)
+vivla access ana@vivla.com dev admin --yes --json        # desde un script o un agente, ya aprobado
+```
+
+## Uso
+
+`vivla access <persona> [herramienta] [rol] [--remove]`
+
+| Argumento     | Qué es                                                                                     |
+| ------------- | ------------------------------------------------------------------------------------------ |
+| `persona`     | el email corporativo, o parte del nombre si solo encaja con una persona                    |
+| `herramienta` | `secondary-market` o `tool-secondary-market`: da igual, se normaliza al id con `tool-`     |
+| `rol`         | `admin`, `editor` o `viewer`. Para `equipos`: `companero`, `manager`, `hr` o `admin`       |
+| `--remove`    | quita la herramienta. En `equipos` deja el perfil `companero`, que es lo que vale no tener |
+
+Sin herramienta enseña todas. Con herramienta y sin rol, solo esa. Con herramienta y rol, o con `--remove`, escribe.
+
+## Cómo funciona
+
+- Busca a la persona igual que [`vivla user`](/cli/commands/user) (`GET /api/people?search=`). Si encajan varias, pide el email; si ninguna, lo dice.
+- Pide su ficha, `GET /api/people/:id`, que trae `toolRoles` leído en vivo de Auth0, y si tiene cuenta de Auth0 enlazada (`accounts.auth0`). Sin cuenta no hay dónde poner roles: hay que vincularla antes en su ficha de Equipos.
+- Para escribir, `PATCH /api/people/:id/tool-roles` con `{ toolId, role }` (`role: null` para quitar). Identity escribe `app_metadata.tools[toolId] = { role }` en Auth0 y apunta `tool_role.set` o `tool_role.removed` en el historial de la persona, así que queda quién lo cambió y cuándo.
+- `tool-equipos` no es un rol de herramienta sino el perfil de permisos de Equipos. Va por `POST /api/people/:id/profile-role` con `{ profile }` y solo puede un admin de Equipos.
+- Antes de escribir pregunta, con el antes y el después. Sin TTY, con `--json` o con `--no-interactive` hace falta `--yes`; si no, `exit 4` y el comando completo en `next_actions`.
+- El cambio llega a cada herramienta con el **siguiente token** de la persona: al entrar de nuevo o cuando se renueve el que tiene. La pestaña que tenga abierta no se entera sola.
+
+En pantalla:
+
+```
+Ana Pérez <ana@vivla.com>  Tech · Growth Engineer · active
+  tool-dev                 admin
+  tool-equipos             hr
+  tool-secondary-market    editor
+```
+
+Y al escribir:
+
+```
+Set tool-secondary-market = editor for Ana Pérez <ana@vivla.com> in Auth0 (vivlapro.eu.auth0.com)? It reaches every tool with their next token. [y/N] y
+✔ Ana Pérez <ana@vivla.com> · tool-secondary-market: viewer → editor
+  tool-dev                 admin
+  tool-equipos             hr
+  tool-secondary-market    editor
+```
+
+## Qué toca
+
+Sin rol ni `--remove`, lee. Con ellos **escribe en Auth0**, en el tenant que use esa Identity (la de producción, `vivlapro`, es el Auth0 real de todas las herramientas: no hay uno por entorno). Por eso pide confirmación y, para agentes, `--yes`.
+
+## Salida `--json`
+
+Leyendo:
+
+```json
+{
+  "type": "access",
+  "person": {
+    "id": "6f1c…",
+    "name": "Ana Pérez",
+    "corporateEmail": "ana@vivla.com",
+    "teamName": "Tech",
+    "roleName": "Growth Engineer",
+    "state": "active"
+  },
+  "auth0": true,
+  "toolRoles": {
+    "tool-dev": { "role": "admin" },
+    "tool-equipos": { "role": "hr" },
+    "tool-secondary-market": { "role": "editor" }
+  }
+}
+```
+
+Escribiendo, lo mismo más qué ha cambiado:
+
+```json
+{
+  "type": "access",
+  "action": "set",
+  "toolId": "tool-secondary-market",
+  "before": "viewer",
+  "after": "editor",
+  "person": { "…": "…" },
+  "auth0": true,
+  "toolRoles": { "…": "…" }
+}
+```
+
+`action` es `set` o `remove`; `before` y `after` son el rol o `null`. Sin `--yes` donde hace falta:
+
+```json
+{
+  "type": "result",
+  "ok": false,
+  "status": "blocked",
+  "exitCode": 4,
+  "message": "Set tool-secondary-market = editor for Ana Pérez <ana@vivla.com> in Auth0 (vivlapro.eu.auth0.com)? It reaches every tool with their next token. Needs confirmation.",
+  "next_actions": [
+    {
+      "kind": "human",
+      "message": "Set tool-secondary-market = editor for …?",
+      "command": "vivla access ana@vivla.com tool-secondary-market editor --yes"
+    }
+  ]
+}
+```
+
+Si Identity dice que no, `{ "type": "access", "ok": false, "message": "…" }` con su motivo tal cual (por ejemplo, que la persona no tiene cuenta de Auth0 enlazada).
+
+## Exit codes
+
+| Código | Cuándo                                                                                              |
+| ------ | --------------------------------------------------------------------------------------------------- |
+| `0`    | leído, o cambiado                                                                                   |
+| `1`    | preguntando por una herramienta que no tiene; Identity dice que no (403, sin cuenta…) o no responde |
+| `2`    | sin sesión: `vivla login`                                                                           |
+| `4`    | había que escribir y faltaba `--yes` (sin TTY, `--json` o `--no-interactive`)                       |
+| `64`   | la persona encaja con varias (usa el email), o la herramienta o el rol no valen                     |
+
+## Para agentes (MCP)
+
+La tool `access` (`person`) devuelve lo mismo que la lectura. Es de solo lectura: dar o quitar un rol se hace por la CLI, `vivla access <email> <herramienta> <rol> --yes` o `… --remove --yes`, cuando una persona lo ha aprobado. La skill `vivla-cli` lo explica así.
+
+## Relacionado
+
+- [`user`](/cli/commands/user): buscar a alguien y ver en qué herramientas tiene cuenta.
+- [Identity](/cli/identity#roles-en-las-herramientas): de dónde salen los roles y cómo llegan al token.
+- En tools, lo mismo con clics: Equipos → la ficha de la persona → Roles en Tools.

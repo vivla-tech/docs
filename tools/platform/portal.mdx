@@ -1,0 +1,190 @@
+---
+title: "Portal de propietarios"
+description: "La puerta de entrada única de los propietarios VIVLA (portal.vivla.com): qué es, cómo añadir un módulo, roles y reglas para construir encima sin preguntar."
+---
+
+# Portal de propietarios
+
+El portal es la puerta de entrada única del propietario VIVLA. Vive en `portal.vivla.com`. Tras el login, muestra un menú lateral y un índice de tarjetas. Cada tarjeta abre un módulo. Un módulo lo construye otro proyecto. El portal es la capa de plataforma: login, sesión, roles, el registro de módulos y el dominio.
+
+Esta página es la base para construir encima del portal sin preguntar. Léela entera antes de añadir nada.
+
+Documentos relacionados:
+
+- Identity, el cerebro de «quién es» (id, etapa, casas y el handoff genérico): [`platform/identity`](/platform/identity).
+- Referencia técnica del registro de módulos: `apps/portal/modules/README.md`.
+- Cómo correr y configurar la app: `apps/portal/README.md`.
+- Skill para agentes: `.claude/skills/portal-module/SKILL.md`.
+
+## Qué es
+
+- **Una sola puerta.** El propietario entra por `portal.vivla.com` y desde ahí llega a todo.
+- **Login en Auth0.** El portal usa la aplicación Auth0 «VIVLA Portal» en el tenant `vivlapro`, organización `vivla-clients`. La pantalla de login es la Universal Login en el dominio propio `auth.vivla.com`.
+- **Misma contraseña que la app.** La conexión `firebase-clients-migration` verifica la contraseña contra Firebase. El propietario entra en el portal con la misma contraseña que usa en la app móvil. Detalle: `docs/internal/identity/auth0-firebase-migration.md`.
+- **El portal no es el dueño del contenido.** El portal dibuja el marco (shell) y el índice. El contenido de cada tarjeta pertenece a su proyecto.
+
+## Cómo añadir un módulo
+
+Un módulo es una carpeta bajo `apps/portal/modules/`. Un módulo añade una tarjeta en Inicio, un enlace en el menú, páginas privadas y landings públicas. **No tocas el shell para añadir un módulo.**
+
+Pasos (la referencia completa está en `apps/portal/modules/README.md`):
+
+1. Crea la carpeta `modules/<tu-id>/`.
+2. Escribe `manifest.ts` con `defineModule({...})`.
+3. Pon tus páginas privadas y tus landings públicas como componentes en tu carpeta.
+4. Añade un `import` y una entrada al array en `modules/registry.ts`.
+5. Enlaza tus páginas con `/m/<path>` (privado) y `/p/<path>` (público).
+
+Cada `manifest` declara cuatro cosas opcionales y una obligatoria:
+
+| Campo | Qué hace |
+| -- | -- |
+| `card` | Una tarjeta en el índice de Inicio. |
+| `nav` | Un enlace en el menú lateral, agrupado por `section`. |
+| `routes` | Páginas privadas. El guard de sesión protege cada `path`. Se sirven en `/m/<path>`. |
+| `public` | Landings públicas. Sin sesión. Se sirven en `/p/<path>`. El módulo valida su propio token. |
+| `visibleWhen(me)` | **Obligatorio.** Decide quién ve la tarjeta, el enlace y las rutas privadas. |
+
+`visibleWhen(me)` es una sola función. Controla tres cosas a la vez: el enlace, la tarjeta y el acceso directo a las rutas privadas. Un módulo oculto no tiene enlace, no tiene tarjeta y responde 404 si alguien escribe su `/m/<path>` a mano. Las landings públicas (`/p/<path>`) no pasan por este control.
+
+## Tarjetas externas (apps que viven fuera)
+
+Algunas apps no viven dentro de `apps/portal`. Son otro frontend VIVLA. Ejemplos: el mercado secundario (`vivla-exchange`, en `exchange.vivla.com`) y un futuro módulo de alquileres. El portal las muestra como **módulos externos**.
+
+Un módulo externo es un módulo normal con tres diferencias: `nav.href` y `card.href` son una URL absoluta, llevan `external: true`, y no tiene `routes`. El enlace externo abre en la **misma** pestaña (no en una nueva). No creas rutas `/m/<path>` para un módulo externo; `/m/<lo-que-sea>` responde 404 a propósito, porque las páginas viven en la otra app.
+
+```ts
+import { defineModule } from '../define'
+
+export const mercadoSecundario = defineModule({
+  id: 'secondary-market',
+  owner: 'secondary-market',
+  nav: {
+    section: 'Club VIVLA',
+    label: 'Mercado secundario',
+    href: 'https://exchange.vivla.com',
+    external: true,
+    order: 30,
+  },
+  card: {
+    title: 'Mercado secundario',
+    href: 'https://exchange.vivla.com',
+    external: true,
+    order: 30,
+  },
+  visibleWhen: (me) => me.roles.owner,
+})
+```
+
+**SSO con la app externa.** La otra app usa su propia aplicación Auth0, en el mismo tenant (`vivlapro`), en el dominio `auth.vivla.com`, organización `vivla-clients` (`org_3fp2WvdcVAJ8qcPt`), conexión `firebase-clients-migration`. La sesión del portal ya vive en `auth.vivla.com`, así que el propietario llega a la otra app ya con sesión iniciada, sin volver a escribir la contraseña (añade `prompt=none` si lo quieres explícito).
+
+El proyecto del portal crea la aplicación Auth0 para la otra app. Mándale las URLs de callback y de logout. **Nunca compartas el client secret del portal**; la otra app tiene el suyo.
+
+## Roles
+
+Los roles son aditivos. Se derivan de datos, no se escriben «a mano». El token solo lleva el `person_id` y los claims que la Action calcula.
+
+La cadena, de los datos al módulo:
+
+1. **Datos de Tools.** El origen son las tablas de Tools: `fraction_owners` y `usage_rights` (modelo de propietarios), y el espejo de chat (`user_properties`, `users`) como respaldo.
+2. **identity — login-claims.** El servicio de identidad resuelve, para un cliente que entra por la organización `vivla-clients`, quién es (`identity_links.id` → `person_id`) y qué propiedades ve con qué rol (`owner` / `co_holder` / `guest` / `visitor`). Código: `apps/identity/src/clients-login-claims/`.
+3. **Auth0 — claims.** La Action de post-login copia esos datos al ID token como claims con namespace (incluida la etapa, `stage`). Se calculan en el login y se refrescan en el intercambio de refresh-token.
+4. **portal — sesión + getMe.** La sesión (`apps/portal/app/lib/session.ts`) resuelve las casas y la etapa **en vivo** desde `GET /me` de Identity (por person id en sesiones Auth0, por session token en las de handoff), con caché corta — así una venta o una baja se nota en minutos, no en el siguiente login. `getMe()` (`apps/portal/app/lib/me.ts`) construye el objeto `Me` a partir de esa sesión. Si Identity no responde, el portal muestra «No hemos podido cargar tus casas» en vez de un portal vacío.
+5. **módulo — visibleWhen.** Cada `manifest` usa `visibleWhen(me)` para decidir qué se ve.
+
+`Me` (`apps/portal/modules/types.ts`) tiene esta forma:
+
+```ts
+type Me = { personId: string; roles: Roles; rawRoles: OwnerRole[]; properties: PortalProperty[] }
+type Roles = { owner: boolean; onboarding: boolean; club: boolean; subscriber: boolean; guest: boolean }
+type OwnerRole = 'owner' | 'co_holder' | 'guest' | 'visitor'
+```
+
+Escribe tu `visibleWhen` contra `roles` — es el contrato grueso y mapeado. Usa `rawRoles` (la lista sin mapear que llega del claim) solo si `roles` no te da lo que necesitas.
+
+Mapeo actual en `getMe`:
+
+- `owner` o `co_holder` en `rawRoles` → `roles.owner = true` y `roles.club = true` (en v1 todo propietario es también club).
+- `onboarding`, `subscriber`, `guest` quedan `false` en v1: todavía no existe una fuente de producción para ellos. Siguen en el contrato para que tu `visibleWhen` los use cuando llegue la fuente, sin tocar el shell.
+- `guest` y `visitor` viven solo en `rawRoles`; ninguno activa un flag de `roles`.
+
+**Importante:** los roles se sellan en los claims en el login. Un cambio de rol se ve en el **siguiente login** de la persona, no en vivo.
+
+### Slots de la home (v2)
+
+Inicio coloca cada tarjeta según `card.slot`:
+
+- **`'hero'`** — la tarjeta central grande (la bienvenida de onboarding). Puede llevar campos ricos: `statusPill` (badge), `who` (línea de nombre), `tiles` (reuniones `{ label, title, value, done? }[]`) y `cta` (texto del botón).
+- **`'side'`** — la pila vertical de la derecha (Mi casa / Mis casas, Alquileres, Mercado secundario). En móvil se apilan bajo el hero.
+- **`'row'`** — una tarjeta en una sección con título (p. ej. «Más de Club VIVLA»); las que comparten `rowSection.title` van bajo una cabecera.
+
+Sin `slot` la tarjeta es `'row'` (retrocompatible). **Regla del centro:** el hero es la tarjeta `hero` visible; si no hay, se promueve la primera `side` (Mi casa); si tampoco, las filas lideran la página. La lógica vive en `apps/portal/modules/home-layout.ts`.
+
+### Secciones con nombre
+
+Entradas de `SECTION_ORDER` (`apps/portal/modules/selectors.ts`) son secciones reservadas del menú para módulos de otros proyectos:
+
+- `'Vuestra casa'` — slot del proyecto de onboarding (Bienvenida, Mi casa).
+- `'Explora'` — herramientas del propietario (Alquileres, Mercado secundario).
+- `'Club VIVLA'` — slot del proyecto de Social Club.
+
+Dentro de una sección, `order` en `nav`/`card` ordena de menor a mayor (los empates se rompen por orden alfabético, `localeCompare('es')`).
+
+### Cómo añadir un rol nuevo de principio a fin
+
+Un rol nuevo toca cuatro sitios. Hazlos en orden:
+
+1. **Regla en identity.** Resuelve el rol a partir de un dato de Tools en `apps/identity/src/clients-login-claims/login-claims.service.ts`, y haz que la Action de post-login lo copie al token (`apps/identity/src/clients-login-claims/` + `apps/identity/src/auth0-actions/`).
+2. **Tipo `Me`.** Si el rol no existe aún, añade el campo al type `Roles` en `apps/portal/modules/types.ts`. Los roles `onboarding`, `subscriber` y `guest` ya están en el contrato: solo les falta una fuente.
+3. **Mapeo en getMe.** Mapea el claim al campo de `Me.roles` en `apps/portal/app/lib/me.ts`.
+4. **Tests.** Añade un test en identity (`login-claims.service.spec.ts`) y un test del portal para `getMe` y para el `visibleWhen` que use el rol.
+
+No inventes un rol en el cliente. Un rol siempre nace de datos en identity.
+
+### Barra de vista previa de rol (interna)
+
+Herramienta **interna** para jugar con el portal como distintos tipos de propietario, sin tener sus datos. No es UI de propietario.
+
+- **Qué hace.** Una barra fija abajo (estilo `.mockbar` del mockup) cambia el shell entre presets: **Real** (sin override) · **Sin rol** · **Nuevo propietario** · **Propietario con casa** · **Propietario + club**. En móvil se colapsa en una pastilla que se expande.
+- **Gate.** Flag de PostHog `portal-role-preview` (persona con `email` que acaba en `@vivla.com`), evaluado **en servidor** con `posthog-node` (`distinct_id` = `personId` de la sesión, `personProperties { email }`). Flag apagado, PostHog inalcanzable o sin `NEXT_PUBLIC_POSTHOG_KEY` → no hay barra ni override. La decisión se cachea por request.
+- **Override.** Cookie `portal_role_preview` (httpOnly, sameSite=lax), puesta por un server action que valida el preset. `getMe()` aplica el preset **solo** si el flag está encendido para el usuario real.
+- **Seguridad.** El `personId` **sigue siendo el real**: el preview solo cambia qué muestra el shell (roles/propiedades), nunca da acceso a los datos reales de otra persona. Un módulo que lea datos por `personId` siempre ve los del usuario real.
+- **Presets.** Viven en un solo archivo (`apps/portal/app/lib/role-preview-presets.ts`) — punto de extensión para que otros módulos añadan estados (añade al array, deja `real` primero).
+- Código: `apps/portal/app/lib/role-preview.ts` (gate + resolución), `role-preview-presets.ts`, `app/components/role-preview-bar.tsx`, `app/actions/role-preview.ts`.
+
+## Contrato app → portal (handoff)
+
+La app móvil abre el portal con una sesión ya iniciada, sin pasar por Auth0. **El contrato de la app no cambia**: la app llama a `POST /api/handoff` con su token de Firebase en la cabecera `Authorization` y `{ returnTo }`, y recibe una URL con un código de un solo uso que abre en el navegador del sistema.
+
+Por debajo, ese handoff ahora es el **handoff genérico de Identity** (ID-2), no un mecanismo propio del portal: `POST /api/handoff` reenvía el token a Identity (que lo verifica y resuelve la persona), `GET /handoff` canjea el código en Identity con el secreto del portal, y la cookie de sesión del portal guarda el **session token opaco de Identity**. Las casas salen de `GET /me` de Identity, en vivo. El portal es el primer consumidor del mismo contrato que usarán el mercado secundario, los alquileres y «mi casa».
+
+El contrato del handoff (issue / redeem / me / revoke, el registro de webs, la etapa, y el camino de M3 / Native-to-Web SSO) está en [`platform/identity`](/platform/identity). Las variables del portal (`IDENTITY_BASE_URL`, `PORTAL_IDENTITY_APP_SECRET`) y los pasos de operador están en **`apps/portal/README.md`** (sección «App → portal»).
+
+## Regla mobile-first
+
+Cada módulo **debe** funcionar a 390 px de ancho. El propietario entra casi siempre desde el móvil.
+
+- El shell tiene una barra de pestañas inferior en móvil.
+- Diseña la tarjeta, la página privada y la landing para móvil primero.
+- Prueba a 390 px antes de publicar.
+
+## Cómo probar
+
+- **Cuenta de prueba.** Usa una cuenta de propietario de prueba en el preview. Entra con su contraseña de Firebase (la misma que en la app).
+- **`PORTAL_DEV_SESSION=1`.** En local, sin Auth0, ves las páginas privadas con una sesión de desarrollo. Doble candado: solo fuera de producción y con la variable puesta. Ver `apps/portal/.env.example`.
+- **`PORTAL_SHOW_EXAMPLE=1`.** Muestra el módulo de ejemplo (`modules/example/`) en local. En producción la variable no está, así que `/m/example` y `/p/example` responden 404.
+
+## De quién es cada cosa
+
+- **El shell es del proyecto del portal.** Nadie más edita `apps/portal/app/`, los dos catch-all (`app/(private)/m/[...slug]` y `app/(public)/p/[...slug]`), ni la carpeta de otro módulo.
+- **Cada módulo es de su proyecto.** El proyecto dueño edita solo su carpeta `modules/<id>/` y su línea en `modules/registry.ts`.
+
+## Plan: absorber Home Excellence como módulo
+
+`apps/home-excellence` es hoy una app Next.js aparte, abierta por `hid`. El plan es traerla al portal como un módulo más. Cuando ocurra:
+
+- Home Excellence se registra como un `manifest` bajo `apps/portal/modules/`.
+- Su contenido pasa a servirse en `/m/<path>` tras el guard de sesión, en vez de por `hid`.
+- Reutiliza el login y los roles del portal, así que deja de depender de un enlace con `hid`.
+
+Hasta entonces, Home Excellence sigue como app aparte. El portal puede enlazarla como tarjeta externa mientras tanto.

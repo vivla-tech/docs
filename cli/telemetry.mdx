@@ -1,0 +1,69 @@
+---
+title: "Telemetría"
+description: "Para saber qué pasos del setup fallan en máquinas de verdad (el CI nocturno solo ve un Linux limpio) y cuánto tarda alguien nuevo en abrir su primer PR. La CLI puede mandar dos eventos a PostHog.…"
+---
+
+Para saber qué pasos del setup fallan en máquinas de verdad (el CI nocturno solo ve un Linux limpio) y cuánto tarda alguien nuevo en abrir su primer PR. La CLI puede mandar dos eventos a PostHog. **Viene apagada**: no manda nada hasta que alguien la configura en el catálogo, y cada persona la puede apagar en su máquina.
+
+## Encenderla y apagarla
+
+**Encendida** solo si `manifest/machine.yaml` tiene un bloque `telemetry`:
+
+```yaml
+telemetry:
+  host: https://eu.i.posthog.com # la región del proyecto (eu o us)
+  key: phc_… # la Project API key del proyecto: la pública, la de capturar eventos
+```
+
+`key` es la clave pública de captura del proyecto (`phc_…`), la que va en cualquier web. No es una personal API key (`phx_…`), que no debe ir nunca en el catálogo. Como el catálogo sale de `main` ([updates.md](/cli/updates#el-catálogo-sale-de-main)), al mergear el bloque se enciende para todos la próxima vez que ejecuten `vivla`.
+
+**Apagada** en tu máquina, aunque el catálogo la tenga, con cualquiera de estas:
+
+```bash
+export VIVLA_CLI_TELEMETRY=0
+export DO_NOT_TRACK=1          # el estándar de consoledonottrack.com
+```
+
+## Qué se manda
+
+Dos eventos:
+
+**`setup finished`**, al acabar un setup de verdad (no `plan`, `doctor` ni `--dry-run`), desde la TUI, la CLI o el MCP:
+
+| Propiedad                              | Ejemplo                                          |
+| -------------------------------------- | ------------------------------------------------ |
+| `status`, `ok`                         | `failed`, `false`                                |
+| `duration_s`                           | `214`                                            |
+| `done`, `skipped`, `failed`, `blocked` | cuántas tareas de cada                           |
+| `failed_tasks`, `blocked_tasks`        | `["repo:vivla-tools:deps"]`, `["login:railway"]` |
+| `machine`                              | si incluía la máquina                            |
+| `repos`                                | `["vivla-tools", "vivla-cms"]`                   |
+
+**`first pr`**, la primera vez que `vivla pr` abre un PR en esta máquina:
+
+| Propiedad             | Ejemplo                                                 |
+| --------------------- | ------------------------------------------------------- |
+| `repo`                | `vivla-tools`                                           |
+| `since_first_setup_s` | segundos desde el primer setup que acabó bien, o `null` |
+
+Los dos llevan también `cli_version`, `os` (`darwin`, `linux`), `arch` (`arm64`, `x64`) y `$lib: vivla-cli`.
+
+**Quién.** `distinct_id` es `u_` más un hash (SHA-256, recortado) del identificador de tu login en Vivla Identity (`sub`), así que tus eventos de distintas máquinas van juntos sin que viaje quién eres. Antes de hacer login, un id aleatorio por máquina (`a_…`, en `~/.vivla/cli/telemetry-id`).
+
+## Qué no se manda nunca
+
+- Email, nombre ni ningún dato de Identity: solo el hash.
+- Rutas, títulos de tareas ni mensajes de error, porque llevan rutas de tu máquina y a veces valores. De cada tarea solo va su id, y solo si es un id normal (`repo:vivla-tools:env`, `login:railway`): cualquier cosa con `/` o espacios se descarta.
+- Nada de los `.env`, tokens, comandos que ejecuta ni salida de los comandos.
+- Nada de los comandos del día a día (`status`, `logs`, `db`…), salvo el primer `pr`.
+
+## Cómo funciona
+
+- Un `POST` a `<host>/i/v0/e/` (la API de captura de PostHog) por evento, con un máximo de 3 s. Si falla o tarda, se pierde el evento y el comando sigue como si nada: nunca falla por la telemetría.
+- "Primer setup" y "primer PR" son marcas locales en `~/.vivla/cli/state.json` (`telemetry:first-setup`, `telemetry:first-pr`). Se guardan aunque la telemetría esté apagada, para que encenderla más tarde no cuente como primer PR uno de hace meses.
+- El código está en [`src/core/telemetry.ts`](https://github.com/vivla-tech/vivla-cli/blob/main/src/core/telemetry.ts) y los tests que comprueban qué sale (y qué no) en [`test/telemetry.test.ts`](https://github.com/vivla-tech/vivla-cli/blob/main/test/telemetry.test.ts).
+
+## Qué mirar en PostHog
+
+- **Pasos que fallan**: eventos `setup finished` con `ok = false`, desglosados por `failed_tasks` y `os`.
+- **Tiempo hasta el primer PR**: la mediana de `since_first_setup_s` en `first pr`. O un funnel `setup finished` (con `ok`) → `first pr` por persona.

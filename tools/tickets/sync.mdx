@@ -1,0 +1,95 @@
+---
+title: "Sincronización con Zendesk"
+description: "Import, webhook, comentarios y los CLIs de backfill del módulo de tickets"
+---
+
+# Sincronización con Zendesk
+
+Zendesk fue la fuente de verdad de los tickets. Desde **agosto de 2026 Tools está desconectado de Zendesk por completo**: no escribe fuera, no lee en vivo y no tiene ningún disparador automático de entrada. Vivla Tools es la única fuente de verdad; el histórico ya persistido (comentarios, custom fields, adjuntos) se conserva. Esta página documenta qué quedaba de la integración y qué se retiró.
+
+<Note>
+  Las opciones de los desplegables (equipo, zona, categoría, etc.) las gobierna
+  Vivla Tools desde config — ver [Campos](/tickets/fields). Ya no hay write-back,
+  así que no dependen de que la opción exista también en Zendesk.
+</Note>
+
+## Qué se retiró
+
+| Dirección | Qué era | Estado |
+|-----------|---------|--------|
+| **Inbound** (Zendesk → Tools) | Import diario (`POST /chat/sync/tickets`, cron de Windmill) + webhook en tiempo real (`POST /chat/webhooks/zendesk`) | **Retirado** — ambas rutas eliminadas |
+| **Outbound** (Tools → Zendesk) | Creación de tickets, propagación de estado/prioridad/título y write-back de adjuntos | **Retirado** — todo ticket nace nativo, `zendesk_ticket_id` queda `null` en los nuevos |
+| **Lecturas en vivo** | `findOneWithMessages` hidrataba `zendeskData`; `getDropdowns` y `GET /chat/zendesk/fields` iban a `GET /ticket_fields` | **Retirado** — el hilo y los custom fields se leen de `chat_ticket_comments` y `metadata.zendesk_custom_fields`; los campos, de config local (`ticket-options.config.ts`) |
+
+El código del proveedor de Zendesk sigue en `apps/backend/src/chat/integrations/ticketing/` (`zendesk.provider.ts`, `zendesk-import.service.ts`, `zendesk-mappings.config.ts`) porque lo usan el proxy de adjuntos legacy y los CLIs manuales; ya no lo invoca ningún flujo automático.
+
+## Import (solo manual)
+
+`zendesk-import.service` sigue existiendo pero **ya no se dispara solo**: se retiró el endpoint `POST /chat/sync/tickets` que llamaba el cron diario de Windmill. Solo queda accesible por el CLI `sync-tickets`, conservado como escotilla manual mientras la cuenta de Zendesk exista. La reconciliación se cerró antes de cortar (0 tickets reales pendientes).
+
+Cuando se ejecuta, hace **UPSERT** de tickets por `zendesk_ticket_id`:
+
+- Mapea los custom fields de Zendesk a columnas nativas según `zendesk-mappings.config.ts` (cada campo tiene su `zendeskFieldId` ↔ `column`).
+- Importa los comentarios a `chat_ticket_comments`.
+- Registra las transiciones de estado en `chat_ticket_status_history` y mantiene `resolved_at` / `reopened_count`.
+
+## Webhook (retirado)
+
+La ruta `POST /chat/webhooks/zendesk` se eliminó. Era la vía por la que los triggers de Zendesk empujaban en tiempo real cambios de estado, asignaciones y comentarios. Con Tools como fuente de verdad no hay nada que recibir.
+
+## Comentarios
+
+La tabla `chat_ticket_comments` (migración 105) guarda los comentarios. La **entrada** desde Zendesk (`upsertFromZendesk`, solo en el import manual) los sincroniza de forma idempotente por `zendesk_comment_id`. La **escritura desde Tools es siempre nativa**: `TicketCommentsService.create()` inserta directo sin `zendesk_comment_id` ni `zendesk_created_at` y ya no publica hacia Zendesk. El upsert del import no se ve afectado porque `ON CONFLICT` no matchea filas con NULL. Ver [Tickets](/tickets/index#comentarios-siempre-nativos-de-tools). Los adjuntos de los comentarios **apuntan a URLs de Zendesk** y se sirven a través del proxy con autenticación + transcodificación HEIC — ver [Adjuntos](/tickets/attachments).
+
+## Auto-cierre de tickets resueltos
+
+Un barrido (`TicketsAutoCloseService.sweep()`) mueve a `closed` los tickets que llevan en `resolved` más días que el umbral (`AUTO_CLOSE_RESOLVED_AFTER_DAYS`, por defecto **4 días**, override con `TICKET_AUTO_CLOSE_DAYS`). Espeja la ventana `solved → closed` de Zendesk (~96 h).
+
+- **Cron (Windmill):** `POST /chat/tickets/auto-close/sweep` — endpoint público protegido por `x-api-key` (`ApiKeyGuard`). Acepta `{ "dryRun": true }` para previsualizar candidatos sin cerrar nada. Ver [Windmill](/platform/windmill).
+- **CLI:** `pnpm tickets:close-resolved [--dry-run]`.
+
+<Warning>
+  El barrido exige `TICKET_SWEEP_ACTOR_USER_ID`: es el actor que se registra en `chat_ticket_status_history` y quien emite el evento `ticket.*`. Sin él, el sweep se niega a ejecutarse (un update sin actor saltaría historial y evento en silencio). El estado terminal `discarded` (elegido a mano) **nunca** lo toca el auto-cierre.
+</Warning>
+
+## CLIs de backfill
+
+Comandos para poblar datos históricos. Usan el contexto de Nest (`CliModule`) y respetan `APP_STAGE` (dev/prod).
+
+| Comando | Qué hace |
+|---------|----------|
+| `pnpm backfill:closed-tickets` | Importa tickets cerrados / históricos de Zendesk |
+| `pnpm backfill:ticket-comments` | Importa los comentarios históricos |
+| `pnpm backfill:ticket-history` | Trae los audits de Zendesk → historial; recomputa `resolved_at` / `reopened_count` |
+| `backfill-ticket-teams` *(follow-up)* | Recategoriza con IA el equipo de tickets cerrados al set nuevo (estadística) |
+
+```bash
+# Ejemplos
+APP_STAGE=development pnpm backfill:ticket-history --dry-run --limit=5
+APP_STAGE=development pnpm exec ts-node -r tsconfig-paths/register \
+  src/cli/backfill-ticket-teams.command.ts --dry-run --limit=10
+```
+
+<Warning>
+  Las migraciones SQL en `apps/backend/src/database/migrations/` se aplican
+  **manualmente** (no hay runner automático en este repo). Aplicar en dev y
+  luego en prod.
+</Warning>
+
+## Migraciones del módulo
+
+| Migración | Descripción |
+|-----------|-------------|
+| `103` | Tablas base de tickets |
+| `104` | Campos nativos (custom fields promovidos a columnas) |
+| `105` | `chat_ticket_comments` |
+| `107` | `chat_ticket_status_history` (historial/actividad) |
+| `108` | `resolved_at` / `reopened_count` / `last_reopened_at` |
+| `134` | `estimated_cost_range` (rangos de coste) |
+| `135` | Soft-delete (`invalid` + metadatos) |
+| `136` | `improvement_plan` (plan de mejora IA) |
+| `137` | `chat_ticket_attachments` (adjuntos en Cloudinary) |
+| `138` | Tickets abiertos → equipo Properties (remap de CX) |
+| `162` | `ticket_kind` (naturaleza del ticket, pre-deploy — ver [Campos](/tickets/fields)) |
+| `163` | Normaliza el `status` de las propuestas de mejora (post-deploy) |
+| `182` | Estado terminal `discarded` (CHECK + índice de tickets activos) |

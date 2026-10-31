@@ -1,0 +1,84 @@
+---
+title: "vivla dev"
+description: "Arranca las apps de un repo en local, todas en la misma terminal y cada una con su prefijo. En un monorepo arranca las principales; las secundarias, nombrándolas o con --all. Con --connect local…"
+---
+
+Arranca las apps de un repo en local, todas en la misma terminal y cada una con su prefijo. En un monorepo arranca las principales; las secundarias, nombrándolas o con `--all`. Con `--connect local` arranca también los servicios que ese repo usa (la API, el backend).
+
+```bash
+vivla dev vivla-cms                    # web + admin, las principales
+vivla dev vivla-cms referrals          # solo referrals
+vivla dev referrals agent              # dentro del clon de vivla-cms, sin nombrar el repo
+vivla dev vivla-tools --all            # todas las apps del monorepo
+vivla dev vivla-mobile-app --connect local   # la app y, antes, su vivla-api local
+vivla dev vivla-cms --json             # qué arrancaría, sin arrancar nada
+```
+
+## Uso
+
+`vivla dev [repo] [app…] [--all]`
+
+| Opción                               | Por defecto                | Qué hace                                                    |
+| ------------------------------------ | -------------------------- | ----------------------------------------------------------- |
+| `repo`                               | el clon en el que estás    | el repo del catálogo                                        |
+| `app…`                               | las principales            | solo estas apps (por su `name` en el catálogo)              |
+| `--all`                              | no                         | añade las apps secundarias                                  |
+| `--connect <remote\|local>` (global) | `remote`                   | con `local`, arranca también los repos a los que se conecta |
+| `--root <dir>` (global)              | la guardada, si no `~/dev` | dónde buscar los clones ([`config`](/cli/commands/config))             |
+
+## Cómo funciona
+
+- **Qué arranca.** Si el repo tiene `apps` en el catálogo: las que nombres, todas con `--all`, o si no las que no son `secondary`. Un nombre que no es una app del repo da error con la lista de apps. Si el repo no tiene `apps`, arranca su comando `dev` (y no admite nombres de app).
+- **El repo se deduce.** Dentro de un clon no hace falta nombrarlo. Si la primera palabra no es un repo del catálogo, se toma como app del repo en el que estás (`vivla dev referrals`).
+- **`--connect local`.** Recorre los `connect` del repo y, de forma recursiva, los de esos repos. Arranca primero las dependencias y al final el repo. De cada dependencia arranca sus apps principales; si no tiene comando `dev` en el catálogo, lo avisa (`○ vivla-api: no dev command in the catalog, start it yourself`) y sigue sin ella. Con `remote` (por defecto) los servicios conectados son los desplegados, y lo recuerda.
+- **Antes de arrancar.** Cada repo tiene que estar clonado (si no: `→ vivla setup repo <repo>`) y, si tiene `package.json`, con `node_modules` instalado. Si falla cualquiera, no arranca nada. Para cada app con `port`, mira con `lsof` si el puerto ya está ocupado y por qué proceso (`⚠ vivla-cms/web: port 4321 is already taken (pid 4242: node …/astro.mjs dev)`); si está libre, enseña `→ vivla-cms/web: http://localhost:4321`. Un puerto ocupado avisa pero no para.
+- **Durante.** Cada app corre en `bash -c` desde la raíz de su repo, con `FORCE_COLOR=1`. Si hay más de una, cada línea lleva su prefijo de color (`vivla-cms/web │ …`). `Ctrl`+`C` para todas, incluido lo que lancen por debajo (pnpm, turbo, node), porque se para el grupo de procesos entero. Si una termina sola, se paran las demás y `vivla dev` sale con el código de esa.
+- Si no nombras apps ni pasas `--all`, avisa de las secundarias que no ha arrancado.
+
+## Qué toca
+
+Solo tu máquina: arranca procesos en local. No cambia ficheros ni toca servicios remotos.
+
+## Salida `--json`
+
+Con `--json` no arranca nada: devuelve lo que arrancaría.
+
+```json
+{
+  "type": "dev",
+  "processes": [
+    {
+      "key": "vivla-cms/web",
+      "dir": "/Users/ana/dev/vivla-cms",
+      "command": "pnpm dev:site",
+      "port": 4321
+    },
+    {
+      "key": "vivla-cms/admin",
+      "dir": "/Users/ana/dev/vivla-cms",
+      "command": "pnpm dev:cms",
+      "port": 3000
+    }
+  ]
+}
+```
+
+`key` es `<repo>/<app>`, o solo `<repo>` en los repos sin `apps`.
+
+## Exit codes
+
+| Código       | Cuándo                                                                                    |
+| ------------ | ----------------------------------------------------------------------------------------- |
+| `0`          | con `--json`, o al pararlas tú con Ctrl+C                                                 |
+| el de la app | la primera app que termina por su cuenta                                                  |
+| `64`         | repo o app desconocidos, repo sin comando `dev`, sin clonar o sin dependencias instaladas |
+
+## Para agentes (MCP)
+
+No hay tool: arrancar servidores es cosa de una terminal. Un agente puede usar `vivla dev <repo> --json` para saber qué comandos, directorios y puertos hay y lanzarlos él.
+
+## Relacionado
+
+- [`vivla run`](/cli/commands/run): un comando con nombre del repo, no sus servidores.
+- Catálogo: `apps` (`name`, `dir`, `dev`, `port`, `secondary`), `dev` y `connect` en [manifest.md](/cli/manifest#apps-de-un-monorepo-apps) y [dependencias entre repos](/cli/manifest#dependencias-entre-repos-connect).
+- [`--connect` al montar el entorno](/cli/setup#servicios-conectados---connect).

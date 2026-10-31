@@ -1,0 +1,152 @@
+---
+title: "Códigos de error"
+description: "Catálogo de tipos y códigos de error que devuelve la API"
+---
+
+# Códigos de error
+
+La API devuelve errores con el envelope:
+
+```json
+{
+  "error": {
+    "type": "invalid_request_error",
+    "code": "validation_error",
+    "message": "Payload does not match schema for booking.created",
+    "param": "aggregate_id",
+    "request_id": "req_a1b2c3d4e5f6",
+    "details": [
+      { "path": "aggregate_id", "message": "Required" }
+    ]
+  }
+}
+```
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `type` | string | Categoría amplia. Ver tabla abajo. |
+| `code` | string | Código específico, machine-readable. Ver tabla abajo. |
+| `message` | string | Descripción human-readable. **NO confiar para lógica** — usar `code`. |
+| `param` | string \| undefined | Field que causó el error (en `validation_error`). |
+| `request_id` | string | Identificador único de la request — incluir en reportes a soporte. |
+| `details` | array \| undefined | Lista detallada `{ path, message }` — útil para errores de payload con múltiples campos inválidos. |
+
+## Tipos (`error.type`)
+
+| Tipo | Cuándo se devuelve |
+|---|---|
+| `invalid_request_error` | Payload mal formado, parámetros inválidos, recurso no encontrado |
+| `authentication_error` | Falta o inválido el token / api-key |
+| `permission_error` | Autenticado pero sin permisos para esta operación |
+| `idempotency_error` | Conflicto con `Idempotency-Key` (misma key + body distinto) |
+| `rate_limit_error` | Excedido el rate limit |
+| `api_error` | Error interno del servidor |
+
+## Códigos (`error.code`)
+
+| Código | HTTP | Type | Notas |
+|---|---|---|---|
+| `validation_error` | 400 | invalid_request_error | El payload no pasó la validación. `details` lista cada problema. |
+| `event_type_unknown` | 400 | invalid_request_error | Específico de `/public/events/ingest`: el `event_type` no está en el catálogo. `details` enumera los aceptados. |
+| `invalid_cursor` | 400 | invalid_request_error | El cursor de paginación está corrupto. Reiniciar desde primera página. |
+| `authentication_required` | 401 | authentication_error | No se envió `Authorization` ni `x-api-key`. |
+| `authentication_invalid` | 401 | authentication_error | Las credenciales enviadas son inválidas o expiradas. |
+| `permission_denied` | 403 | permission_error | El caller existe pero no tiene rol/permiso requerido. |
+| `resource_missing` | 404 | invalid_request_error | El recurso solicitado no existe. |
+| `idempotency_conflict` | 409 | idempotency_error | Reintento incoherente con la request original. |
+| `idempotency_key_in_use` | 409 | idempotency_error | Misma `Idempotency-Key` con un body distinto al primer POST. |
+| `rate_limit_exceeded` | 429 | rate_limit_error | Excedido el límite. Header `Retry-After` indica cuándo reintentar. |
+| `internal_error` | 500 | api_error | Error inesperado del servidor. Reintentar con backoff. |
+| `service_unavailable` | 503 | api_error | Dependencia (DB, etc.) caída. Reintentar más tarde. |
+
+## Ejemplos por status code
+
+### 400 — Validation error
+
+```json
+{
+  "error": {
+    "type": "invalid_request_error",
+    "code": "validation_error",
+    "message": "Payload does not match schema for booking.created",
+    "param": "payload.bookingId",
+    "request_id": "req_abc",
+    "details": [
+      { "path": "payload.bookingId", "message": "Required" },
+      { "path": "payload.startDate", "message": "Invalid datetime" }
+    ]
+  }
+}
+```
+
+### 400 — Event type desconocido
+
+```json
+{
+  "error": {
+    "type": "invalid_request_error",
+    "code": "event_type_unknown",
+    "message": "event_type \"booking.foo\" is not registered",
+    "param": "event_type",
+    "request_id": "req_abc",
+    "details": [
+      { "path": "event_type", "message": "user.welcomed" },
+      { "path": "event_type", "message": "booking.created" }
+    ]
+  }
+}
+```
+
+### 401 — API key inválida
+
+```json
+{
+  "error": {
+    "type": "authentication_error",
+    "code": "authentication_invalid",
+    "message": "Invalid API key",
+    "request_id": "req_abc"
+  }
+}
+```
+
+### 409 — Idempotency conflict
+
+```json
+{
+  "error": {
+    "type": "idempotency_error",
+    "code": "idempotency_key_in_use",
+    "message": "Idempotency-Key already used with a different request body",
+    "param": "Idempotency-Key",
+    "request_id": "req_abc"
+  }
+}
+```
+
+### 429 — Rate limit
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 23
+X-RateLimit-Limit: 200
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 23
+
+{
+  "error": {
+    "type": "rate_limit_error",
+    "code": "rate_limit_exceeded",
+    "message": "ThrottlerException: Too Many Requests",
+    "request_id": "req_abc"
+  }
+}
+```
+
+## Cómo manejar errores en el cliente
+
+1. **Lee `error.code` para lógica**, nunca `error.message` (puede cambiar sin previo aviso).
+2. **Adjunta `request_id`** en cualquier ticket a soporte — lo encontramos en logs en segundos.
+3. **Reintenta con backoff exponencial** ante `rate_limit_exceeded`, `internal_error`, `service_unavailable`. Respeta `Retry-After` cuando esté presente.
+4. **Para `idempotency_key_in_use`**: cambia la key o asegúrate de enviar el mismo body. Es probablemente un bug en el cliente.
+5. **Para `validation_error`**: corrige el payload antes de reintentar. Usa `details[].path` para el field específico.

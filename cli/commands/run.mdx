@@ -1,0 +1,63 @@
+---
+title: "vivla run"
+description: "Ejecuta un comando con nombre de un repo: uno de los commands del catálogo o, si no existe, el script del package.json con el package manager del repo. Sirve para lo que se hace a menudo y nadie…"
+---
+
+Ejecuta un comando con nombre de un repo: uno de los `commands` del catálogo o, si no existe, el script del `package.json` con el package manager del repo. Sirve para lo que se hace a menudo y nadie recuerda (sembrar la base de datos, regenerar tipos) sin ir a buscarlo.
+
+```bash
+vivla run vivla-tools seed              # commands.seed del catálogo: pnpm db:seed
+vivla run vivla-tools types             # pnpm db:generate-types
+vivla run vivla-cms build               # no está en commands: pnpm run build
+vivla run vivla-tools test -- --watch   # lo que va detrás se pasa al comando
+vivla run vivla-tools seed --json       # salida capturada, para agentes
+```
+
+## Uso
+
+`vivla run <repo> <nombre> [args…]`
+
+| Argumento | Qué es                                                                   |
+| --------- | ------------------------------------------------------------------------ |
+| `repo`    | el repo del catálogo (aquí es obligatorio, aunque estés dentro del clon) |
+| `nombre`  | una clave de `commands:` o un script del `package.json`                  |
+| `args…`   | se añaden al comando, cada uno entrecomillado para la shell              |
+
+## Cómo funciona
+
+- **Qué ejecuta.** Si el catálogo tiene `commands.<nombre>`, ese comando tal cual. Si no, `<npm|pnpm|yarn> run <nombre>` según el `packageManager` del repo. Un repo con `packageManager: none` solo tiene los de `commands`; con cualquier otro nombre da error y lista los que conoce.
+- **Dónde.** En la raíz del clon en el que estás si es ese repo; si no, en `<carpeta de repos>/<repo>` (`~/dev` si no has elegido otra con [`config root`](/cli/commands/config), o `--root`). Si no está clonado: `→ vivla setup repo <repo>`.
+- **Cómo.** En una terminal, imprime `$ <comando>  (<directorio>)` y lo ejecuta conectado a tu terminal, así que ves los colores y puedes responder si pregunta. Con `--json` lo ejecuta sin terminal y captura la salida.
+
+## Qué toca
+
+Lo que haga el comando. `vivla run` no añade nada: ni confirma ni bloquea. Un `seed` o una migración local cambian tu base de datos local; mira qué hace el comando antes de lanzarlo contra algo que no sea tu máquina.
+
+## Salida `--json`
+
+```json
+{
+  "type": "run",
+  "repo": "vivla-tools",
+  "command": "pnpm db:seed",
+  "exitCode": 0,
+  "stdout": "Seeded 12 homes",
+  "stderr": ""
+}
+```
+
+## Exit codes
+
+| Código         | Cuándo                                               |
+| -------------- | ---------------------------------------------------- |
+| el del comando | siempre que llegue a ejecutarse                      |
+| `64`           | repo desconocido, sin clonar o comando que no existe |
+
+## Para agentes (MCP)
+
+No hay tool. Un agente lo lanza por la CLI con `--json` y lee `exitCode`, `stdout` y `stderr`.
+
+## Relacionado
+
+- [`vivla dev`](/cli/commands/dev): los servidores de desarrollo del repo.
+- Catálogo: `commands` y `packageManager` en [manifest.md](/cli/manifest#día-a-día).

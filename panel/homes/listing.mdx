@@ -1,0 +1,134 @@
+---
+title: "Contenido del anuncio"
+description: "Pestaña Contenido del anuncio de la ficha de la casa: lista para publicar, nombres, textos por idioma y por canal, camas, seguridad, amenities y piscina"
+---
+
+# Contenido del anuncio
+
+La pestaña **Contenido del anuncio** (`?tab=listing`) es parte de la [ficha de la casa](/panel/homes/details). Recoge lo que dice el anuncio de la casa en los canales: nombre público, textos, camas, seguridad y amenities. Todo se guarda en VIVLA. El envío al anuncio de Hostaway llegará más adelante, y la propia pestaña lo avisa arriba.
+
+## Antes de empezar
+
+- La casa necesita su ID de Hostaway. Si no lo tiene, verás **Esta casa todavía no tiene anuncio en Hostaway** y el botón **Ir a Hostaway y Airbnb**.
+- Ver la pestaña exige `read:homes`. Editar exige `edit:homes`.
+- Si el anuncio no se puede leer, verás **No se ha podido leer el anuncio** y el botón **Reintentar**. Pasa también mientras la API a la que apunta el panel no tenga las rutas del anuncio.
+
+## Idioma de los textos
+
+Arriba de la pestaña eliges **Idioma de los textos**: **Inglés** o **Español**. El idioma vale para todas las tarjetas y sus editores.
+
+- Un punto naranja marca el idioma al que le falta algo (**Le falta algo en ese idioma**).
+- A Hostaway irá el inglés, porque solo admite un idioma por anuncio. El español se queda en VIVLA.
+- Si editas en español, debajo de cada campo ves el texto en inglés.
+
+## Lista para publicar en cualquier canal
+
+La primera tarjeta cuenta los puntos que cumple el anuncio, por ejemplo **4 de 7**. Mientras falte alguno, la pestaña **Contenido del anuncio** lleva un punto naranja.
+
+| Punto | Se cumple cuando |
+|-------|------------------|
+| **Título y descripción en inglés** | Los textos generales en inglés tienen título y descripción |
+| **Normas de la casa en inglés** | Los textos generales en inglés tienen normas |
+| **Contenido propio de cada canal en inglés** | Ni Airbnb ni el portal de alquileres, si tienen texto propio, tienen un fallo en inglés: falta el título, la descripción o el titular de Vrbo, el título pasa de 50 caracteres o el resumen de Airbnb pasa de 500 |
+| **Distribución de camas por estancia** | Todas las estancias tienen camas y cuadran con los dormitorios y las camas de **La casa** |
+| **Detectores de humo y CO, extintor y botiquín** | Los cuatro tienen respuesta, y humo, extintor y botiquín están en **Sí** |
+| **Cámaras declaradas** | La casa dice que no tiene cámaras, o dice que sí y cada cámara tiene dónde está, a dónde apunta y si graba |
+| **Número de licencia** | La casa tiene número de licencia. Se rellena en la pestaña **Licencias** (**En Licencias**) |
+
+Debajo de cada punto pendiente verás qué falta, por ejemplo **Falta: detector de humo, botiquín y extintor**. Con `edit:homes`, su nombre abre el editor donde se arregla.
+
+## Tarjetas
+
+| Tarjeta | Qué guarda |
+|---------|------------|
+| **Nombres** | **Nombre público**, el que ven los huéspedes en todos los canales e idiomas. Máximo 100 caracteres. El **Nombre interno** es el de la casa en VIVLA y no se cambia aquí |
+| **Textos generales** | **Título** (máximo 50 caracteres), **Descripción** y **Normas de la casa**, en cada idioma |
+| **Textos por canal** | El texto propio de **Airbnb** y del **Portal de alquileres**. **Booking.com** y **Vrbo** salen como **Próximamente** y aún no se pueden rellenar |
+| **Distribución de camas** | Las estancias y las camas de cada una |
+| **Seguridad del anuncio** | Cámaras, detectores y equipamiento |
+| **Amenities** | Los amenities de la casa y si tiene piscina |
+
+### Textos generales y textos por canal
+
+Cada canal usa los textos generales hasta que le pones texto propio. Las normas de la casa llegan siempre a todos los canales.
+
+Por ahora solo se rellenan **Airbnb** y **Portal de alquileres**. **Booking.com** y **Vrbo** salen al final con **Próximamente** y **Todavía no está operativo**, sin botón para editarlos.
+
+1. En **Textos por canal**, pulsa **Poner texto propio** en el canal.
+2. Enciende **Texto propio en …**. Vale para todos los idiomas. Si lo apagas, el canal vuelve a usar los textos generales.
+3. Rellena los campos del canal en el idioma elegido.
+
+| Canal | Campos |
+|-------|--------|
+| **Airbnb** | **Título** y siete partes de descripción. La primera, **Resumen**, admite hasta 500 caracteres |
+| **Portal de alquileres** | **Nombre** y **Descripción** |
+| **Booking.com** (próximamente) | **Nombre** y **Descripción** |
+| **Vrbo** (próximamente) | **Nombre**, **Titular** y **Descripción** |
+
+Si un canal con texto propio aún no está en español, usa los textos generales en español hasta que lo traduzcas (**Traducir**).
+
+### Distribución de camas
+
+- Añade estancias de tipo **Dormitorio** o **Zona común**. Cada una necesita un nombre.
+- En cada estancia, **Añadir cama** pone un tipo de cama que aún no tenga. Cada tipo sale una vez por estancia, con su cantidad (hasta 10).
+- Los botones **Una menos** y **Una más** esperan un momento antes de guardar, así varios clics seguidos van en un solo guardado.
+- **Quitar** una estancia pide confirmación en **Quitar estancia**.
+
+La nota de abajo compara el reparto con los dormitorios y las camas de **La casa**: **Cuadra con La casa**, faltan camas por repartir o hay más de las que dice La casa. Las cunas no cuentan como cama.
+
+### Seguridad del anuncio
+
+- **¿La casa tiene cámaras?** Con **Sí** aparece una cámara para rellenar: **Dónde está**, **A dónde apunta** y **¿Graba?**. Puedes añadir más con **Añadir cámara**. Con **No** se quitan las cámaras.
+- Hostaway no admite cámaras, así que también hay que declararlas en Airbnb.
+- El detector de humo, el extintor y el botiquín los piden Marriott y Airbnb. El detector de monóxido de carbono basta con declararlo, aunque sea **No**.
+
+<Warning>
+  Airbnb retira el anuncio si no declara las cámaras y el detector de
+  monóxido de carbono.
+</Warning>
+
+### Amenities y piscina
+
+Son los amenities de la casa: los mismos que ven los propietarios en la app. En la ficha solo se editan en esta pestaña. Salen del catálogo de Hostaway, agrupados en **Lo básico**, **Casa y lavandería**, **Cocina**, **Ocio y bienestar**, **Exterior**, **Ubicación y vistas**, **Familias**, **Acceso y aparcamiento** y **Normas**.
+
+- En el editor marcas y desmarcas casillas. Varios cambios seguidos se guardan juntos, y lo pendiente se guarda también al cerrar el editor.
+- La piscina se responde en la tarjeta: **No tiene**, **Privada** o **Compartida**. Si no eliges nada, queda sin indicar.
+- **Privada** y **Compartida** se guardan como amenities de la casa, así que también salen en la app.
+
+## Cómo se guarda
+
+- Los textos se guardan al salir de cada campo. Las respuestas y los interruptores, al elegirlos.
+- Solo se envía lo que cambias: el canal y el idioma que estás editando.
+- Cada guardado muestra **Anuncio guardado**.
+- Si un guardado falla, el cambio se deshace y verás el error del campo o **No se ha podido guardar. Revisa la conexión y vuelve a intentarlo.**
+
+## Endpoints de vivla-api
+
+| Método | Endpoint | Para qué |
+|--------|----------|----------|
+| `GET` | `/v2/admin/properties/:id/listing-content` | Lee el anuncio de la casa |
+| `PUT` | `/v2/admin/properties/:id/listing-content` | Guarda el nombre público, los textos, los canales, la seguridad y la piscina. Solo cambia lo que llega |
+| `PUT` | `/v2/admin/properties/:id/listing-content/rooms` | Sustituye las estancias y sus camas |
+| `PUT` | `/v2/admin/properties/:id/listing-content/cameras` | Sustituye las cámaras |
+| `PUT` | `/v2/admin/properties/:id/listing-content/amenities` | Sustituye los amenities de la casa, salvo la piscina, con su id del catálogo de Hostaway |
+
+Leer exige `read:homes` y escribir, `edit:homes`. Cada escritura devuelve el anuncio entero.
+
+<Note>
+  La API no deja guardar cámaras si la casa no dice que las tiene, ni un tipo
+  de piscina si no dice que tiene piscina. El panel manda siempre las dos
+  cosas juntas.
+</Note>
+
+## Código
+
+| Qué | Dónde |
+|-----|-------|
+| Pestaña | `src/features/homes/components/homeRecord/tabs/ListingTab` |
+| Editores | `src/features/homes/components/homeRecord/editors/RecordListing*` |
+| Modelo y catálogo de amenities | `src/core/homes/models/HomeListing.ts` |
+| Reglas: lista para publicar, camas, seguridad y amenities | `src/core/homes/rules/homeListing.rules.ts` |
+| Peticiones y DTOs | `src/features/homes/api/requests/homeListing/`, `src/features/homes/api/dtos/HomeListingApiDto.ts`, `src/features/homes/api/dtos/HomeListingInputApiDto.ts` |
+| Lectura y guardado | `src/features/homes/queries/homeListing/useHomeListing.ts`, `src/features/homes/hooks/useHomeListing.ts` |
+| Idioma elegido | `src/features/homes/state/listingLanguageStore.ts` |
+| Textos de UI | `src/assets/locales/es/homeRecord.json` (`listing` y `editors.listing-*`) |

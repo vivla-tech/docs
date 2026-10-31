@@ -1,0 +1,118 @@
+---
+title: "vivla impact"
+description: "Qué alcanza un PR: qué apps toca, en qué despliegues acabará, si cambia la API, migraciones, variables de entorno o dependencias, y qué otros repos del catálogo usan lo que toca. Sirve para saber,…"
+---
+
+Qué alcanza un PR: qué apps toca, en qué despliegues acabará, si cambia la API, migraciones, variables de entorno o dependencias, y qué otros repos del catálogo usan lo que toca. Sirve para saber, antes de mergear o de cortar una release, si hay que avisar a la app móvil o mirar `vivla-api`.
+
+```bash
+vivla impact 1662 --repo vivla-tools   # un PR
+vivla impact 35 --repo vivla-api
+vivla impact                           # sin PR: tu rama contra su base, con lo que no has commiteado
+vivla impact 1662 --repo vivla-tools --json
+```
+
+```text
+vivla-tools #1662 · feat(identity): me and dev-profile endpoints
+merged 2026-10-21 → develop · 12 files
+
+Apps               backend (2) · identity (9)
+Deploys            backend: production, develop · identity: production, develop
+⚠ API surface      apps/identity/src/dev-profile/dev-profile.controller.ts
+⚠ Migrations / SQL apps/backend/src/database/migrations/501_identity_dev_packages.sql
+                   → vivla migrate status --repo vivla-tools --env prod
+
+Who uses it
+  ✖ vivla-mobile-app     CHAT_API_URL in .env.development → backend@develop
+```
+
+## Opciones
+
+`vivla impact [pr] [--repo <repo>]`
+
+| Opción          | Por defecto             | Qué hace                                                                         |
+| --------------- | ----------------------- | -------------------------------------------------------------------------------- |
+| `pr`            | tu rama                 | número del PR (`1662` o `#1662`). Sin él, lo que cambia tu rama frente a su base |
+| `--repo <repo>` | el repo en el que estás | repo del catálogo                                                                |
+
+## Cómo funciona
+
+1. **Los ficheros.** Con un PR, `gh pr view` para sus datos y `gh api …/pulls/<n>/files --paginate` para la lista entera (`gh pr view` se queda en 100). Sin PR, `git diff --name-only` desde el merge-base con `origin/<base>` más los ficheros nuevos sin seguimiento: compara con lo último que hayas traído de `origin`.
+2. **Las apps.** En un monorepo, cada fichero cuenta para la app cuyo `dir` lo contiene. Lo que queda fuera de todas (un paquete compartido, el `package.json` de la raíz) sale como **Shared**. La documentación y el CI (`docs/`, `.github/`, `*.md`) no cuentan como cambio de una app. Un repo sin `apps` es una app sola: el propio repo.
+3. **Los despliegues.** Los de las apps tocadas. Si además hay código compartido, también los de las demás, marcados con `?` (`why: shared` en JSON), porque pueden importarlo.
+4. **Qué tipo de cambio.** Por la ruta dentro de la app, para que `apps/api/…` no cuente como API solo por la carpeta:
+   - **⚠ API**: controllers, routes, routers, DTOs, resolvers, `app/api/**/route.ts`, `pages/api/`, OpenAPI y Swagger, `.graphql`, `.proto`.
+   - **⚠ Migraciones / SQL**: `.sql` y lo que esté en `migrations/` (o en `migrations.dir` del catálogo), sin sus tests.
+   - **· Env**: `.env*` (también `.env.example`) y `env.ts`.
+   - **· Deploy**: `vercel.json`, `railway.json`/`.toml`, `wrangler.toml`, `Dockerfile`, `nixpacks.toml`, `Procfile`, `eas.json`, `app.json`.
+   - **· Dependencias**: `package.json`, lockfiles, `requirements*.txt`, `pyproject.toml`.
+5. **Quién lo usa.** Los repos del catálogo con un `connect` hacia este ([manifest.md](/cli/manifest#dependencias-entre-repos-connect)): por qué variable y en qué fichero. Si la URL `remote` coincide con la de un despliegue de este repo, se sabe qué app usan (`backend@develop`) y si esa app está tocada: ✖ sí, ? no se sabe o solo cambió código compartido, ○ no.
+
+Las reglas son heurísticas: avisan de por dónde mirar, no demuestran que algo se rompa.
+
+## Qué toca
+
+Solo lee: GitHub (`gh`) o tu clon (`git`). No llama a Railway, Vercel ni a los servicios.
+
+## Salida `--json`
+
+```json
+{
+  "type": "impact",
+  "repo": "vivla-tools",
+  "pr": {
+    "number": 1662,
+    "title": "feat(identity): me and dev-profile endpoints",
+    "url": "https://github.com/vivla-tech/vivla-tools/pull/1662",
+    "state": "MERGED",
+    "base": "develop",
+    "head": "feat/identity-dev-profile",
+    "mergedAt": "2026-10-21T18:02:11Z"
+  },
+  "files": 12,
+  "apps": [
+    { "name": "backend", "files": 2 },
+    { "name": "identity", "files": 9 }
+  ],
+  "shared": [],
+  "deploys": [
+    { "name": "backend", "env": "production", "url": "https://api.tools.vivla.com", "why": "app" }
+  ],
+  "flags": {
+    "api": ["apps/identity/src/dev-profile/dev-profile.controller.ts"],
+    "migrations": ["apps/backend/src/database/migrations/501_identity_dev_packages.sql"]
+  },
+  "consumers": [
+    {
+      "repo": "vivla-mobile-app",
+      "env": "CHAT_API_URL",
+      "path": ".env.development",
+      "remote": "https://api.tools.vivla.dev/api",
+      "app": "backend",
+      "deployEnv": "develop",
+      "affected": "yes"
+    }
+  ]
+}
+```
+
+Sin PR, `pr` no viene y `branch` dice qué se comparó (`feat/x vs develop`).
+
+## Exit codes
+
+| Código | Cuándo                                                                                   |
+| ------ | ---------------------------------------------------------------------------------------- |
+| `0`    | siempre que pueda leer el PR o la rama                                                   |
+| `1`    | falló `gh` o `git`                                                                       |
+| `64`   | no es un número de PR, GitHub no lo encuentra, o no hay `origin/<base>` con que comparar |
+
+## Para agentes (MCP)
+
+Tool `impact` con `repo` y `pr`: devuelve lo mismo que `--json`. Útil antes de revisar un PR o de proponer una release.
+
+## Relacionado
+
+- [`vivla release`](/cli/commands/release): lo que llega a `main`, con sus migraciones.
+- [`vivla migrate`](/cli/commands/migrate): si el PR trae migraciones.
+- [`vivla task`](/cli/commands/task): empezar una issue en su propio worktree.
+- Catálogo: `apps`, `deploys` y `connect` en [manifest.md](/cli/manifest).

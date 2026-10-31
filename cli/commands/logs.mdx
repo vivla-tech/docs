@@ -1,0 +1,127 @@
+---
+title: "vivla logs"
+description: "Los logs de un servicio desplegado en Railway, Vercel o Cloudflare, sin abrir su dashboard. Los filtros (texto, errores, desde cuándo, código HTTP) los aplica la plataforma, así que --errors --since…"
+---
+
+Los logs de un servicio desplegado en Railway, Vercel o Cloudflare, sin abrir su dashboard. Los filtros (texto, errores, desde cuándo, código HTTP) los aplica la plataforma, así que `--errors --since 1d` no se trae un día entero de logs para filtrarlo aquí.
+
+```bash
+vivla logs vivla-tools identity --env production -n 200
+vivla logs vivla-api -f                               # sigue el stream (Railway)
+vivla logs vivla-api --errors --since 2h              # solo errores de las últimas 2 horas
+vivla logs vivla-api --grep "web properties"          # líneas con ese texto
+vivla logs vivla-api --status 401 --since 1h          # peticiones HTTP que acabaron en 401
+vivla logs vivla-tools frontend --http --errors       # peticiones 5xx (Vercel)
+vivla logs docs --env staging --errors                # Cloudflare: en vivo, solo invocaciones con error
+vivla logs docs --env staging --json --for 30         # Cloudflare para un agente: escucha 30 s
+```
+
+## Opciones
+
+| Opción            | Por defecto                          | Qué hace                                                                                     |
+| ----------------- | ------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `[repo]`          | el repo en el que estás              | de qué repo                                                                                  |
+| `[service]`       | el primero del repo en el catálogo   | qué servicio (`backend`, `identity`, `web`…)                                                 |
+| `--env <env>`     | el primero listado para ese servicio | entorno                                                                                      |
+| `-n`, `--lines`   | `100`                                | cuántas líneas                                                                               |
+| `-f`, `--follow`  |                                      | sigue el stream (Railway, Cloudflare). No se puede con `--since` ni `--until`                |
+| `--grep <texto>`  |                                      | solo líneas con ese texto. En logs HTTP, la ruta: exacta en Railway, parte de ella en Vercel |
+| `--errors`        |                                      | solo errores; con `--http`, las peticiones 5xx                                               |
+| `--since <t>`     | lo que dé la plataforma              | desde cuándo: `30m`, `2h`, `1d` o una fecha ISO                                              |
+| `--until <t>`     | ahora                                | hasta cuándo, en los mismos formatos (Railway, Vercel)                                       |
+| `--http`          |                                      | logs de peticiones HTTP en vez de lo que escribe la app                                      |
+| `--status <code>` |                                      | código HTTP: `401`, `>=400` o `500..599`. Implica `--http`                                   |
+| `--for <s>`       | `20`                                 | Cloudflare solo emite en vivo: cuántos segundos escucha con `--json`                         |
+
+## Cómo funciona
+
+Busca el deploy en el catálogo y monta el comando de su plataforma.
+
+**Railway**
+
+```
+railway logs --service <servicio> --environment <env> [--http] [--status …] [--path …] [--filter …] [--since …] [--until …] --lines <n> [--json]
+```
+
+- `--errors` y `--grep` se juntan en un solo `--filter` con la sintaxis de Railway: `@level:error AND "texto"`.
+- Con `--http` o `--status` pide los logs de peticiones: `--status` va tal cual, `--errors` se convierte en `--status '>=500'` y `--grep` en `--path`. Ahí la búsqueda de texto no aplica y `--path` solo acepta la **ruta exacta** (`/api/v1/web/properties`; con un prefijo o comodines no sale nada o sale todo).
+- `--since`, `--until` y `--lines` traen histórico y paran. Con `-f` no se pasa ninguno y Railway sigue el stream.
+- Railway enseña los logs del **último deploy**: si el servicio se acaba de desplegar, lo de antes no sale.
+- El comando corre en `~/.vivla/cli/railway/<proyecto>`, enlazado con `railway link` al proyecto, entorno y servicio. Nada se escribe dentro de tus repos.
+
+**Vercel**
+
+```
+vercel logs [requests] --project <proyecto> --scope <equipo> --environment production|preview --limit <n> [--since …] [--until …] [--query …] [--json]
+```
+
+- Lo que no es `production` se pide como `preview` (los custom environments, como `develop`, van ahí).
+- `--errors` y `--grep` van en un `--query`: `level:error AND "texto"`.
+- Con `--http` o `--status` usa `vercel logs requests`. `--status` pasa a la sintaxis de Vercel (`401` → `httpStatus:401`, `>=400` → `httpStatus >= 400`, `500..599` → `httpStatus >= 500 AND httpStatus <= 599`) y `--grep` filtra la ruta con `requestPath:*texto*`.
+- `-f` no tiene efecto: Vercel no sigue el stream.
+
+**Cloudflare**
+
+```
+wrangler tail <worker> --format pretty|json [--status error] [--search <texto>]
+```
+
+- Necesita el nombre del worker en `project` y, si tu login ve varias cuentas, `account` (va como `CLOUDFLARE_ACCOUNT_ID`).
+- Cloudflare no guarda histórico: `--since` y `--until` dan error. Tampoco hay logs HTTP aparte, porque cada entrada ya es una petición con su estado, así que `--http` y `--status` también dan error. `--errors` deja las invocaciones fallidas.
+- En una terminal escucha hasta `Ctrl`+`C`. Con `--json` escucha `--for` segundos, corta y devuelve lo que haya llegado. Si en ese tiempo no llega nada, no es un fallo.
+
+Un deploy `other`, o uno de Cloudflare sin `project`, no tiene logs desde aquí. El error te da su dashboard o su URL.
+
+## Qué toca
+
+Solo lee, con tus sesiones de `railway`, `vercel` y `wrangler`. Lo único que escribe es el enlace de Railway en `~/.vivla/cli/railway/`. Los logs de producción se leen igual que los de cualquier entorno, así que trátalos con cuidado: pueden llevar datos de clientes.
+
+## Salida `--json`
+
+Las líneas JSON tal como las da la plataforma, una por línea en stdout (si el comando falla, su error va a stderr):
+
+- **Railway**, logs de la app: `{"timestamp":"…","message":"…","level":"error",…}`
+- **Railway**, con `--http`: `{"timestamp":"2026-10-23T10:00:03.945Z","method":"GET","path":"/api/v1/web/properties","httpStatus":200,"totalDuration":747,"requestId":"R83cIAEjQKmHDPxcALIuDA","host":"api.tools.vivla.dev","clientUa":"axios/1.12.2",…}`
+- **Vercel**: sus JSON Lines, y al final una línea `{"type":"summary","recordsReturned":0,…}`
+- **Cloudflare**: los eventos de `wrangler tail --format json`
+
+Con `--json`, `-f` no se aplica: un agente siempre recibe un trozo cerrado.
+
+## Exit codes
+
+| Código | Cuándo                                                                                                                                 |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`    | la plataforma devolvió los logs; en Cloudflare con `--json`, también cuando se acaba `--for`                                           |
+| `1`    | falló el comando de la plataforma (sin sesión, servicio que no existe…)                                                                |
+| `64`   | repo o servicio desconocido, un `--status` que no se entiende, `-f` con `--since` o `--until`, o un filtro que esa plataforma no tiene |
+
+En una terminal, el código es el del propio `railway`, `vercel` o `wrangler`.
+
+## Para agentes (MCP)
+
+Tool `logs`:
+
+| Entrada   | Por defecto | Qué es                                 |
+| --------- | ----------- | -------------------------------------- |
+| `repo`    |             | clave del repo                         |
+| `service` | el primero  | servicio                               |
+| `env`     | el primero  | entorno                                |
+| `lines`   | `100`       | de 1 a 1000                            |
+| `grep`    |             | como `--grep`                          |
+| `errors`  |             | como `--errors`                        |
+| `since`   |             | como `--since`                         |
+| `until`   |             | como `--until`                         |
+| `http`    |             | como `--http`                          |
+| `status`  |             | como `--status`                        |
+| `seconds` | `15`        | Cloudflare: cuánto escucha (de 1 a 60) |
+
+Devuelve `{ service, env, exitCode, logs: [...líneas], error? }`. Si el deploy no existe, `{ error, deploys }` con los que hay. Si el filtro no vale para esa plataforma, `{ error }`.
+
+## Relacionado
+
+- [`vivla status`](/cli/commands/status) para ver qué deploy falló antes de mirar sus logs.
+- [`vivla why`](/cli/commands/why) junta los errores desde el último deploy con lo que cambió, y [`vivla watch`](/cli/commands/watch) compara los de antes y después de un deploy.
+- [`vivla call`](/cli/commands/call) para reproducir la petición que falla.
+- [`vivla db`](/cli/commands/db) tiene sus propios logs: los de Supabase (`vivla db logs`).
+- Lo que necesita el catálogo: `deploys` con `platform`, `project` (proyecto de Railway, de Vercel o worker de Cloudflare), `service` (Railway), `scope` (Vercel) y `account` (Cloudflare). Ver [manifest.md](/cli/manifest#día-a-día).
+- Guía: [devtools.md](/cli/devtools#vivla-logs).

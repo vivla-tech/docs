@@ -1,0 +1,94 @@
+---
+title: "vivla task"
+description: "De una issue de Linear a un agente trabajando en ella. Lee la issue, crea su rama en un worktree nuevo al lado del clon (con los .env, las skills y las dependencias), le deja al agente un fichero con…"
+---
+
+De una issue de Linear a un agente trabajando en ella. Lee la issue, crea su rama en un worktree nuevo al lado del clon (con los `.env`, las skills y las dependencias), le deja al agente un fichero con el contexto y abre Claude Code ahí, con la tarea ya pedida. Así cada persona puede tener varias issues en marcha a la vez, cada una en su carpeta, sin pelearse con el entorno.
+
+```bash
+vivla task VIV-3417                          # en el repo en el que estás
+vivla task https://linear.app/vivla/issue/VIV-3417/basura-y-reciclaje --repo vivla-api
+vivla task VIV-3417 --no-agent               # todo listo, pero sin abrir Claude Code
+vivla task --title "Arreglar el menú del panel" --repo vivla-panel   # sin Linear
+vivla task VIV-3417 --dry-run                # qué rama, qué carpeta y qué apps, sin crear nada
+```
+
+## Opciones
+
+`vivla task [issue] [--repo <repo>] [--title <título>] [--base <rama>] [--dir <ruta>] [--no-agent]`
+
+| Opción             | Por defecto                                                | Qué hace                                                                          |
+| ------------------ | ---------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `issue`            |                                                            | `VIV-3417` o la URL de la issue en Linear                                         |
+| `--repo <repo>`    | el repo en el que estás, o el de una label de la issue     | en qué repo del catálogo se trabaja                                               |
+| `--title <título>` |                                                            | no lee Linear: trabaja sobre este título. El id de la issue sigue siendo opcional |
+| `--base <rama>`    | la base del repo (`develop` en vivla-tools)                | de qué rama sale la nueva                                                         |
+| `--dir <ruta>`     | `<root>/<repo>-<issue>`, p. ej. `~/dev/vivla-api-viv-3417` | dónde va el worktree                                                              |
+| `--no-agent`       | abre Claude Code                                           | lo deja todo listo y termina, con el comando para abrir el agente                 |
+
+También cuentan las [globales](/cli/commands/index#opciones-globales) `--root` (dónde están los clones), `--dry-run` y `--json`.
+
+## Cómo funciona
+
+1. **La issue.** Con `LINEAR_API_KEY`, una consulta a la API GraphQL de Linear (solo lectura): título, descripción, URL, equipo, estado, proyecto, labels y la rama que Linear propone. Sin la variable, y sin `--title`, termina con `exit 2` y dice cómo crear la clave: en Linear, _Settings → Account → Security & access → Personal API keys_, y `export LINEAR_API_KEY=lin_api_…` en tu shell.
+2. **El repo.** `--repo`, si no el clon en el que estás, y si no una label o el proyecto de la issue que se llame como un repo del catálogo (`vivla-tools` o `repo: vivla-tools`).
+3. **La rama.** La que propone Linear (`ana/viv-3417-basura-y-reciclaje`). Es la que hace que Linear enlace el PR con la issue él solo. Con `--title`, `viv-3417-<título>` si hay id, o `task/<título>` si no.
+4. **El worktree**, al lado del clon principal (`~/dev/<repo>`), que se clona primero si aún no está. Si la rama ya existe en local se usa esa; si existe en `origin`, se sigue la remota; si no, se crea desde `origin/<base>` recién traído. Si la carpeta ya es un worktree de ese repo en esa rama, se reutiliza: repetir es seguro.
+5. **El entorno**, con la misma tarea que [`setup repo <r> --worktree`](/cli/commands/setup): copia los `.env` del clon principal, instala las skills del repo y las dependencias.
+6. **El contexto**, en `.vivla/task.md` dentro del worktree: la issue entera, el repo, la rama y su base, las apps que parece tocar (las que la issue nombra, por nombre o carpeta), los últimos cambios mergeados en ellas y cómo se trabaja ahí (`vivla dev`, commits convencionales, `vivla pr`). `/.vivla/` va al `info/exclude` del repo, compartido por todos sus worktrees, así que nunca acaba en un commit.
+7. **El agente.** Si hay una persona en la terminal, Claude Code está instalado y no has pasado `--no-agent`, abre `claude` en el worktree con la tarea pedida: leer `.vivla/task.md`, hacer un plan, commitear con la convención y abrir el PR con `vivla pr`. `ctrl`+`c` es para el agente. Si no, imprime el comando para abrirlo tú.
+
+**El enlace con Linear.** `vivla pr` no añade nada: la integración de Linear con GitHub enlaza el PR en cuanto ve el id de la issue en el nombre de la rama, y la rama sale de Linear (o lleva el id). Al mergear, Linear mueve la issue según los ajustes del equipo.
+
+## Qué toca
+
+- **Tu máquina**: el worktree (y el clon, si no estaba), sus `.env`, skills y dependencias, y una línea en `.git/info/exclude`.
+- **Lee** Linear (la issue) y GitHub (`git fetch`, los últimos cambios de la zona). No escribe en Linear ni en GitHub: la rama no se sube hasta que el agente o tú lancéis `vivla pr`.
+
+## Salida `--json`
+
+Primero los eventos del setup del worktree (como [`setup`](/cli/commands/setup#salida---json)) y al final:
+
+```json
+{
+  "type": "task",
+  "ok": true,
+  "issue": {
+    "identifier": "VIV-3417",
+    "title": "Basura y reciclaje de cada casa",
+    "url": "https://linear.app/vivla/issue/VIV-3417",
+    "branchName": "ana/viv-3417-basura-y-reciclaje",
+    "labels": ["vivla-api"]
+  },
+  "repo": "vivla-api",
+  "base": "stage",
+  "branch": "ana/viv-3417-basura-y-reciclaje",
+  "worktree": "/Users/ana/dev/vivla-api-viv-3417",
+  "worktreeState": "created",
+  "apps": [],
+  "context": "/Users/ana/dev/vivla-api-viv-3417/.vivla/task.md",
+  "agent": { "launched": false, "command": "cd '/Users/ana/dev/vivla-api-viv-3417' && claude '…'" }
+}
+```
+
+Con `--json` nunca abre el agente. Con `--dry-run`, solo el plan (`"dryRun": true`), sin crear nada.
+
+## Exit codes
+
+| Código | Cuándo                                                                                              |
+| ------ | --------------------------------------------------------------------------------------------------- |
+| `0`    | worktree listo (y, si se abrió, lo que devuelva Claude Code al salir)                               |
+| `1`    | falló una tarea del setup del worktree o un comando de git, o Linear rechazó la clave               |
+| `2`    | sin `LINEAR_API_KEY` y sin `--title`                                                                |
+| `4`    | el setup necesita a una persona (un login)                                                          |
+| `64`   | la referencia no es una issue, Linear no la encuentra, no se sabe el repo o la carpeta está ocupada |
+
+## Para agentes (MCP)
+
+No hay tool. Un agente que quiera repartir trabajo en worktrees lo lanza por la CLI: `vivla task VIV-3417 --repo vivla-api --no-agent --json`, y trabaja (o lanza otro agente) en el `worktree` que devuelve.
+
+## Relacionado
+
+- [`vivla pr`](/cli/commands/pr): abre el PR desde el worktree.
+- [`vivla impact`](/cli/commands/impact): a quién afecta lo que cambia la rama antes de abrir el PR.
+- [Worktrees para agentes](/cli/setup#worktrees-para-agentes): lo mismo a mano.

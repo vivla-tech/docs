@@ -1,0 +1,121 @@
+---
+title: "vivla status"
+description: "Qué commit hay desplegado en cada servicio y entorno, cuántos commits de su rama faltan por salir y si responde. Es lo que miras antes de decir que algo \"ya está en prod\", o cuando algo falla y…"
+---
+
+Qué commit hay desplegado en cada servicio y entorno, cuántos commits de su rama faltan por salir y si responde. Es lo que miras antes de decir que algo "ya está en prod", o cuando algo falla y quieres saber si es un deploy.
+
+```bash
+vivla status                         # el repo en el que estás (o tus clonados + recomendados)
+vivla status vivla-tools             # un repo
+vivla status vivla-tools vivla-cms   # varios
+vivla status --env production        # solo producción
+vivla status --all                   # todo el catálogo
+vivla status vivla-tools --json      # para agentes
+```
+
+```
+✔ vivla-tools/backend          develop     ebf9230 = develop                BUILDING 200 310ms    1m ago
+✔ vivla-tools/identity         develop     ebf9230 = develop                SUCCESS  200 125ms    19m ago
+✔ vivla-tools/spark            develop     ·······                          SUCCESS  302 121ms    15d ago
+⚠ vivla-tools/frontend         production  2c6fc21 6 behind main            READY    200 431ms    1d ago
+```
+
+## Opciones
+
+| Opción        | Por defecto                                                 | Qué hace                                        |
+| ------------- | ----------------------------------------------------------- | ----------------------------------------------- |
+| `[repos...]`  | el repo en el que estás; si no, tus clonados y recomendados | qué repos mirar                                 |
+| `--env <env>` | todos                                                       | solo ese entorno (`production`, `develop`…)     |
+| `--all`       |                                                             | todos los repos del catálogo que tienen deploys |
+
+## Cómo funciona
+
+Por cada deploy del catálogo (`deploys:` del repo) junta tres cosas.
+
+**1. Lo que dice la plataforma**
+
+- **Railway**: un `railway status --json` por proyecto (una sola llamada para todos sus entornos y servicios), desde un directorio enlazado en `~/.vivla/cli/railway/<proyecto>`. De ahí salen el estado del último deploy (`SUCCESS`, `FAILED`, `BUILDING`…), su commit, su rama, cuándo se creó y el dominio (el propio si lo hay, si no el de Railway).
+- **Vercel**: `vercel ls <proyecto> --scope <equipo> --environment production`. Para un entorno que no es producción busca en `preview` filtrando por la rama (`-m githubCommitRef=<branch>`). Se salta los deploys `CANCELED`: son builds que Vercel ignoró porque el commit no tocaba esa app, y no son lo que está sirviendo.
+- **Cloudflare** y **other**: la plataforma no se consulta; solo cuenta la salud.
+
+**2. La salud.** Un `GET` a `health` (una ruta sobre `url` o una URL entera) o, si no hay, a `url`. Tiempo máximo de 8 s, sin seguir redirecciones.
+
+- Cuenta como arriba cualquier código por debajo de 400, y también un `401`: un `302` o un `401` de Cloudflare Access es un servicio arriba que no te deja pasar.
+- Si contesta JSON con `commitSha`, `commit`, `sha` o `gitSha` (un SHA de 7 a 40 caracteres), ese commit gana al de la plataforma: lo que corre de verdad manda sobre lo último que se construyó. Así un build fallido no esconde qué versión sigue sirviendo.
+
+**3. Cuánto va por detrás.** Si hay commit y `branch`, `gh api repos/<repo>/compare/<commit>...<branch>` da los commits de la rama que no están desplegados.
+
+- En un monorepo, si el deploy se llama igual que una app (`apps:`), solo cuentan los commits que tocan su `dir`. Si ninguno de los ficheros cambiados está bajo `dir` sale `0`. Si sí, cuenta los commits de la rama en ese `dir` desde la base común, sin contar el desplegado (como mínimo 1). Si GitHub trunca la lista a 300 ficheros, siempre los cuenta.
+- Si GitHub no puede comparar (un force-push, un repo sin acceso), el retraso queda sin saber.
+
+Al final, si el último deploy de algo falló, lo resume con `→ vivla logs`. Y si algo va por detrás, dice cuántos entornos.
+
+## Qué toca
+
+Solo lee. Llama a `railway`, `vercel` y `gh` con tus sesiones y hace un `GET` a cada URL de salud. No cambia nada en ninguna plataforma. Lo único que escribe es el enlace de Railway en `~/.vivla/cli/railway/`, fuera de tus repos.
+
+## Salida `--json`
+
+```json
+{
+  "type": "status",
+  "ok": true,
+  "deploys": [
+    {
+      "repo": "vivla-tools",
+      "name": "backend",
+      "env": "develop",
+      "platform": "railway",
+      "url": "https://api.tools.vivla.dev",
+      "branch": "develop",
+      "state": "BUILDING",
+      "commit": "ebf9230408a135de96df4c41d99f0d0641e08401",
+      "ref": "develop",
+      "deployedAt": "2026-10-23T10:58:23.237Z",
+      "health": { "ok": true, "code": 200, "ms": 560 },
+      "behind": 0
+    }
+  ]
+}
+```
+
+| Campo    | Qué es                                                                            |
+| -------- | --------------------------------------------------------------------------------- |
+| `state`  | estado del último deploy según la plataforma                                      |
+| `commit` | lo que dice la salud si trae SHA; si no, lo de la plataforma                      |
+| `ref`    | la rama de la que salió ese deploy, según la plataforma                           |
+| `branch` | la rama que ese entorno debería seguir (catálogo)                                 |
+| `behind` | commits de `branch` sin desplegar. `0` = al día; ausente = no se sabe             |
+| `health` | `ok`, `code` y `ms`. Si no contestó, `ok: false` sin `code`                       |
+| `error`  | lo que falló al preguntar a la plataforma (por ejemplo, un entorno que no existe) |
+
+Los campos que no se pudieron averiguar no aparecen.
+
+## Exit codes
+
+| Código | Cuándo                                                                     |
+| ------ | -------------------------------------------------------------------------- |
+| `0`    | todo contesta y ninguna plataforma dio error                               |
+| `1`    | algún deploy tiene `error` o su salud está caída                           |
+| `64`   | un repo que no existe, o ninguno de los repos tiene deploys en el catálogo |
+
+Un último deploy `FAILED` no cambia el código si lo anterior sigue contestando. Sale con ✖ en la línea y en el resumen final.
+
+## Para agentes (MCP)
+
+Tool `status`, de solo lectura:
+
+| Entrada | Por defecto | Qué es                                                  |
+| ------- | ----------- | ------------------------------------------------------- |
+| `repos` | `[]`        | claves de repo. Vacío = **todos** los repos con deploys |
+| `env`   |             | solo ese entorno                                        |
+
+Devuelve `{ deploys: [...] }` con los mismos campos que el JSON de la CLI.
+
+## Relacionado
+
+- [`vivla logs`](/cli/commands/logs) para ver por qué falló un deploy, y [`vivla open`](/cli/commands/open) para abrir su dashboard.
+- [`vivla call`](/cli/commands/call) para probar un endpoint del servicio.
+- Lo que necesita el catálogo: `deploys` con `name`, `env`, `platform`, `project` (Railway o Vercel), `service` (Railway, si no es `name`), `url`, `health`, `branch` y `scope` (Vercel). Y `apps` con su `dir` para el retraso por app. Ver [manifest.md](/cli/manifest#día-a-día).
+- Guía: [devtools.md](/cli/devtools#vivla-status).

@@ -1,0 +1,311 @@
+---
+title: "El día a día"
+description: "Después del setup, vivla sigue siendo útil: el catálogo sabe dónde se despliega cada repo, qué Supabase usa y cómo llegan los cambios a producción. Con eso, cada comando hace lo que harías a mano en…"
+---
+
+Después del setup, `vivla` sigue siendo útil: el catálogo sabe dónde se despliega cada repo, qué Supabase usa y cómo llegan los cambios a producción. Con eso, cada comando hace lo que harías a mano en cinco sitios distintos.
+
+Reglas comunes:
+
+- **El repo se deduce.** Si estás dentro de un clon, no hace falta nombrarlo (`vivla status`, `vivla pr`). Si no, va como argumento o con `--repo`.
+- **`--json` en todos.** Mismo contrato que el setup (ver [agents.md](/cli/agents)): un objeto por línea y exit codes estables.
+- **Fuera de tu máquina, se pregunta.** Aplicar una migración en producción, pushear una release… piden confirmación. Un agente tiene que pasar `--yes`; sin él recibe `exit 4` y el comando exacto en `next_actions`.
+- **Producción, solo lectura.** `vivla db query` en `prod` rechaza todo lo que no sea una sola lectura (`SELECT`, `WITH`, `EXPLAIN`). Para escribir hay que hacer una migración.
+
+## `vivla`: la pantalla de inicio
+
+Referencia: [`vivla`](/cli/commands/vivla)
+
+`vivla` sin argumentos junta en una pantalla lo de los comandos de esta página: tus repos con lo que hay desplegado en producción y en `develop`/`staging`, tus PRs (con el CI y la review) y lo que espera por ti (reviews, CI en rojo, deploys caídos). Dentro de un clon entra en ese repo: tu rama frente a su base, su PR y una tabla de apps × entornos.
+
+- **Teclas para lo de siempre.** Sobre una app y un entorno, `l` lee sus logs, `f` los sigue, `c` le hace un `call` y `o` abre su URL. `d` arranca el repo y `p` abre el PR de tu rama (o lo crea con `vivla pr`).
+- **`/`, la paleta.** Cualquier comando con sugerencias para tus repos: `logs ide` encuentra `logs vivla-tools identity --env production`.
+- **Refresco a mano.** Al abrirse enseña lo de la última vez y lo pide de nuevo una vez. Después, `r`.
+
+Los comandos se ejecutan en tu terminal, como si los escribieras, y al terminar vuelves a la pantalla. Todas las teclas, en [`vivla`](/cli/commands/vivla).
+
+## `vivla status`
+
+Referencia: [`status`](/cli/commands/status)
+
+Para cada app y entorno del catálogo (producción, `develop` o `staging`):
+
+| Columna  | De dónde sale                                                                                                                                                  |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| commit   | `railway status --json` o `vercel ls --format json`. Si el servicio tiene `health` y responde JSON con `commitSha`, manda lo que dice el servicio vivo         |
+| _behind_ | `gh api repos/…/compare/<commit>...<rama>`: commits de la rama que aún no están desplegados. En un monorepo con `apps`, solo los que tocan el `dir` de esa app |
+| estado   | El del último deploy en la plataforma (`SUCCESS`, `READY`, `FAILED`, `BUILDING`…)                                                                              |
+| salud    | `GET` a `health` o a la URL. Un 302 o un 401 (Cloudflare Access, login) cuentan como vivo: responde, pero no a nosotros                                        |
+
+Sin argumentos mira el repo en el que estás o, si no estás en ninguno, los que tienes clonados más tus recomendados. `--all` mira todo el catálogo y `--env production` filtra por entorno. Termina con `exit 1` si algo está caído. Si el último deploy de algo falló (lo anterior sigue sirviendo), lo resume al final con `→ vivla logs`.
+
+## `vivla shipped`
+
+Referencia: [`shipped`](/cli/commands/shipped)
+
+```bash
+vivla shipped 1662                    # ¿está desplegado este PR del repo en el que estás?
+vivla shipped vivla-cms#212 --env production
+vivla shipped https://github.com/vivla-tech/vivla-tools/pull/1662
+```
+
+La respuesta a "¿está en prod el fix de X?". Para cada deploy de las apps que el PR cambia, compara su commit de merge con el commit desplegado (`gh api …/compare`): si lo desplegado es ese commit o va por delante, lo lleva. En vivla-tools, `main` recibe los cambios en releases con cherry-pick y los commits son otros, así que en sus deploys de `main` busca la release cuyo cuerpo cita `#1662` y comprueba esa. Termina con `exit 0` solo si está en todos los deploys que toca.
+
+## `vivla logs`
+
+Referencia: [`logs`](/cli/commands/logs)
+
+```bash
+vivla logs vivla-tools identity --env production -n 200
+vivla logs vivla-api -f                               # sigue el stream (Railway)
+vivla logs vivla-api --errors --since 2h              # solo errores de las últimas 2 horas
+vivla logs vivla-api --grep "web properties"          # líneas con ese texto
+vivla logs vivla-api --status 401 --since 1h          # peticiones HTTP que acabaron en 401
+vivla logs vivla-tools frontend --http --errors       # peticiones 5xx (Vercel)
+vivla logs docs --env staging --errors                # Cloudflare: en vivo, solo invocaciones con error
+```
+
+Railway (`railway logs`), Vercel (`vercel logs`) y Cloudflare (`wrangler tail`). Los filtros los aplica la plataforma, así que `--errors --since 1d` no se trae un día entero de logs para filtrar aquí:
+
+| Opción            | Railway                                                     | Vercel                                                  | Cloudflare        |
+| ----------------- | ----------------------------------------------------------- | ------------------------------------------------------- | ----------------- |
+| `--grep <texto>`  | `--filter "texto"` (con `--http`, `--path`: la ruta exacta) | `--query "texto"` (con `--http`, `requestPath:*texto*`) | `--search`        |
+| `--errors`        | `@level:error` (`--http`: 5xx)                              | `level:error` (`--http`: 5xx)                           | `--status error`  |
+| `--since <t>`     | `--since`                                                   | `--since`                                               | no: solo hay vivo |
+| `--http`          | `--http`                                                    | `vercel logs requests`                                  | no hace falta     |
+| `--status <code>` | `--status` (`401`, `>=400`, `500..599`)                     | `httpStatus` en `--query`                               | no                |
+
+Railway enseña los logs del **último deploy** del servicio: si se acaba de desplegar, lo de antes no sale. Cloudflare no guarda histórico: `vivla logs` se queda escuchando hasta Ctrl-C, y con `--json` escucha `--for` segundos (20 por defecto) y devuelve lo que haya llegado. Necesita `project` (el nombre del worker) en el catálogo. Los `railway link` van a un directorio privado por proyecto (`~/.vivla/cli/railway/<id>`), así que nunca se escribe nada dentro de tus repos.
+
+## `vivla call`
+
+Referencia: [`call`](/cli/commands/call)
+
+```bash
+vivla call vivla-tools backend /api/v1/web/properties?limit=1   # producción: con tu login
+vivla call vivla-tools identity /api/me
+vivla call vivla-api /v2/properties/list -H "x-api-key: …"        # otro tenant de Auth0: la clave la pones tú
+vivla call vivla-tools backend /api/x --env develop -d '{"a":1}'  # escribir solo fuera de producción
+```
+
+Una petición HTTP a un servicio desplegado y lo que contesta: código, tiempo, las cabeceras que ayudan a depurar (`x-request-id`, `www-authenticate`, `location`…) y el cuerpo. Termina con `exit 1` si el código es 400 o más.
+
+- Tu sesión de `vivla login` solo va a los deploys marcados `auth: vivla` en el catálogo (el backend y Identity de vivla-tools en producción). A cualquier otro no se manda nada salvo lo que pongas con `-H`. `--no-auth` la quita.
+- En producción solo `GET`, `HEAD` y `OPTIONS`. Para cambiar datos, la app o una migración.
+- Una redirección se enseña, no se sigue: el token no sale del host al que iba.
+
+## Cuando algo falla: `vivla why` y `vivla watch`
+
+Referencia: [`why`](/cli/commands/why) · [`watch`](/cli/commands/watch)
+
+```bash
+vivla why vivla-tools backend                 # qué trajo el último deploy y qué falla desde entonces
+vivla watch vivla-tools backend               # justo después de desplegar: ¿han subido los errores?
+vivla watch vivla-tools backend --no-wait     # lo mismo, sin esperar a que pasen 15 minutos
+```
+
+**`why`** responde a "¿qué ha cambiado y desde cuándo falla?" en una pantalla. Junta lo que harías a mano en cuatro sitios:
+
+- **El deploy**: el último y el anterior que funcionó, de Railway o Vercel.
+- **Lo que trajo**: los commits y PRs entre los dos, según GitHub.
+- **Lo que falla desde entonces**: sus líneas de error agrupadas por tipo, las más frecuentes primero.
+- **Supabase**: los errores de Postgres y los 5xx de su API desde el deploy.
+- **Ahora**: si responde.
+
+Producción por defecto.
+
+**`watch`** compara los errores de los 15 minutos después del último deploy con los 15 de antes. Sale con `exit 1` si han subido (más del doble y al menos 5, ajustable con `--threshold` y `--min`), y avisa en Slack si le das un webhook (`--slack` o `VIVLA_SLACK_WEBHOOK`). Está pensado para ir al final del workflow de deploy de un repo. En [`watch`](/cli/commands/watch#en-el-workflow-de-deploy-de-un-repo) hay un ejemplo de job.
+
+Los dos solo leen. Cloudflare no guarda logs, así que con un worker no hay errores que contar.
+
+## Variables que faltan: `vivla env drift`
+
+Referencia: [`env drift`](/cli/commands/env#vivla-env-drift)
+
+```bash
+vivla env drift vivla-tools
+```
+
+Por cada `.env` que baja un repo, qué variables faltan dónde: en la plantilla, en el entorno de desarrollo del que se baja, en producción o en tu `.env`. Lo importante es el ✖: una variable que está en la plantilla o en desarrollo y no en producción. Si el código que vas a desplegar la lee, allí no estará. De producción solo se leen nombres, nunca valores, y los valores de desarrollo se comparan por un hash que no sale en la salida. Termina con `exit 1` si falta algo en producción.
+
+## `vivla open`
+
+Referencia: [`open`](/cli/commands/open)
+
+`vivla open [repo] [github|prs|actions|docs|dashboard|db|<servicio>|<entorno>]`. Con `--json` devuelve la URL sin abrir nada, para que un agente se la pase a una persona.
+
+## `vivla dev` y `vivla run`
+
+Referencia: [`dev`](/cli/commands/dev) · [`run`](/cli/commands/run)
+
+- `vivla dev vivla-mobile-app` arranca el `dev` del catálogo. En los monorepos con `apps` (vivla-cms, vivla-tools) arranca las **principales**; las **secundarias**, con `--all` o nombrándolas:
+
+  ```bash
+  vivla dev vivla-cms                 # web + admin
+  vivla dev vivla-cms referrals       # solo referrals
+  vivla dev referrals agent           # dentro del clon, sin nombrar el repo
+  vivla dev vivla-tools --all         # backend, frontend, identity, spark, community…
+  ```
+
+  Antes de arrancar avisa si el puerto de una app ya está ocupado y por qué proceso (un `astro dev` de otro proyecto que se quedó abierto, por ejemplo).
+
+- Con `--connect local` arranca también los servicios a los que se conecta (por ejemplo `vivla-api`), cada uno con su prefijo de color. `Ctrl`+`C` para todos; si uno se cae, se paran los demás. Si alguno no está clonado o no tiene dependencias, lo dice antes de arrancar nada (`→ vivla setup repo <repo>`).
+- `vivla run vivla-tools seed` ejecuta un comando con nombre (`commands:` en el catálogo) y, si no existe, el script del `package.json` con el package manager del repo. Lo que pongas después se pasa al comando.
+
+## Migraciones (`vivla migrate`)
+
+Referencia: [`migrate`](/cli/commands/migrate) · [`migrate check`](/cli/commands/migrate#vivla-migrate-check)
+
+Para repos con `migrations:` en el catálogo (vivla-tools: `apps/backend/src/database/migrations` + `public.app_migrations`):
+
+```bash
+vivla migrate new "owner requests sale interest"   # → 502_owner_requests_sale_interest.sql
+vivla migrate check                                # lo que puede salir mal en producción
+vivla migrate check 502 --try                      # y si se aplica limpio en dev (se deshace)
+vivla migrate status --env dev                     # qué ficheros no están en el registro
+vivla migrate apply 502 --env dev --notes "PR #1670"
+vivla migrate apply 502 --env prod                 # pide confirmación
+```
+
+`apply` ejecuta el fichero con `supabase db query --linked` (Management API: basta con `supabase login`, sin contraseña de la base de datos) y lo registra con tu nombre de git. Si ya está registrado no hace nada, salvo con `--force`.
+
+`status` ignora los ficheros anteriores al primer registro (el registro empezó tarde) y llama a lo demás «sin registrar», no «pendiente»: hay migraciones antiguas aplicadas a mano que nunca se registraron.
+
+`check` revisa sin conectarse a nada las migraciones que añade tu rama (o, en `develop`, las que faltan en producción). Son errores lo que pierde datos o falla con filas dentro: `DROP TABLE`, `DROP COLUMN`, `TRUNCATE`, `DELETE` sin `WHERE`, `NOT NULL` sin `DEFAULT` en una tabla con datos, `CONCURRENTLY` dentro de una transacción. Son warnings lo que bloquea o rompe el código desplegado: cambios de tipo, `SET NOT NULL`, renombrados, `UPDATE` sin `WHERE` y ficheros sin `BEGIN … COMMIT`. Los errores salen con `exit 1`. Si un `DROP` es a propósito, `-- vivla-check: allow drop-column` encima de esa sentencia. Con `--try` además la ejecuta en dev dentro de una transacción que deshace.
+
+## Base de datos (`vivla db`)
+
+Referencia: [`db`](/cli/commands/db)
+
+```bash
+vivla db query "select count(*) from public.app_migrations" --env prod
+vivla db open --env dev          # SQL editor de Supabase
+vivla db logs --env prod --source api --errors --since 2h   # peticiones a la API de Supabase con 4xx/5xx
+vivla db logs --source postgres --errors --grep deadlock    # errores de Postgres (dev por defecto)
+```
+
+`db logs` lee los logs de Supabase (`--source api | postgres | auth | functions`, por defecto `api`, desde hace `--since 1h`) con la Management API y tu sesión de `supabase login`, la misma que usa `db query` (en Mac, el token que dejó en el llavero). Con `SUPABASE_ACCESS_TOKEN` usa ese otro token.
+
+## PRs y releases
+
+Referencia: [`pr`](/cli/commands/pr) · [`release`](/cli/commands/release)
+
+**`vivla pr`** sube la rama actual y abre el PR contra la base del repo (`flow.base`, `develop` en vivla-tools). Antes comprueba que los commits siguen `tipo(scope): asunto en minúscula`, que es lo que exige commitlint, y si alguno no cumple lo dice en vez de dejar que falle el hook remoto. `--draft`, `--title` y `--force` para saltarse la comprobación.
+
+**`vivla release`** sigue el flujo de vivla-tools: lo que está en `develop` llega a `main` con cherry-pick, en una rama `release/YYYY-MM-DD-<letra>`.
+
+```bash
+vivla release                 # la propuesta: qué puede salir ya y el comando
+vivla release 1662 --dry-run  # la rama y el cuerpo del PR que crearía
+vivla release 1662 1665       # cherry-pick, push y PR
+```
+
+- Sin argumentos agrupa lo pendiente por PR. Cada uno lleva el CI de `develop` después del merge (y el de su propio PR), la review y sus migraciones, con si producción ya las tiene. Separa los que pueden salir de los que esperan, y por qué esperan, y termina con el `vivla release …` de los que pueden salir.
+- Los números son PRs ya mergeados (se usa su merge commit; si no se hizo squash, con `cherry-pick -m 1`). También acepta SHAs.
+- La letra sigue la serie del día: `a`…`z`, luego `za`, `zb`…, mirando las ramas vivas y los merges a `main`.
+- Se hace en un worktree temporal: tu checkout no se toca. Si un cherry-pick choca, se aborta todo y no se sube nada.
+- Si la release añade migraciones que aún no están registradas en prod, avisa antes de subirla.
+
+## `vivla user`
+
+Referencia: [`user`](/cli/commands/user)
+
+`vivla user ana` o `vivla user ana.garcia@vivla.com`: busca en Vivla Identity (`GET /api/people`) y enseña el equipo, el estado y en qué herramientas tiene cuenta. Hace falta un perfil `hr` o `admin` de Equipos; si no lo tienes, Identity responde 403 y la CLI te lo dice tal cual.
+
+## `vivla access`
+
+Referencia: [`access`](/cli/commands/access)
+
+`vivla access ana@vivla.com` enseña qué herramientas de tools puede abrir Ana y con qué rol: lo que hay en Auth0 (`app_metadata.tools`), leído en vivo a través de Identity (`GET /api/people/:id`). Con herramienta y rol lo cambia, y con `--remove` lo quita:
+
+```bash
+vivla access ana@vivla.com secondary-market editor    # editor en Secondary Market
+vivla access ana@vivla.com secondary-market --remove  # fuera
+vivla access ana@vivla.com equipos hr                 # el perfil de Equipos (solo admin)
+```
+
+Escribe en el Auth0 real (`PATCH /api/people/:id/tool-roles` en Identity, que deja el evento en el historial de la persona), así que pregunta antes y para agentes exige `--yes`. El cambio llega a las herramientas con el siguiente token de la persona. Es lo mismo que Equipos → ficha → Roles en Tools, sin salir de la terminal.
+
+## Trabajo con agentes
+
+Referencia: [`task`](/cli/commands/task) · [`impact`](/cli/commands/impact)
+
+**`vivla task`** pasa de una issue de Linear a un agente trabajando en ella, en su propia carpeta:
+
+```bash
+vivla task VIV-3417                      # en el repo en el que estás
+vivla task VIV-3417 --repo vivla-api --no-agent
+vivla task --title "Arreglar el menú" --repo vivla-panel   # sin Linear
+```
+
+- Lee la issue con `LINEAR_API_KEY` (una clave personal de Linear: _Settings → Account → Security & access_).
+- Crea la rama que propone Linear en un worktree al lado del clon (`~/dev/vivla-api-viv-3417`), con los `.env`, las skills y las dependencias, como `setup --worktree`.
+- Deja el contexto en `.vivla/task.md` (fuera de git): la issue, las apps que parece tocar, los últimos cambios ahí y cómo se trabaja en el repo.
+- Abre Claude Code en el worktree con la tarea pedida. Con `--no-agent`, solo el comando.
+
+El PR que abra después `vivla pr` queda enlazado a la issue solo, porque la rama lleva su id.
+
+**`vivla impact`** dice qué alcanza un PR, o tu rama antes de abrirlo: las apps y los despliegues que toca, si cambia la API, migraciones, variables de entorno o dependencias, y qué repos del catálogo usan lo tocado (por los `connect`: la app móvil usa el backend de tools por `CHAT_API_URL`).
+
+```bash
+vivla impact 1662 --repo vivla-tools
+vivla impact                             # tu rama contra su base
+```
+
+## `vivla who`
+
+Referencia: [`who`](/cli/commands/who)
+
+```bash
+vivla who vivla-tools/identity     # una app
+vivla who apps/backend/src/auth    # una carpeta del repo en el que estás
+vivla who vivla-cms --days 30
+```
+
+A quién preguntar: los `leads` del catálogo (con su email y equipo de Identity si tienes perfil hr o admin en Equipos), la regla de CODEOWNERS que lo cubre y quién ha hecho commits ahí en los últimos 90 días, con cuántos. No hay rota de guardias de la que leer, y lo dice.
+
+## Slack: `vivla slack serve`
+
+Referencia: [`slack serve`](/cli/commands/slack)
+
+Un bot de Slack (Socket Mode, sin URL pública) que contesta lo mismo que `shipped`, `status` y `who` a quien no abre una terminal: `/vivla 1662`, "¿está en prod el #1662?", "¿quién lleva identity?". Corre donde estén `gh`, `vercel` y `railway` con sesión o sus tokens, con `SLACK_BOT_TOKEN` y `SLACK_APP_TOKEN`. Solo lee: no hay logs, `call` ni SQL desde Slack. La app se crea con [`slack/app-manifest.yaml`](https://github.com/vivla-tech/vivla-cli/blob/main/slack/app-manifest.yaml); los pasos, en su página.
+
+## Para agentes (MCP)
+
+`vivla mcp` expone también `status`, `shipped`, `who`, `logs` (con los mismos filtros), `why`, `env_drift`, `call`, `migrations`, `db_query`, `db_logs` (producción: solo lecturas), `impact`, `migrate_check` y `release_plan`. `watch` no, porque espera minutos: un agente lo lanza por la CLI. Lo que escribe fuera de la máquina (`migrate apply`, `release`, `pr`) no está como tool: un agente lo lanza por la CLI con `--yes`, después de que una persona lo haya aprobado.
+
+## Qué necesita el catálogo
+
+Cada repo declara lo suyo en `manifest/repos/<repo>.yaml` (ver [manifest.md](/cli/manifest#día-a-día)):
+
+```yaml
+deploys:
+  - {
+      name: backend,
+      env: production,
+      platform: railway,
+      project: <id>,
+      branch: main,
+      url: 'https://api.tools.vivla.com',
+      health: /api/health,
+    }
+  - {
+      name: frontend,
+      env: production,
+      platform: vercel,
+      project: vivla-tools-frontend,
+      branch: main,
+    }
+  - {
+      name: wiki,
+      env: production,
+      platform: cloudflare,
+      project: vivla-wiki, # el worker, para wrangler tail
+      account: <id>,
+      url: 'https://wiki.vivla.com',
+    }
+supabase: { dev: <ref>, prod: <ref> }
+migrations: { dir: apps/backend/src/database/migrations, registry: public.app_migrations }
+flow: { base: develop, release: { target: main } }
+commands: { seed: pnpm db:seed }
+```
